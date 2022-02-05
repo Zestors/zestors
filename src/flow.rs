@@ -1,106 +1,121 @@
 use std::{
+    any::Any,
     convert::Infallible,
+    intrinsics::transmute,
     ops::{ControlFlow, FromResidual, Try},
+    pin::Pin,
     time::Duration,
 };
 
-use crate::actor::Actor;
+use crate::{actor::Actor, action::{After, Before}};
+use futures::Future;
 
 
-/// This indicates a request that was made by a caller.
-/// It should normally be replied to, but the reply can also be ignored.
-///
-/// Errors are normally transferred directly to the reply, for example if you have a
-/// `ReqFlow<Self, anyhow::Error>`, using the `?` withing this function will return back an
-/// error to the caller.
-///
-/// Errors can be converted to stopping the actor by calling `.stop()?` on the `Result<T, E>`.
-/// The caller will receive a message that it's `Req` has been dropped, and the `stopping`
-/// function on the actor trait will be called.
-pub enum ReqFlow<A: Actor, R> {
-    /// Send back a reply to the caller
+
+/// Flow for handling a request
+pub enum ReqFlow<A: Actor + ?Sized, R> {
     Reply(R),
-    /// Send back a reply to the caller, and change configurations of the actor
-    ReplyAnd(R, FlowConfig),
-
-    /// Ignore the callers request. The caller will receive a message indicating it's request
-    /// has been dropped.
     Ignore,
-    /// Ignore the callers request. The caller will receive a message indicating it's request
-    /// has been dropped. Also change the configuration of the actor
-    IgnoreAnd(FlowConfig),
+    ReplyAndAfter(R, After<A>),
+    IgnoreAndAfter(After<A>),
+    ReplyAndBefore(R, Before<A>),
+    IgnoreAndBefore(Before<A>),
+    ReplyAndErrorExit(R, A::ErrorExit),
+    IgnoreAndErrorExit(A::ErrorExit),
+    ReplyAndNormalExit(R, A::NormalExit),
+    IgnoreAndNormalExit(A::NormalExit),
+}
 
-    /// Stop the actor with an error message. The caller will receive a message indicating it's request
-    /// has been dropped. `stopping` will subsequently be called with this
-    /// value
-    Stop(A::Error),
-    /// Stop the actor with an error message. The caller will still receive the request before `stopping`
-    /// is called. `stopping` will subsequently be called with the error value
-    ReplyAndStop(R, A::Error),
+/// Flow for handling a msg, or when starting this actor
+pub enum MsgFlow<A: Actor + ?Sized> {
+    Ok,
+    Before(Before<A>),
+    ErrorExit(A::ErrorExit),
+    NormalExit(A::NormalExit),
+}
 
-    /// Stop the actor without an error. The caller will receive a message indicating it's request
-    /// has been dropped. `stopping` will subsequently be called with a `Normal`
-    /// value
-    StopNormal,
-    /// Stop the actor without an error. The caller will receive the reply.
-    /// stopping` will subsequently be called with a `Normal` value
-    ReplyAndStopNormal(R),
+/// Flow for handling a scheduled future, or before handling the next action
+pub enum Flow<A: Actor + ?Sized> {
+    Ok,
+    ErrorExit(A::ErrorExit),
+    NormalExit(A::NormalExit),
+}
+
+/// The internal flow, which 
+pub(crate) enum InternalFlow<A: Actor + ?Sized> {
+    Ok,
+
+    After(After<A>),
+
+    Before(Before<A>),
+
+    ErrorExit(A::ErrorExit),
+
+    NormalExit(A::NormalExit),
 }
 
 impl<A: Actor, R> ReqFlow<A, R> {
-    pub fn take_reply(self) -> (MsgFlow<A>, Option<R>) {
+    pub(crate) fn take_reply(self) -> (InternalFlow<A>, Option<R>) {
         match self {
-            ReqFlow::Reply(r) => (MsgFlow::Ok, Some(r)),
-            ReqFlow::ReplyAnd(r, c) => (MsgFlow::OkAnd(c), Some(r)),
-            ReqFlow::Ignore => (MsgFlow::Ok, None),
-            ReqFlow::IgnoreAnd(c) => (MsgFlow::OkAnd(c), None),
-            ReqFlow::Stop(e) => (MsgFlow::Stop(e), None),
-            ReqFlow::ReplyAndStop(r, e) => (MsgFlow::Stop(e), Some(r)),
-            ReqFlow::StopNormal => (MsgFlow::StopNormal, None),
-            ReqFlow::ReplyAndStopNormal(r) => (MsgFlow::StopNormal, Some(r)),
+            ReqFlow::Reply(reply) => (InternalFlow::Ok, Some(reply)),
+            ReqFlow::Ignore => (InternalFlow::Ok, None),
+            ReqFlow::ReplyAndAfter(reply, handler) => (InternalFlow::After(handler), Some(reply)),
+            ReqFlow::IgnoreAndAfter(handler) => (InternalFlow::After(handler), None),
+            ReqFlow::ReplyAndBefore(reply, handler) => (InternalFlow::Before(handler), Some(reply)),
+            ReqFlow::IgnoreAndBefore(handler) => (InternalFlow::Before(handler), None),
+            ReqFlow::ReplyAndErrorExit(reply, error) => (InternalFlow::ErrorExit(error), Some(reply)),
+            ReqFlow::IgnoreAndErrorExit(error) => (InternalFlow::ErrorExit(error), None),
+            ReqFlow::ReplyAndNormalExit(reply, normal) => {
+                (InternalFlow::NormalExit(normal), Some(reply))
+            }
+            ReqFlow::IgnoreAndNormalExit(normal) => (InternalFlow::NormalExit(normal), None),
         }
     }
 }
 
-/// This indicates a message that was sent by a caller. It does not need a reply.
-///
-/// Errors can be converted to stopping the actor by calling `.stop()?` on the `Result<T, E>`.
-/// The `stopping` function on the actor trait will be subsequently called.
-pub enum MsgFlow<A: Actor + ?Sized> {
-    /// End of handling this msg
-    Ok,
-    /// End of handling this msg, and change configuration of the actor
-    OkAnd(FlowConfig),
+impl<A: Actor> MsgFlow<A> {
+    pub(crate) fn into_internal(self) -> InternalFlow<A> {
+        match self {
+            MsgFlow::Ok => InternalFlow::Ok,
+            MsgFlow::Before(handler) => InternalFlow::Before(handler),
+            MsgFlow::ErrorExit(error) => InternalFlow::ErrorExit(error),
+            MsgFlow::NormalExit(normal) => InternalFlow::NormalExit(normal),
+        }
+    }
+}
 
-    /// Stop the actor with an error message, calling `stopping` afterwards with this value.
-    Stop(A::Error),
-    /// Stop the actor without error msg, calling `stopping` afterwards with `Normal` value.
-    StopNormal,
+impl<A: Actor> Flow<A> {
+    pub(crate) fn into_internal(self) -> InternalFlow<A> {
+        match self {
+            Flow::Ok => InternalFlow::Ok,
+            Flow::ErrorExit(error) => InternalFlow::ErrorExit(error),
+            Flow::NormalExit(normal) => InternalFlow::NormalExit(normal),
+        }
+    }
 }
 
 unsafe impl<A: Actor> Send for MsgFlow<A> {}
-// unsafe impl<A: Actor> Send for Pin<Box<dyn futures::Future<Output = MsgFlow<A>>>> {}
-
-pub struct FlowConfig {}
-
+unsafe impl<A: Actor> Send for Flow<A> {}
+unsafe impl<A: Actor, R> Send for ReqFlow<A, R> {}
+unsafe impl<A: Actor> Send for InternalFlow<A> {}
 //-------------------------------------
 // IntoStop Trait
 //-------------------------------------
 
-pub enum IntoStop<T, E> {
+pub enum IntoExit<T, E> {
     Continue(T),
     Stop(E),
 }
 
-pub trait Stop<T, E> {
-    fn stop(self) -> IntoStop<T, E>;
+pub trait Exit<T, E> {
+    fn into_exit(self) -> IntoExit<T, E>;
 }
 
-impl<T, E> Stop<T, E> for Result<T, E> {
-    fn stop(self) -> IntoStop<T, E> {
+impl<T, E> Exit<T, E> for Result<T, E> {
+    fn into_exit(self) -> IntoExit<T, E> {
         match self {
-            Ok(t) => IntoStop::Continue(t),
-            Err(e) => IntoStop::Stop(e),
+            Ok(t) => IntoExit::Continue(t),
+            Err(e) => IntoExit::Stop(e),
         }
     }
 }
@@ -109,10 +124,10 @@ impl<T, E> Stop<T, E> for Result<T, E> {
 // Try implementations
 //-------------------------------------
 
-impl<T, E> Try for IntoStop<T, E> {
+impl<T, E> Try for IntoExit<T, E> {
     type Output = T;
 
-    type Residual = IntoStop<Infallible, E>;
+    type Residual = IntoExit<Infallible, E>;
 
     fn from_output(output: Self::Output) -> Self {
         Self::Continue(output)
@@ -120,17 +135,17 @@ impl<T, E> Try for IntoStop<T, E> {
 
     fn branch(self) -> ControlFlow<Self::Residual, Self::Output> {
         match self {
-            IntoStop::Continue(t) => ControlFlow::Continue(t),
-            IntoStop::Stop(e) => ControlFlow::Break(IntoStop::Stop(e)),
+            IntoExit::Continue(t) => ControlFlow::Continue(t),
+            IntoExit::Stop(e) => ControlFlow::Break(IntoExit::Stop(e)),
         }
     }
 }
 
-impl<T, E> FromResidual<IntoStop<Infallible, E>> for IntoStop<T, E> {
-    fn from_residual(residual: IntoStop<Infallible, E>) -> Self {
+impl<T, E> FromResidual<IntoExit<Infallible, E>> for IntoExit<T, E> {
+    fn from_residual(residual: IntoExit<Infallible, E>) -> Self {
         match residual {
-            IntoStop::Continue(_inf) => unreachable!(),
-            IntoStop::Stop(e) => Self::Stop(e),
+            IntoExit::Continue(_inf) => unreachable!(),
+            IntoExit::Stop(e) => Self::Stop(e),
         }
     }
 }
@@ -139,26 +154,26 @@ impl<T, E> FromResidual<IntoStop<Infallible, E>> for IntoStop<T, E> {
 // FromResidual<IntoStop>
 //-------------------------------------
 
-impl<A: Actor, R, E> FromResidual<IntoStop<Infallible, E>> for ReqFlow<A, R>
+impl<A: Actor, R, E> FromResidual<IntoExit<Infallible, E>> for ReqFlow<A, R>
 where
-    E: Into<A::Error>,
+    E: Into<A::ErrorExit>,
 {
-    fn from_residual(residual: IntoStop<Infallible, E>) -> Self {
+    fn from_residual(residual: IntoExit<Infallible, E>) -> Self {
         match residual {
-            IntoStop::Continue(_inf) => unreachable!(),
-            IntoStop::Stop(e) => ReqFlow::Stop(e.into()),
+            IntoExit::Continue(_inf) => unreachable!(),
+            IntoExit::Stop(e) => ReqFlow::IgnoreAndErrorExit(e.into()),
         }
     }
 }
 
-impl<A: Actor, E> FromResidual<IntoStop<Infallible, E>> for MsgFlow<A>
+impl<A: Actor, E> FromResidual<IntoExit<Infallible, E>> for MsgFlow<A>
 where
-    E: Into<A::Error>,
+    E: Into<A::ErrorExit>,
 {
-    fn from_residual(residual: IntoStop<Infallible, E>) -> Self {
+    fn from_residual(residual: IntoExit<Infallible, E>) -> Self {
         match residual {
-            IntoStop::Continue(_inf) => unreachable!(),
-            IntoStop::Stop(e) => MsgFlow::Stop(e.into()),
+            IntoExit::Continue(_inf) => unreachable!(),
+            IntoExit::Stop(e) => MsgFlow::ErrorExit(e.into()),
         }
     }
 }

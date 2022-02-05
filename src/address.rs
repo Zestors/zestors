@@ -3,15 +3,44 @@ use std::intrinsics::transmute;
 use futures::Future;
 
 use crate::{
-    actor::Actor,
+    actor::{Actor, ActorChild},
     callable::{
-        MsgAsyncFnNostateType, MsgAsyncFnType, MsgFnNostateType, MsgFnType, ReqAsyncFnNostateType,
-        ReqAsyncFnType, ReqFnNostateType, ReqFnType,
+        MsgAsyncFnNostateType, MsgAsyncFnType, MsgFnType1, MsgFnTypeNostate1,
+        ReqAsyncFnNostateType, ReqAsyncFnType, ReqFnNostateType, ReqFnType,
     },
-    flow::{MsgFlow, ReqFlow},
+    flow::{InternalFlow, MsgFlow, ReqFlow},
     messaging::{Msg, PacketSender, Req},
     packets::{HandlerFn, HandlerPacket, Packet},
 };
+//-------------------------------------
+// AddressFor
+//-------------------------------------
+
+pub trait RawAddress<A: Actor> {
+    fn raw_address(&self) -> &Address<A>;
+}
+
+pub trait FromAddress<A: Actor>: Clone {
+    fn from_address(address: Address<A>) -> Self;
+}
+
+impl<A: Actor> FromAddress<A> for Address<A> {
+    fn from_address(address: Address<A>) -> Self {
+        address
+    }
+}
+
+impl<A: Actor> RawAddress<A> for Address<A> {
+    fn raw_address(&self) -> &Address<A> {
+        self
+    }
+}
+
+impl<A: Actor> RawAddress<A> for ActorChild<A> {
+    fn raw_address(&self) -> &Address<A> {
+        &self.address
+    }
+}
 
 //-------------------------------------
 // Address
@@ -31,18 +60,22 @@ impl<A: Actor> Clone for Address<A> {
 }
 
 impl<'a, 'b, A: Actor> Address<A> {
-    pub fn msg<P: Send + 'static>(&'a self, function: MsgFnType<A, P>, params: P) -> Msg<'a, A, P> {
+    pub(crate) fn new_msg<P: Send + 'static>(
+        &'a self,
+        function: MsgFnType1<A, P>,
+        params: P,
+    ) -> Msg<'a, A, P> {
         let handler_fn = HandlerFn::Sync(
             |actor: &mut A,
              state: &mut <A as Actor>::State,
              handler_packet: HandlerPacket|
-             -> MsgFlow<A> {
+             -> InternalFlow<A> {
                 // transmute the fn_ptr
-                let function: MsgFnType<A, P> = unsafe { transmute(handler_packet.fn_ptr) };
+                let function: MsgFnType1<A, P> = unsafe { transmute(handler_packet.fn_ptr) };
                 // downcast the packet data to params and the request
                 let params = handler_packet.data.downcast_msg().unwrap();
                 // call the function with everything necessary
-                function(actor, state, params)
+                function(actor, state, params).into_internal()
             },
         );
 
@@ -53,7 +86,7 @@ impl<'a, 'b, A: Actor> Address<A> {
         Msg::new(&self.sender, packet)
     }
 
-    pub fn msg_async<P: Send + 'static, F>(
+    pub(crate) fn new_msg_async<P: Send + 'static, F>(
         &'a self,
         function: MsgAsyncFnType<A, P, F>,
         params: P,
@@ -71,7 +104,7 @@ impl<'a, 'b, A: Actor> Address<A> {
                 // now we transform the async function and box it
                 Box::pin(async move {
                     // call and await the function
-                    function(actor, state, params).await
+                    function(actor, state, params).await.into_internal()
                 })
             },
         );
@@ -83,7 +116,7 @@ impl<'a, 'b, A: Actor> Address<A> {
         Msg::new(&self.sender, packet)
     }
 
-    pub fn req<P: Send + 'static, R: Send + 'static>(
+    pub(crate) fn new_req<P: Send + 'static, R: Send + 'static>(
         &'a self,
         function: ReqFnType<A, P, R>,
         params: P,
@@ -92,7 +125,7 @@ impl<'a, 'b, A: Actor> Address<A> {
             |actor: &mut A,
              state: &mut <A as Actor>::State,
              handler_packet: HandlerPacket|
-             -> MsgFlow<A> {
+             -> InternalFlow<A> {
                 // transmute the fn_ptr
                 let function: ReqFnType<A, P, R> = unsafe { transmute(handler_packet.fn_ptr) };
                 // downcast the packet data to params and the request
@@ -115,7 +148,7 @@ impl<'a, 'b, A: Actor> Address<A> {
         Req::new(&self.sender, packet, reply)
     }
 
-    pub fn req_async<P: Send + 'static, R: Send + 'static, F>(
+    pub(crate) fn new_req_async<P: Send + 'static, R: Send + 'static, F>(
         &'a self,
         function: ReqAsyncFnType<A, P, F>,
         params: P,
@@ -151,22 +184,22 @@ impl<'a, 'b, A: Actor> Address<A> {
         Req::new(&self.sender, packet, reply)
     }
 
-    pub fn msg_nostate<P: Send + 'static>(
+    pub(crate) fn new_msg_nostate<P: Send + 'static>(
         &'a self,
-        function: MsgFnNostateType<A, P>,
+        function: MsgFnTypeNostate1<A, P>,
         params: P,
     ) -> Msg<'a, A, P> {
         let handler_fn = HandlerFn::Sync(
             |actor: &mut A,
              _: &mut <A as Actor>::State,
              handler_packet: HandlerPacket|
-             -> MsgFlow<A> {
+             -> InternalFlow<A> {
                 // transmute the fn_ptr
-                let function: MsgFnNostateType<A, P> = unsafe { transmute(handler_packet.fn_ptr) };
+                let function: MsgFnTypeNostate1<A, P> = unsafe { transmute(handler_packet.fn_ptr) };
                 // downcast the packet data to params and the request
                 let params = handler_packet.data.downcast_msg().unwrap();
                 // call the function with everything necessary
-                function(actor, params)
+                function(actor, params).into_internal()
             },
         );
 
@@ -177,7 +210,7 @@ impl<'a, 'b, A: Actor> Address<A> {
         Msg::new(&self.sender, packet)
     }
 
-    pub fn msg_async_nostate<P: Send + 'static, F>(
+    pub(crate) fn new_msg_async_nostate<P: Send + 'static, F>(
         &'a self,
         function: MsgAsyncFnNostateType<A, P, F>,
         params: P,
@@ -196,7 +229,7 @@ impl<'a, 'b, A: Actor> Address<A> {
                 // now we transform the async function and box it
                 Box::pin(async move {
                     // call and await the function
-                    function(actor, params).await
+                    function(actor, params).await.into_internal()
                 })
             },
         );
@@ -208,7 +241,7 @@ impl<'a, 'b, A: Actor> Address<A> {
         Msg::new(&self.sender, packet)
     }
 
-    pub fn req_nostate<P: Send + 'static, R: Send + 'static>(
+    pub(crate) fn new_req_nostate<P: Send + 'static, R: Send + 'static>(
         &'a self,
         function: ReqFnNostateType<A, P, R>,
         params: P,
@@ -217,7 +250,7 @@ impl<'a, 'b, A: Actor> Address<A> {
             |actor: &mut A,
              state: &mut <A as Actor>::State,
              handler_packet: HandlerPacket|
-             -> MsgFlow<A> {
+             -> InternalFlow<A> {
                 // transmute the fn_ptr
                 let function: ReqFnNostateType<A, P, R> =
                     unsafe { transmute(handler_packet.fn_ptr) };
@@ -241,7 +274,7 @@ impl<'a, 'b, A: Actor> Address<A> {
         Req::new(&self.sender, packet, reply)
     }
 
-    pub fn req_async_nostate<P: Send + 'static, R: Send + 'static, F>(
+    pub(crate) fn new_req_async_nostate<P: Send + 'static, R: Send + 'static, F>(
         &'a self,
         function: ReqAsyncFnNostateType<A, P, F>,
         params: P,
@@ -281,38 +314,39 @@ impl<'a, 'b, A: Actor> Address<A> {
 
 mod test {
     use crate::{
-        actor::{ActorExit, BasicState},
-        callable::{Callable, Sendable},
+        actor::Exiting,
+        callable::{Callable, UnboundedSend},
         func,
+        state::State,
     };
 
     use super::*;
 
     #[tokio::test]
     async fn all_functions_dont_segfault_test() -> anyhow::Result<()> {
-        let child = MyActor.spawn();
+        let (child, address) = MyActor.spawn();
 
-        let res1 = child.msg(MyActor::test_a, 10).try_send()?;
-        let res2 = child.msg_async(MyActor::test_b, 10).try_send()?;
+        let res1 = address.new_msg(MyActor::test_a, 10).send()?;
+        let res2 = address.new_msg_async(MyActor::test_b, 10).send()?;
 
-        let res3 = child.req(MyActor::test_c, 10).try_send()?.recv().await?;
-        let res4 = child
-            .req_async(MyActor::test_d, 10)
-            .try_send()?
+        let res3 = address.new_req(MyActor::test_c, 10).send()?.recv().await?;
+        let res4 = address
+            .new_req_async(MyActor::test_d, 10)
+            .send()?
             .recv()
             .await?;
 
-        let res5 = child.msg_nostate(MyActor::test_e, 10).try_send()?;
-        let res6 = child.msg_async_nostate(MyActor::test_f, 10).try_send()?;
+        let res5 = address.new_msg_nostate(MyActor::test_e, 10).send()?;
+        let res6 = address.new_msg_async_nostate(MyActor::test_f, 10).send()?;
 
-        let res7 = child
-            .req_nostate(MyActor::test_g, 10)
-            .try_send()?
+        let res7 = address
+            .new_req_nostate(MyActor::test_g, 10)
+            .send()?
             .recv()
             .await?;
-        let res8 = child
-            .req_async_nostate(MyActor::test_h, 10)
-            .try_send()?
+        let res8 = address
+            .new_req_async_nostate(MyActor::test_h, 10)
+            .send()?
             .recv()
             .await?;
 
@@ -326,14 +360,16 @@ mod test {
         assert_eq!(res7, "ok");
         assert_eq!(res8, "ok");
 
-        let res1 = child.send(func!(MyActor::test_a), 10).await?;
-        let res2 = child.call(func!(MyActor::test_b), 10).send().await?;
-        let res3 = child.try_send(func!(MyActor::test_c), 10)?.recv().await?;
-        let res4 = child.try_send(func!(MyActor::test_d), 10)?.recv().await?;
-        let res5 = child.call(func!(MyActor::test_e), 10).try_send()?;
-        let res6 = child.try_send(func!(MyActor::test_f), 10)?;
-        let res7 = child.try_send(func!(MyActor::test_g), 10)?.recv().await?;
-        let res8 = child.try_send(func!(MyActor::test_h), 10)?.recv().await?;
+        let res1 = child.send(func!(MyActor::test_a), 10)?;
+        // let res1 = child.send(func!(MyActor::test_a2), ("hi", 10)).await?;
+
+        let res2 = child.call(func!(MyActor::test_b), 10).send()?;
+        let res3 = child.send(func!(MyActor::test_c), 10)?.recv().await?;
+        let res4 = address.send(func!(MyActor::test_d), 10)?.recv().await?;
+        let res5 = child.call(func!(MyActor::test_e), 10).send()?;
+        let res6 = child.send(func!(MyActor::test_f), 10)?;
+        let res7 = address.send(func!(MyActor::test_g), 10)?.recv().await?;
+        let res8 = child.send(func!(MyActor::test_h), 10)?.recv().await?;
 
         assert_eq!(res1, ());
         assert_eq!(res2, ());
@@ -356,7 +392,11 @@ mod test {
             MsgFlow::Ok
         }
 
-        fn test_a(&mut self, state: &mut BasicState<Self>, c: u32) -> MsgFlow<Self> {
+        fn test_a(&mut self, state: &mut State<Self>, c: u32) -> MsgFlow<Self> {
+            MsgFlow::Ok
+        }
+
+        fn test_a2(&mut self, s: &str, c: u32) -> MsgFlow<Self> {
             MsgFlow::Ok
         }
 
@@ -364,7 +404,7 @@ mod test {
             MsgFlow::Ok
         }
 
-        async fn test_b(&mut self, state: &mut BasicState<Self>, c: u32) -> MsgFlow<Self> {
+        async fn test_b(&mut self, state: &mut State<Self>, c: u32) -> MsgFlow<Self> {
             MsgFlow::Ok
         }
 
@@ -372,7 +412,7 @@ mod test {
             ReqFlow::Reply("ok")
         }
 
-        fn test_c(&mut self, state: &mut BasicState<Self>, c: u32) -> ReqFlow<Self, &'static str> {
+        fn test_c(&mut self, state: &mut State<Self>, c: u32) -> ReqFlow<Self, &'static str> {
             ReqFlow::Reply("ok")
         }
 
@@ -390,13 +430,13 @@ mod test {
     }
 
     impl Actor for MyActor {
-        type Error = anyhow::Error;
-        type Exit = u32;
-        type State = BasicState<Self>;
+        type ErrorExit = anyhow::Error;
+        type Returns = u32;
+        type State = State<Self>;
+        type Address = Address<Self>;
+        type NormalExit = ();
 
-        fn starting(&mut self, state: &mut Self::State) {}
-
-        fn stopping(self, state: &mut Self::State, exit: ActorExit<Self::Error>) -> Self::Exit {
+        fn exiting(self, state: &mut Self::State, exit: Exiting<Self>) -> Self::Returns {
             0
         }
     }

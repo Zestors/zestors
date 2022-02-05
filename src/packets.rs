@@ -4,7 +4,7 @@ use futures::Future;
 
 use crate::{
     actor::Actor,
-    flow::MsgFlow,
+    flow::{InternalFlow, MsgFlow},
     messaging::{InnerRequest, Reply},
 };
 
@@ -13,13 +13,13 @@ use crate::{
 //-------------------------------------
 
 pub(crate) type HandlerFnSync<A> =
-    unsafe fn(&mut A, &mut <A as Actor>::State, HandlerPacket) -> MsgFlow<A>;
+    unsafe fn(&mut A, &mut <A as Actor>::State, HandlerPacket) -> InternalFlow<A>;
 pub(crate) type HandlerFnAsync<A> =
     for<'a> unsafe fn(
         &'a mut A,
         &'a mut <A as Actor>::State,
         HandlerPacket,
-    ) -> Pin<Box<dyn Future<Output = MsgFlow<A>> + 'a + Send>>;
+    ) -> Pin<Box<dyn Future<Output = InternalFlow<A>> + 'a + Send>>;
 
 pub(crate) enum HandlerFn<A: Actor + ?Sized> {
     Sync(HandlerFnSync<A>),
@@ -32,9 +32,20 @@ pub(crate) enum HandlerFn<A: Actor + ?Sized> {
 
 /// A single [Packet] which is sent to call a function remotely. It contains
 /// a pointer to the correct handler function, as well as a [HandlerPacket].
-pub(crate) struct Packet<A: Actor + ?Sized> {
+pub struct Packet<A: Actor + ?Sized> {
     pub(crate) handler_fn: HandlerFn<A>,
     pub(crate) handler_packet: HandlerPacket,
+}
+
+impl<A: Actor> Packet<A> {
+    pub(crate) async fn handle(self, actor: &mut A, state: &mut A::State) -> InternalFlow<A> {
+        match self.handler_fn {
+            HandlerFn::Sync(handler_fn) => unsafe { handler_fn(actor, state, self.handler_packet) },
+            HandlerFn::Async(handler_fn) => unsafe {
+                handler_fn(actor, state, self.handler_packet).await
+            },
+        }
+    }
 }
 
 impl<A: Actor> std::fmt::Debug for Packet<A> {
@@ -60,22 +71,25 @@ unsafe impl Send for HandlerPacket {}
 pub(crate) struct PacketData(Box<dyn Any>);
 
 impl PacketData {
-    pub fn new_msg<P: 'static + Send>(params: P) -> Self {
+    pub(crate) fn new_msg<P: 'static + Send>(params: P) -> Self {
         Self(Box::new(params))
     }
 
-    pub fn new_req<P: 'static + Send, R: 'static + Send>(params: P, request: InnerRequest<R>) -> Self {
+    pub(crate) fn new_req<P: 'static + Send, R: 'static + Send>(
+        params: P,
+        request: InnerRequest<R>,
+    ) -> Self {
         Self(Box::new((params, request)))
     }
 
-    pub fn downcast_msg<P: 'static>(self) -> Result<P, Self> {
+    pub(crate) fn downcast_msg<P: 'static>(self) -> Result<P, Self> {
         match self.0.downcast() {
             Ok(params) => Ok(*params),
             Err(boxed) => Err(Self(boxed)),
         }
     }
 
-    pub fn downcast_req<P: 'static, R: 'static>(self) -> Result<(P, InnerRequest<R>), Self> {
+    pub(crate) fn downcast_req<P: 'static, R: 'static>(self) -> Result<(P, InnerRequest<R>), Self> {
         match self.0.downcast() {
             Ok(params) => Ok(*params),
             Err(boxed) => Err(Self(boxed)),
@@ -84,7 +98,11 @@ impl PacketData {
 }
 
 impl<A: Actor> Packet<A> {
-    pub fn new_msg<P: 'static + Send>(handler_fn: HandlerFn<A>, fn_ptr: usize, params: P) -> Self {
+    pub(crate) fn new_msg<P: 'static + Send>(
+        handler_fn: HandlerFn<A>,
+        fn_ptr: usize,
+        params: P,
+    ) -> Self {
         Self {
             handler_fn,
             handler_packet: HandlerPacket {
@@ -94,7 +112,7 @@ impl<A: Actor> Packet<A> {
         }
     }
 
-    pub fn new_req<P: 'static + Send, R: 'static + Send>(
+    pub(crate) fn new_req<P: 'static + Send, R: 'static + Send>(
         handler_fn: HandlerFn<A>,
         fn_ptr: usize,
         params: P,

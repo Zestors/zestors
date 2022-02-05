@@ -6,7 +6,7 @@ use futures::Future;
 use crate::{
     actor::Actor,
     flow::MsgFlow,
-    packets::{HandlerFn, Packet},
+    packets::{HandlerFn, Packet}, sending::TrySendError,
 };
 
 /// A [Req], which has been sent returns a [Reply], this can be awaited
@@ -74,70 +74,37 @@ where
         }
     }
 
-    pub async fn send(self) -> Result<Reply<R>, SendError<P>>
+    pub fn send(self) -> Result<Reply<R>, TrySendError<P>>
     where
         P: 'static,
         R: 'static,
     {
-        match self.sender.send(self.packet).await {
+        match self.sender.send(self.packet) {
             Ok(()) => Ok(self.reply),
-            Err(e) => Err(SendError::ActorDied(e.0.get_params_req::<P, R>())),
+            Err(e) => Err(TrySendError::ActorDied(e.0.get_params_req::<P, R>())),
         }
     }
 
-    pub fn try_send(self) -> Result<Reply<R>, TrySendError<P>>
-    where
-        P: 'static,
-        R: 'static,
-    {
-        match self.sender.try_send(self.packet) {
-            Ok(()) => Ok(self.reply),
-            Err(e) => match e {
-                PacketTrySendError::ActorDied(packet) => {
-                    Err(TrySendError::ActorDied(packet.get_params_req::<P, R>()))
-                }
-                PacketTrySendError::Full(packet) => {
-                    Err(TrySendError::Full(packet.get_params_req::<P, R>()))
-                }
-            },
-        }
-    }
+    // pub fn try_send(self) -> Result<Reply<R>, TrySendError<P>>
+    // where
+    //     P: 'static,
+    //     R: 'static,
+    // {
+    //     match self.sender.try_send(self.packet) {
+    //         Ok(()) => Ok(self.reply),
+    //         Err(e) => match e {
+    //             PacketTrySendError::ActorDied(packet) => {
+    //                 Err(TrySendError::ActorDied(packet.get_params_req::<P, R>()))
+    //             }
+    //             PacketTrySendError::Full(packet) => {
+    //                 Err(TrySendError::Full(packet.get_params_req::<P, R>()))
+    //             }
+    //         },
+    //     }
+    // }
 }
 
-#[derive(Debug)]
-pub enum SendError<T> {
-    ActorDied(T),
-}
 
-#[derive(Debug)]
-pub enum TrySendError<T> {
-    ActorDied(T),
-    Full(T),
-}
-
-impl<T> std::fmt::Display for TrySendError<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("Error {}", "Full"))
-    }
-}
-
-impl<T> std::fmt::Display for SendError<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("Error {}", "Full"))
-    }
-}
-
-impl<T: std::fmt::Debug> std::error::Error for TrySendError<T> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
-}
-
-impl<T: std::fmt::Debug> std::error::Error for SendError<T> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
-}
 
 /// A message which does not return anything
 #[derive(Debug)]
@@ -162,59 +129,59 @@ where
         }
     }
 
-    pub async fn send(self) -> Result<(), SendError<P>>
+    pub fn send(self) -> Result<(), TrySendError<P>>
     where
         P: 'static,
     {
-        match self.sender.send(self.packet).await {
+        match self.sender.send(self.packet) {
             Ok(()) => Ok(()),
-            Err(e) => Err(SendError::ActorDied(e.0.get_params_msg())),
+            Err(e) => Err(TrySendError::ActorDied(e.0.get_params_msg())),
         }
     }
 
-    pub fn try_send(self) -> Result<(), TrySendError<P>>
-    where
-        P: 'static,
-    {
-        match self.sender.try_send(self.packet) {
-            Ok(()) => Ok(()),
-            Err(e) => match e {
-                PacketTrySendError::ActorDied(packet) => {
-                    Err(TrySendError::ActorDied(packet.get_params_msg()))
-                }
-                PacketTrySendError::Full(packet) => {
-                    Err(TrySendError::Full(packet.get_params_msg()))
-                }
-            },
-        }
-    }
+    // pub fn try_send(self) -> Result<(), TrySendError<P>>
+    // where
+    //     P: 'static,
+    // {
+    //     match self.sender.try_send(self.packet) {
+    //         Ok(()) => Ok(()),
+    //         Err(e) => match e {
+    //             PacketTrySendError::ActorDied(packet) => {
+    //                 Err(TrySendError::ActorDied(packet.get_params_msg()))
+    //             }
+    //             PacketTrySendError::Full(packet) => {
+    //                 Err(TrySendError::Full(packet.get_params_msg()))
+    //             }
+    //         },
+    //     }
+    // }
 }
 
 /// A sender of [Packet]s
 #[derive(Debug)]
 pub(crate) struct PacketSender<A: Actor + ?Sized> {
-    sender: flume::Sender<Packet<A>>,
+    sender: tokio::sync::mpsc::UnboundedSender<Packet<A>>,
 }
 
 impl<A: Actor> PacketSender<A> {
-    pub async fn send(&self, packet: Packet<A>) -> Result<(), PacketSendError<A>> {
-        match self.sender.send_async(packet).await {
+    pub fn send(&self, packet: Packet<A>) -> Result<(), PacketSendError<A>> {
+        match self.sender.send(packet) {
             Ok(()) => Ok(()),
             Err(e) => Err(PacketSendError(e.0)),
         }
     }
 
-    pub fn try_send(&self, packet: Packet<A>) -> Result<(), PacketTrySendError<A>> {
-        match self.sender.try_send(packet) {
-            Ok(_) => Ok(()),
-            Err(e) => match e {
-                flume::TrySendError::Full(packet) => Err(PacketTrySendError::Full(packet)),
-                flume::TrySendError::Disconnected(packet) => {
-                    Err(PacketTrySendError::ActorDied(packet))
-                }
-            },
-        }
-    }
+    // pub fn try_send(&self, packet: Packet<A>) -> Result<(), PacketTrySendError<A>> {
+    //     match self.sender.try_send(packet) {
+    //         Ok(_) => Ok(()),
+    //         Err(e) => match e {
+    //             flume::TrySendError::Full(packet) => Err(PacketTrySendError::Full(packet)),
+    //             flume::TrySendError::Disconnected(packet) => {
+    //                 Err(PacketTrySendError::ActorDied(packet))
+    //             }
+    //         },
+    //     }
+    // }
 }
 
 pub(crate) struct PacketSendError<A: Actor>(pub Packet<A>);
@@ -232,20 +199,19 @@ impl<A: Actor> Clone for PacketSender<A> {
 }
 
 /// A receiver of [Packet]s
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct PacketReceiver<A: Actor> {
-    receiver: flume::Receiver<Packet<A>>,
+    pub receiver: tokio::sync::mpsc::UnboundedReceiver<Packet<A>>,
 }
 
 unsafe impl<A: Actor> Send for PacketReceiver<A> {}
 unsafe impl<A: Actor> Sync for PacketReceiver<A> {}
 
 impl<A: Actor> PacketSender<A> {
-    pub fn new(cap: Option<usize>) -> (PacketSender<A>, PacketReceiver<A>) {
-        let (tx, rx) = match cap {
-            Some(cap) => flume::bounded(cap),
-            None => flume::unbounded(),
-        };
+    pub fn new() -> (PacketSender<A>, PacketReceiver<A>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // tokio::sync::mpsc::channel();
 
         let tx = PacketSender { sender: tx };
         let rx = PacketReceiver { receiver: rx };
@@ -255,10 +221,7 @@ impl<A: Actor> PacketSender<A> {
 }
 
 impl<A: Actor> PacketReceiver<A> {
-    pub async fn recv(&self) -> Option<Packet<A>> {
-        match self.receiver.recv_async().await {
-            Ok(packet) => Some(packet),
-            Err(_) => None,
-        }
+    pub async fn recv(&mut self) -> Option<Packet<A>> {
+        self.receiver.recv().await
     }
 }
