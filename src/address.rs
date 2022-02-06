@@ -3,12 +3,12 @@ use std::intrinsics::transmute;
 use futures::Future;
 
 use crate::{
-    actor::{Actor, ActorChild},
+    actor::{Actor, Child, IsUnbounded},
     callable::{
         MsgAsyncFnNostateType, MsgAsyncFnType, MsgFnType1, MsgFnTypeNostate1,
         ReqAsyncFnNostateType, ReqAsyncFnType, ReqFnNostateType, ReqFnType,
     },
-    flow::{InternalFlow, MsgFlow, ReqFlow},
+    flows::{InternalFlow, MsgFlow, ReqFlow},
     messaging::{Msg, PacketSender, Req},
     packets::{HandlerFn, HandlerPacket, Packet},
 };
@@ -36,7 +36,7 @@ impl<A: Actor> RawAddress<A> for Address<A> {
     }
 }
 
-impl<A: Actor> RawAddress<A> for ActorChild<A> {
+impl<A: Actor> RawAddress<A> for Child<A> {
     fn raw_address(&self) -> &Address<A> {
         &self.address
     }
@@ -59,7 +59,8 @@ impl<A: Actor> Clone for Address<A> {
     }
 }
 
-impl<'a, 'b, A: Actor> Address<A> {
+impl<'a, 'b, A: Actor> Address<A>
+{
     pub(crate) fn new_msg<P: Send + 'static>(
         &'a self,
         function: MsgFnType1<A, P>,
@@ -313,12 +314,7 @@ impl<'a, 'b, A: Actor> Address<A> {
 }
 
 mod test {
-    use crate::{
-        actor::Exiting,
-        callable::{Callable, UnboundedSend},
-        func,
-        state::State,
-    };
+    use crate::{actor::Exiting, callable::Callable, func, sending::UnboundedSend, state::State};
 
     use super::*;
 
@@ -329,11 +325,11 @@ mod test {
         let res1 = address.new_msg(MyActor::test_a, 10).send()?;
         let res2 = address.new_msg_async(MyActor::test_b, 10).send()?;
 
-        let res3 = address.new_req(MyActor::test_c, 10).send()?.recv().await?;
+        let res3 = address.new_req(MyActor::test_c, 10).send()?.async_recv().await?;
         let res4 = address
             .new_req_async(MyActor::test_d, 10)
             .send()?
-            .recv()
+            .async_recv()
             .await?;
 
         let res5 = address.new_msg_nostate(MyActor::test_e, 10).send()?;
@@ -342,12 +338,12 @@ mod test {
         let res7 = address
             .new_req_nostate(MyActor::test_g, 10)
             .send()?
-            .recv()
+            .async_recv()
             .await?;
         let res8 = address
             .new_req_async_nostate(MyActor::test_h, 10)
             .send()?
-            .recv()
+            .async_recv()
             .await?;
 
         assert_eq!(res1, ());
@@ -364,12 +360,12 @@ mod test {
         // let res1 = child.send(func!(MyActor::test_a2), ("hi", 10)).await?;
 
         let res2 = child.call(func!(MyActor::test_b), 10).send()?;
-        let res3 = child.send(func!(MyActor::test_c), 10)?.recv().await?;
-        let res4 = address.send(func!(MyActor::test_d), 10)?.recv().await?;
+        let res3 = child.send(func!(MyActor::test_c), 10)?.await?;
+        let res4 = address.send(func!(MyActor::test_d), 10)?.await?;
         let res5 = child.call(func!(MyActor::test_e), 10).send()?;
         let res6 = child.send(func!(MyActor::test_f), 10)?;
-        let res7 = address.send(func!(MyActor::test_g), 10)?.recv().await?;
-        let res8 = child.send(func!(MyActor::test_h), 10)?.recv().await?;
+        let res7 = address.send(func!(MyActor::test_g), 10)?.await?;
+        let res8 = child.send(func!(MyActor::test_h), 10)?.await?;
 
         assert_eq!(res1, ());
         assert_eq!(res2, ());
@@ -430,11 +426,11 @@ mod test {
     }
 
     impl Actor for MyActor {
-        type ErrorExit = anyhow::Error;
+        type ExitError = anyhow::Error;
         type Returns = u32;
         type State = State<Self>;
         type Address = Address<Self>;
-        type NormalExit = ();
+        type ExitNormal = ();
 
         fn exiting(self, state: &mut Self::State, exit: Exiting<Self>) -> Self::Returns {
             0

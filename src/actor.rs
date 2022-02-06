@@ -1,74 +1,78 @@
-use std::pin::Pin;
-
 use futures::{
-    future::Either,
-    pin_mut,
-    stream::{self, select_all, select_with_strategy, Next, PollNext},
+    stream::{self, PollNext},
     Future, StreamExt,
 };
-use tokio::pin;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::{
     action::{After, Before},
     address::{Address, FromAddress},
-    flow::{Flow, InternalFlow, MsgFlow},
-    messaging::{PacketReceiver, PacketSender},
+    flows::{Flow, InternalFlow, MsgFlow},
+    messaging::{NewInbox, PacketReceiver, PacketSender},
     packets::{HandlerFn, Packet},
     state::{self, ActorState, Scheduled, State},
     AnyhowError,
 };
 
-//-------------------------------------
-// Actor
-//-------------------------------------
-
-pub trait InboxType {}
-
-impl InboxType for Unbounded {}
-impl InboxType for Bounded {}
-
-pub(crate) trait IsBounded {}
-pub(crate) trait IsUnbounded {}
-
-impl IsUnbounded for Unbounded {}
-impl IsBounded for Bounded {}
-
-pub struct Unbounded;
-pub struct Bounded;
-
-// pub trait TrySending2<'a, 'b, I, F, P, R, G, A> {
-//     fn trysend(&'a self, function: RemoteFunction<F>, params: P) -> Result<R, TrySendError<P>>;
-// }
-
-// trait TrySending<A: Actor, C> {
-//     // fn try_send(&self, )
-// }
-
-// impl<A: Actor, T> TrySending<A, Unbounded> for T where A::Inbox: IsBounded {}
-
-// impl<A: Actor, T> TrySending<A, Bounded> for T where A::Inbox: IsUnbounded {}
-
+/// This is the main trait, which `Zestors` revolves around. All actors have to implement this.
+///
+/// There is only one required method which needs to be implemented: `exiting()`, all other methods
+/// have sensible defaults. It is possible to override these types and methods one at a time,
+/// as is necessary.
+///
+/// ## Overrideable methods:
+/// ```
+/// /// The error type that can be used to stop this [Actor].
+/// type ExitError = AnyhowError;
+/// 
+/// /// The type that is used to stop this [Actor] normally.
+/// type ExitNormal = ();
+/// 
+/// /// The type that is returned when this [Actor] exits.
+/// type Returns: Send = ();
+/// 
+/// /// The [ActorState] that is passed to all handler functions.
+/// type State: ActorState<Self> = State<Self>;
+/// 
+/// /// The address that is returned when this actor is spawned.
+/// type Address: FromAddress<Self> = Address<Self>;
+/// 
+/// /// Whether the inbox should be [Bounded] or [Unbounded].
+/// type Inbox: NewInbox<Self, Self::Inbox> = Unbounded;
+/// 
+/// /// If the inbox is [Bounded], this will be the inbox capacity
+/// const INBOX_CAP: usize = 0;
+/// 
+/// /// Spawn this [Actor], and return an [Address] of this [Actor].
+/// /// This is called when this [Actor] starts, and is executed on a new tokio `Task`
+/// fn starting(&mut self, state: &mut Self::State) -> MsgFlow<Self> {
+///     MsgFlow::Ok
+/// }
+/// 
+/// /// This is called when this [Actor] exits.
+/// fn exiting(self, state: &mut Self::State, exit: Exiting<Self>) -> Self::Returns;
+/// 
+/// ```
 pub trait Actor: Send + Sync + 'static + Sized {
     /// The error type that can be used to stop this [Actor].
-    type ErrorExit = AnyhowError;
+    type ExitError = AnyhowError;
     /// The type that is used to stop this [Actor] normally.
-    type NormalExit = ();
+    type ExitNormal = ();
     /// The type that is returned when this [Actor] exits.
     type Returns: Send = ();
     /// The [ActorState] that is passed to all handler functions.
     type State: ActorState<Self> = State<Self>;
     /// The address that is returned when this actor is spawned.
     type Address: FromAddress<Self> = Address<Self>;
-
-    type Inbox: InboxType = Unbounded;
-
-    const INBOX_SIZE: usize = 0;
+    /// Whether the inbox should be [Bounded] or [Unbounded].
+    type Inbox: NewInbox<Self, Self::Inbox> = Unbounded;
+    /// If the inbox is [Bounded], this will be the inbox capacity
+    const INBOX_CAP: usize = 0;
 
     /// Spawn this [Actor], and return an [Address] of this [Actor].
-    fn spawn(self) -> (ActorChild<Self>, Self::Address) {
+    fn spawn(self) -> (Child<Self>, Self::Address) {
         // create the packet senders
-        let (sender, receiver) = PacketSender::new();
+        let (sender, receiver) =
+            <Self::Inbox as NewInbox<Self, Self::Inbox>>::new_packet_sender(Self::INBOX_CAP);
         // create the address from the sender
         let address = Address { sender };
         // create the return address from this raw address
@@ -90,17 +94,13 @@ pub trait Actor: Send + Sync + 'static + Sized {
     fn exiting(self, state: &mut Self::State, exit: Exiting<Self>) -> Self::Returns;
 }
 
-//-------------------------------------
-// RunningActor
-//-------------------------------------
-
+// The actor once it has started.
 struct RunningActor<A: Actor<State = S>, S: ActorState<A>> {
     actor: A,
     state: S,
     receiver: PacketReceiver<A>,
 }
 
-trait PacketFut<A: Actor>: Future<Output = Option<Packet<A>>> + Send {}
 
 impl<A: Actor<State = S> + Send + 'static, S: ActorState<A> + Send + 'static> RunningActor<A, S> {
     pub fn new(actor: A, state: S, receiver: PacketReceiver<A>) -> Self {
@@ -111,9 +111,9 @@ impl<A: Actor<State = S> + Send + 'static, S: ActorState<A> + Send + 'static> Ru
         }
     }
 
-    pub fn run(self, address: Address<A>) -> ActorChild<A> {
+    pub fn run(self, address: Address<A>) -> Child<A> {
         let handle = tokio::task::spawn(async move { Self::started(self).await });
-        ActorChild::new(handle, address)
+        Child::new(handle, address)
     }
 
     async fn started(mut self) -> <A as Actor>::Returns {
@@ -123,7 +123,9 @@ impl<A: Actor<State = S> + Send + 'static, S: ActorState<A> + Send + 'static> Ru
         let mut optional_before: Option<Before<A>> = None;
         let mut global_state = Some(self.state);
         let mut global_receiver_stream = Some(
-            UnboundedReceiverStream::new(self.receiver.receiver)
+            self.receiver
+                .receiver
+                .into_stream()
                 .map(|packet| StreamOutput::Packet(packet)),
         );
 
@@ -151,7 +153,7 @@ impl<A: Actor<State = S> + Send + 'static, S: ActorState<A> + Send + 'static> Ru
             let mut combined_stream = stream::select_with_strategy(
                 global_state.take().unwrap(),
                 global_receiver_stream.take().unwrap(),
-                left_first,
+                left_first_strat,
             );
 
             // Take a single value from it
@@ -216,7 +218,7 @@ impl<A: Actor<State = S> + Send + 'static, S: ActorState<A> + Send + 'static> Ru
     }
 }
 
-fn left_first(_: &mut ()) -> PollNext {
+fn left_first_strat(_: &mut ()) -> PollNext {
     PollNext::Left
 }
 
@@ -225,16 +227,36 @@ pub enum StreamOutput<A: Actor> {
     Scheduled(Scheduled<A>),
 }
 
+
 //-------------------------------------
-// Child
+// Imbox stuff
 //-------------------------------------
 
-pub struct ActorChild<A: Actor> {
+
+pub unsafe trait InboxType {}
+
+unsafe impl InboxType for Unbounded {}
+unsafe impl InboxType for Bounded {}
+
+pub trait IsBounded {}
+pub trait IsUnbounded {}
+
+impl IsUnbounded for Unbounded {}
+impl IsBounded for Bounded {}
+
+pub struct Unbounded;
+pub struct Bounded;
+
+//-------------------------------------
+// Child stuff
+//-------------------------------------
+
+pub struct Child<A: Actor> {
     handle: tokio::task::JoinHandle<<A as Actor>::Returns>,
     pub(crate) address: Address<A>,
 }
 
-impl<A: Actor> ActorChild<A> {
+impl<A: Actor> Child<A> {
     pub(crate) fn new(
         handle: tokio::task::JoinHandle<<A as Actor>::Returns>,
         address: Address<A>,
@@ -243,11 +265,7 @@ impl<A: Actor> ActorChild<A> {
     }
 }
 
-//-------------------------------------
-// ActorExit
-//-------------------------------------
-
 pub enum Exiting<A: Actor> {
-    Error(A::ErrorExit),
-    Normal(A::NormalExit),
+    Error(A::ExitError),
+    Normal(A::ExitNormal),
 }

@@ -1,11 +1,12 @@
 use std::time::Duration;
 
 use zestors::{
-    actor::{Actor, Exiting},
+    actor::{Actor, Exiting, Bounded, Unbounded},
     address::{Address, FromAddress, RawAddress},
-    callable::{Callable},
-    flow::{MsgFlow, ReqFlow},
+    callable::Callable,
+    flows::{MsgFlow, ReqFlow, Exitable},
     func,
+    sending::{UnboundedSend, BoundedSend},
     state::{ActorState, State},
 };
 
@@ -17,10 +18,7 @@ async fn main() -> anyhow::Result<()> {
     address.send(func!(Calculator::add), 10)?;
     child.send(func!(Calculator::subtract), 5)?;
 
-    let count = raw_address
-        .send(func!(Calculator::get_count), ())?
-        .recv()
-        .await?;
+    let count = raw_address.send(func!(Calculator::get_count), ())?.await?;
 
     assert_eq!(count, 5);
 
@@ -31,8 +29,9 @@ async fn main() -> anyhow::Result<()> {
 
     let tes = address
         .send(func!(Calculator::print_after_1_sec), 100)
-        .unwrap().recv().await.unwrap();
-
+        .unwrap()
+        .await
+        .unwrap();
 
     address.add(10);
     address.add(10);
@@ -85,17 +84,23 @@ impl Calculator {
             },
         );
 
+
+
         state
             .this_address()
             .send(func!(Calculator::sleep), ())
-            .unwrap();
-        
+            .into_exit()?;
+
         ReqFlow::Reply(())
     }
 }
 
 impl Actor for Calculator {
     type Address = CalculatorAddress;
+
+    type Inbox = Unbounded;
+
+    const INBOX_CAP: usize = 10;
 
     fn exiting(self, state: &mut Self::State, exit: Exiting<Self>) -> Self::Returns {
         ()
@@ -129,7 +134,6 @@ impl CalculatorAddress {
     pub async fn get(&self) -> i64 {
         self.send(func!(Calculator::get_count), ())
             .unwrap()
-            .recv()
             .await
             .unwrap()
     }

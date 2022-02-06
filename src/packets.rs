@@ -4,7 +4,7 @@ use futures::Future;
 
 use crate::{
     actor::Actor,
-    flow::{InternalFlow, MsgFlow},
+    flows::{InternalFlow, MsgFlow},
     messaging::{InnerRequest, Reply},
 };
 

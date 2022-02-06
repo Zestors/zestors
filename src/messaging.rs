@@ -1,12 +1,16 @@
-use std::{any::Any, fmt::Pointer, marker::PhantomData, time::Duration};
+use std::{any::Any, fmt::Pointer, marker::PhantomData, task::Poll, time::Duration};
 
 use derive_more::{Display, Error};
-use futures::Future;
+use futures::{Future, FutureExt};
 
 use crate::{
-    actor::Actor,
-    flow::MsgFlow,
-    packets::{HandlerFn, Packet}, sending::TrySendError,
+    actor::{Actor, Bounded, InboxType, IsBounded, IsUnbounded, Unbounded},
+    errors::{
+        ActorDied, ActorDiedAfterSending, SendRecvError, TryRecvError, TrySendError,
+        TrySendRecvError,
+    },
+    flows::MsgFlow,
+    packets::{HandlerFn, Packet},
 };
 
 /// A [Req], which has been sent returns a [Reply], this can be awaited
@@ -17,13 +21,35 @@ pub struct Reply<T> {
 }
 
 impl<T> Reply<T> {
-    pub async fn recv(self) -> Result<T, oneshot::RecvError> {
-        self.receiver.await
+    pub async fn async_recv(self) -> Result<T, ActorDiedAfterSending> {
+        self.await
+    }
+
+    pub fn try_recv(self) -> Result<T, TryRecvError> {
+        self.receiver.try_recv().map_err(|e| match e {
+            oneshot::TryRecvError::Empty => TryRecvError::NoReplyYet,
+            oneshot::TryRecvError::Disconnected => TryRecvError::ActorDiedAfterSending,
+        })
+    }
+
+    pub fn blocking_recv(self) -> Result<T, ActorDiedAfterSending> {
+        self.receiver.recv().map_err(|_| ActorDiedAfterSending)
     }
 }
 
-// unsafe impl<'a, A: Actor, P, R> Send for Req<'a, A, P, R> {}
-// unsafe impl<'a, A: Actor, P, R> Sync for Req<'a, A, P, R> {}
+impl<T> Future for Reply<T> {
+    type Output = Result<T, ActorDiedAfterSending>;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Self::Output> {
+        self.receiver.poll_unpin(cx).map(|ready| match ready {
+            Ok(t) => Ok(t),
+            Err(e) => Err(ActorDiedAfterSending),
+        })
+    }
+}
 
 /// The sender part of the [Req]. Is not allowed in public interface
 pub(crate) struct InnerRequest<T> {
@@ -74,37 +100,149 @@ where
         }
     }
 
-    pub fn send(self) -> Result<Reply<R>, TrySendError<P>>
+    pub fn send(self) -> Result<Reply<R>, ActorDied<P>>
     where
         P: 'static,
         R: 'static,
+        A::Inbox: IsUnbounded,
     {
-        match self.sender.send(self.packet) {
+        match self.sender.try_send_packet(self.packet) {
             Ok(()) => Ok(self.reply),
-            Err(e) => Err(TrySendError::ActorDied(e.0.get_params_req::<P, R>())),
+            Err(PacketTrySendError::Disconnected(packet)) => {
+                Err(ActorDied(packet.get_params_req::<P, R>()))
+            }
+            Err(PacketTrySendError::Full(_)) => unreachable!("should be unbounded"),
         }
     }
 
-    // pub fn try_send(self) -> Result<Reply<R>, TrySendError<P>>
-    // where
-    //     P: 'static,
-    //     R: 'static,
-    // {
-    //     match self.sender.try_send(self.packet) {
-    //         Ok(()) => Ok(self.reply),
-    //         Err(e) => match e {
-    //             PacketTrySendError::ActorDied(packet) => {
-    //                 Err(TrySendError::ActorDied(packet.get_params_req::<P, R>()))
-    //             }
-    //             PacketTrySendError::Full(packet) => {
-    //                 Err(TrySendError::Full(packet.get_params_req::<P, R>()))
-    //             }
-    //         },
-    //     }
-    // }
+    pub async fn send_recv(self) -> Result<R, SendRecvError<P>>
+    where
+        P: 'static,
+        R: 'static,
+        A::Inbox: IsUnbounded,
+    {
+        match self.sender.try_send_packet(self.packet) {
+            Ok(()) => Ok(self.reply.await?),
+            Err(PacketTrySendError::Disconnected(packet)) => {
+                Err(SendRecvError::ActorDied(packet.get_params_req::<P, R>()))
+            }
+            Err(PacketTrySendError::Full(packet)) => unreachable!("should be unbounded"),
+        }
+    }
+
+    pub fn try_send(self) -> Result<Reply<R>, TrySendError<P>>
+    where
+        P: 'static,
+        R: 'static,
+        A::Inbox: IsBounded,
+    {
+        match self.sender.try_send_packet(self.packet) {
+            Ok(()) => Ok(self.reply),
+            Err(e) => match e {
+                PacketTrySendError::Disconnected(packet) => {
+                    Err(TrySendError::ActorDied(packet.get_params_req::<P, R>()))
+                }
+                PacketTrySendError::Full(packet) => {
+                    Err(TrySendError::NoSpace(packet.get_params_req::<P, R>()))
+                }
+            },
+        }
+    }
+
+    pub async fn try_send_recv(self) -> Result<R, TrySendRecvError<P>>
+    where
+        P: 'static,
+        R: 'static,
+        A::Inbox: IsBounded,
+    {
+        match self.sender.try_send_packet(self.packet) {
+            Ok(()) => Ok(self.reply.await?),
+            Err(e) => match e {
+                PacketTrySendError::Disconnected(packet) => {
+                    Err(TrySendRecvError::ActorDied(packet.get_params_req::<P, R>()))
+                }
+                PacketTrySendError::Full(packet) => {
+                    Err(TrySendRecvError::NoSpace(packet.get_params_req::<P, R>()))
+                }
+            },
+        }
+    }
+
+    pub async fn async_send(self) -> Result<Reply<R>, ActorDied<P>>
+    where
+        P: 'static,
+        R: 'static,
+        A::Inbox: IsBounded,
+    {
+        match self.sender.send_packet_async(self.packet).await {
+            Ok(()) => Ok(self.reply),
+            Err(PacketSendError::Disconnected(packet)) => {
+                Err(ActorDied(packet.get_params_req::<P, R>()))
+            }
+        }
+    }
+
+    pub fn blocking_send(self) -> Result<Reply<R>, ActorDied<P>>
+    where
+        P: 'static,
+        R: 'static,
+        A::Inbox: IsBounded,
+    {
+        match self.sender.send_packet_blocking(self.packet) {
+            Ok(()) => Ok(self.reply),
+            Err(PacketSendError::Disconnected(packet)) => {
+                Err(ActorDied(packet.get_params_req::<P, R>()))
+            }
+        }
+    }
+
+    pub async fn async_send_recv(self) -> Result<R, SendRecvError<P>>
+    where
+        P: 'static,
+        R: 'static,
+        A::Inbox: IsBounded,
+    {
+        match self.sender.send_packet_async(self.packet).await {
+            Ok(()) => Ok(self.reply.await?),
+            Err(PacketSendError::Disconnected(packet)) => {
+                Err(SendRecvError::ActorDied(packet.get_params_req::<P, R>()))
+            }
+        }
+    }
+
+    pub fn blocking_send_blocking_recv(self) -> Result<R, SendRecvError<P>>
+    where
+        P: 'static,
+        R: 'static,
+        A::Inbox: IsBounded,
+    {
+        match self.sender.send_packet_blocking(self.packet) {
+            Ok(()) => Ok(self.reply.blocking_recv()?),
+            Err(PacketSendError::Disconnected(packet)) => {
+                Err(SendRecvError::ActorDied(packet.get_params_req::<P, R>()))
+            }
+        }
+    }
+
+    pub fn try_send_blocking_recv(self) -> Result<R, TrySendRecvError<P>>
+    where
+        P: 'static,
+        R: 'static,
+        A::Inbox: IsBounded,
+    {
+        match self.sender.try_send_packet(self.packet) {
+            Ok(()) => Ok(self.reply.blocking_recv()?),
+            Err(e) => match e {
+                PacketTrySendError::Disconnected(packet) => {
+                    Err(TrySendRecvError::ActorDied(packet.get_params_req::<P, R>()))
+                }
+                PacketTrySendError::Full(packet) => {
+                    Err(TrySendRecvError::NoSpace(packet.get_params_req::<P, R>()))
+                }
+            },
+        }
+    }
 }
-
-
 
 /// A message which does not return anything
 #[derive(Debug)]
@@ -129,65 +267,102 @@ where
         }
     }
 
-    pub fn send(self) -> Result<(), TrySendError<P>>
+    pub fn send(self) -> Result<(), ActorDied<P>>
     where
         P: 'static,
+        A::Inbox: IsUnbounded,
     {
-        match self.sender.send(self.packet) {
+        match self.sender.try_send_packet(self.packet) {
             Ok(()) => Ok(()),
-            Err(e) => Err(TrySendError::ActorDied(e.0.get_params_msg())),
+            Err(PacketTrySendError::Disconnected(packet)) => {
+                Err(ActorDied(packet.get_params_msg::<P>()))
+            }
+            Err(PacketTrySendError::Full(_)) => unreachable!("should be unbounded"),
         }
     }
 
-    // pub fn try_send(self) -> Result<(), TrySendError<P>>
-    // where
-    //     P: 'static,
-    // {
-    //     match self.sender.try_send(self.packet) {
-    //         Ok(()) => Ok(()),
-    //         Err(e) => match e {
-    //             PacketTrySendError::ActorDied(packet) => {
-    //                 Err(TrySendError::ActorDied(packet.get_params_msg()))
-    //             }
-    //             PacketTrySendError::Full(packet) => {
-    //                 Err(TrySendError::Full(packet.get_params_msg()))
-    //             }
-    //         },
-    //     }
-    // }
+    pub fn try_send(self) -> Result<(), TrySendError<P>>
+    where
+        P: 'static,
+        A::Inbox: IsBounded,
+    {
+        match self.sender.try_send_packet(self.packet) {
+            Ok(()) => Ok(()),
+            Err(e) => match e {
+                PacketTrySendError::Disconnected(packet) => {
+                    Err(TrySendError::ActorDied(packet.get_params_msg()))
+                }
+                PacketTrySendError::Full(packet) => {
+                    Err(TrySendError::NoSpace(packet.get_params_msg()))
+                }
+            },
+        }
+    }
+
+    pub async fn async_send(self) -> Result<(), ActorDied<P>>
+    where
+        P: 'static,
+        A::Inbox: IsBounded,
+    {
+        match self.sender.send_packet_async(self.packet).await {
+            Ok(()) => Ok(()),
+            Err(PacketSendError::Disconnected(packet)) => Err(ActorDied(packet.get_params_msg())),
+        }
+    }
+
+    pub fn blocking_send(self) -> Result<(), ActorDied<P>>
+    where
+        P: 'static,
+        A::Inbox: IsBounded,
+    {
+        match self.sender.send_packet_blocking(self.packet) {
+            Ok(()) => Ok(()),
+            Err(PacketSendError::Disconnected(packet)) => Err(ActorDied(packet.get_params_msg())),
+        }
+    }
 }
 
 /// A sender of [Packet]s
 #[derive(Debug)]
-pub(crate) struct PacketSender<A: Actor + ?Sized> {
-    sender: tokio::sync::mpsc::UnboundedSender<Packet<A>>,
+pub struct PacketSender<A: Actor + ?Sized> {
+    sender: flume::Sender<Packet<A>>,
 }
 
 impl<A: Actor> PacketSender<A> {
-    pub fn send(&self, packet: Packet<A>) -> Result<(), PacketSendError<A>> {
-        match self.sender.send(packet) {
+    pub(crate) fn try_send_packet(&self, packet: Packet<A>) -> Result<(), PacketTrySendError<A>> {
+        match self.sender.try_send(packet) {
             Ok(()) => Ok(()),
-            Err(e) => Err(PacketSendError(e.0)),
+            Err(e) => match e {
+                flume::TrySendError::Full(packet) => Err(PacketTrySendError::Full(packet)),
+                flume::TrySendError::Disconnected(packet) => {
+                    Err(PacketTrySendError::Disconnected(packet))
+                }
+            },
         }
     }
 
-    // pub fn try_send(&self, packet: Packet<A>) -> Result<(), PacketTrySendError<A>> {
-    //     match self.sender.try_send(packet) {
-    //         Ok(_) => Ok(()),
-    //         Err(e) => match e {
-    //             flume::TrySendError::Full(packet) => Err(PacketTrySendError::Full(packet)),
-    //             flume::TrySendError::Disconnected(packet) => {
-    //                 Err(PacketTrySendError::ActorDied(packet))
-    //             }
-    //         },
-    //     }
-    // }
+    pub(crate) async fn send_packet_async(&self, packet: Packet<A>) -> Result<(), PacketSendError<A>> {
+        match self.sender.send_async(packet).await {
+            Ok(()) => Ok(()),
+            Err(e) => Err(PacketSendError::Disconnected(e.0)),
+        }
+    }
+
+    pub(crate) fn send_packet_blocking(&self, packet: Packet<A>) -> Result<(), PacketSendError<A>> {
+        match self.sender.send(packet) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(PacketSendError::Disconnected(e.0)),
+        }
+    }
 }
 
-pub(crate) struct PacketSendError<A: Actor>(pub Packet<A>);
 pub(crate) enum PacketTrySendError<A: Actor> {
-    ActorDied(Packet<A>),
     Full(Packet<A>),
+    Disconnected(Packet<A>),
+}
+
+pub(crate) enum PacketSendError<A: Actor> {
+    Disconnected(Packet<A>),
 }
 
 impl<A: Actor> Clone for PacketSender<A> {
@@ -200,16 +375,38 @@ impl<A: Actor> Clone for PacketSender<A> {
 
 /// A receiver of [Packet]s
 #[derive(Debug)]
-pub(crate) struct PacketReceiver<A: Actor> {
-    pub receiver: tokio::sync::mpsc::UnboundedReceiver<Packet<A>>,
+pub struct PacketReceiver<A: Actor> {
+    pub receiver: flume::Receiver<Packet<A>>,
 }
 
 unsafe impl<A: Actor> Send for PacketReceiver<A> {}
 unsafe impl<A: Actor> Sync for PacketReceiver<A> {}
 
+pub trait NewInbox<A: Actor, B: InboxType>: InboxType {
+    fn new_packet_sender(cap: usize) -> (PacketSender<A>, PacketReceiver<A>);
+}
+
+
+impl<A: Actor> NewInbox<A, Bounded> for Bounded {
+    fn new_packet_sender(_cap: usize) -> (PacketSender<A>, PacketReceiver<A>) {
+        println!("new bounded!");
+        PacketSender::new(None)
+    }
+}
+
+impl<A: Actor> NewInbox<A, Unbounded> for Unbounded {
+    fn new_packet_sender(cap: usize) -> (PacketSender<A>, PacketReceiver<A>) {
+        println!("new unbounded!");
+        PacketSender::new(Some(cap))
+    }
+}
+
 impl<A: Actor> PacketSender<A> {
-    pub fn new() -> (PacketSender<A>, PacketReceiver<A>) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    fn new(size: Option<usize>) -> (PacketSender<A>, PacketReceiver<A>) {
+        let (tx, rx) = match size {
+            Some(size) => flume::bounded(size),
+            None => flume::unbounded(),
+        };
 
         // tokio::sync::mpsc::channel();
 
@@ -222,6 +419,6 @@ impl<A: Actor> PacketSender<A> {
 
 impl<A: Actor> PacketReceiver<A> {
     pub async fn recv(&mut self) -> Option<Packet<A>> {
-        self.receiver.recv().await
+        self.receiver.recv_async().await.ok()
     }
 }

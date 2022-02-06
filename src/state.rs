@@ -5,7 +5,7 @@ use futures::{ stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use crate::{
     actor::{Actor, StreamOutput},
     address::Address,
-    flow::{Flow, MsgFlow, InternalFlow}, action::{AsyncAction, SyncAction},
+    flows::{Flow, MsgFlow, InternalFlow}, action::{AsyncAction, SyncAction},
 };
 
 //-------------------------------------
