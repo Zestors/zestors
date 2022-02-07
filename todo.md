@@ -6,9 +6,14 @@
 [x] address.rs 
 [x] process.rs 
 [x] state.rs 
+[ ] actor.rs
 [ ] callable.rs 
 [ ] messaging.rs 
 [ ] packets.rs 
 [ ] sending.rs 
 [ ] lib.rs
 
+# General
+[ ] Create derive(Address) macro
+[ ] Crate documentation
+[ ] Tests

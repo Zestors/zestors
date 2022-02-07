@@ -62,11 +62,6 @@ impl<A: Actor> Process<A> {
         &self.address
     }
 
-    /// Get a reference to the raw address of this process. (`Address<Actor>`)
-    pub fn raw_address(&self) -> &Address<A> {
-        &self.address.raw_address()
-    }
-
     /// Whether this process is attached.
     pub fn is_attatched(&self) -> bool {
         self.is_attatched

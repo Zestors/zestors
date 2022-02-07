@@ -18,7 +18,7 @@ use futures::{
 use crate::{
     abort::{AbortReceiver, AbortSender, ToAbort},
     action::Action,
-    address::{Address, Addressable, FromAddress},
+    address::{Address, Addressable},
     flows::{ExitFlow, Flow, InitFlow, InternalFlow},
     messaging::{NewInbox, PacketReceiver, PacketSender},
     packets::{HandlerFn, Packet, Unbounded},
@@ -91,9 +91,9 @@ pub trait Actor: Send + Sync + 'static + Sized {
     /// The [ActorState] that is passed to all handler functions.
     type State: State<Self> = BasicState<Self>;
     /// The address that is returned when this actor is spawned.
-    type Address: FromAddress<Self> + Addressable<Self> + Send = Address<Self>;
+    type Address: From<Address<Self>> + Addressable<Self> + Send + Clone = Address<Self>;
     /// Whether the inbox should be [Bounded] or [Unbounded].
-    /// If setting this to [Bounded], dont forget to set `INBOX_CAPACITY` as well.
+    /// If setting this to [Bounded], don't forget to set `INBOX_CAPACITY` as well.
     type Inbox: NewInbox<Self, Self::Inbox> = Unbounded;
     /// What this actor should be initialized with
     type Init: Send = Self;
@@ -117,7 +117,7 @@ pub fn spawn<A: Actor>(init: A::Init) -> (Process<A>, A::Address) {
     let (abort_sender, abort_receiver) = AbortSender::new();
 
     // create the return address from this raw address
-    let address = <A::Address as FromAddress<A>>::from_address(Address::new(sender));
+    let address = <A::Address as From<Address<A>>>::from(Address::new(sender));
     // create the state
     let state = A::State::starting(address.clone());
 

@@ -17,7 +17,8 @@ use crate::{
 //--------------------------------------------------------------------------------------------------
 
 /// A trait that allows a custom address to be callable with `address.call()`, or `address.send()`
-/// etc.
+/// etc. You will probably also want to implement `From<Address<Actor>>` for this custom address,
+/// to allow this address to be used as the associated type [Actor::Address].
 /// 
 /// todo:
 /// A `#[derive(Address)]` macro.
@@ -25,24 +26,9 @@ pub trait Addressable<A: Actor> {
     fn raw_address(&self) -> &Address<A>;
 }
 
-/// A trait that should be implemented for all custom address types. You will probably also want
-/// to implement [Addressable] for this custom address.
-/// 
-/// todo:
-/// A `#[derive(Address)]` macro.
-pub trait FromAddress<A: Actor>: Clone {
-    fn from_address(address: Address<A>) -> Self;
-}
-
 //--------------------------------------------------------------------------------------------------
 //  implement Addressable and FromAddress for Address and Process
 //--------------------------------------------------------------------------------------------------
-
-impl<A: Actor> FromAddress<A> for Address<A> {
-    fn from_address(address: Address<A>) -> Self {
-        address
-    }
-}
 
 impl<A: Actor> Addressable<A> for Address<A> {
     fn raw_address(&self) -> &Address<A> {

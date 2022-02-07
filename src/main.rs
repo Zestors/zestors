@@ -3,7 +3,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use zestors::{
     actor::{spawn, Actor, ExitReason, Spawn},
-    address::{Address, Addressable, FromAddress},
+    address::{Address, Addressable},
     callable::Callable,
     flows::{ExitFlow, IntoReplyAble, Flow, InitFlow, ReqFlow},
     func,
@@ -182,8 +182,8 @@ impl Actor for Calculator {
 #[derive(Clone)]
 pub struct CalculatorAddress(Address<Calculator>);
 
-impl FromAddress<Calculator> for CalculatorAddress {
-    fn from_address(address: Address<Calculator>) -> Self {
+impl From<Address<Calculator>> for CalculatorAddress {
+    fn from(address: Address<Calculator>) -> Self {
         Self(address)
     }
 }
