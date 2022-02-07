@@ -15,3 +15,4 @@ oneshot = "^0.1"
 flume = "0.10"
 uuid = { version = "0.8", features = ["v4"] }
 tokio-stream = "0.1.8"
+async-channel = "1.6"

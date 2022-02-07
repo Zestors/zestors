@@ -1,28 +1,42 @@
+use futures::Future;
 use std::intrinsics::transmute;
 
-use futures::Future;
-
 use crate::{
-    actor::{Actor, Child, IsUnbounded},
+    actor::{Actor},
+    process::Process,
     callable::{
         MsgAsyncFnNostateType, MsgAsyncFnType, MsgFnType1, MsgFnTypeNostate1,
         ReqAsyncFnNostateType, ReqAsyncFnType, ReqFnNostateType, ReqFnType,
     },
-    flows::{InternalFlow, MsgFlow, ReqFlow},
+    flows::{InternalFlow, Flow, ReqFlow},
     messaging::{Msg, PacketSender, Req},
     packets::{HandlerFn, HandlerPacket, Packet},
 };
-//-------------------------------------
-// AddressFor
-//-------------------------------------
+//--------------------------------------------------------------------------------------------------
+//  Addressable and FromAddress traits
+//--------------------------------------------------------------------------------------------------
 
-pub trait RawAddress<A: Actor> {
+/// A trait that allows a custom address to be callable with `address.call()`, or `address.send()`
+/// etc.
+/// 
+/// todo:
+/// A `#[derive(Address)]` macro.
+pub trait Addressable<A: Actor> {
     fn raw_address(&self) -> &Address<A>;
 }
 
+/// A trait that should be implemented for all custom address types. You will probably also want
+/// to implement [Addressable] for this custom address.
+/// 
+/// todo:
+/// A `#[derive(Address)]` macro.
 pub trait FromAddress<A: Actor>: Clone {
     fn from_address(address: Address<A>) -> Self;
 }
+
+//--------------------------------------------------------------------------------------------------
+//  implement Addressable and FromAddress for Address and Process
+//--------------------------------------------------------------------------------------------------
 
 impl<A: Actor> FromAddress<A> for Address<A> {
     fn from_address(address: Address<A>) -> Self {
@@ -30,37 +44,51 @@ impl<A: Actor> FromAddress<A> for Address<A> {
     }
 }
 
-impl<A: Actor> RawAddress<A> for Address<A> {
+impl<A: Actor> Addressable<A> for Address<A> {
     fn raw_address(&self) -> &Address<A> {
         self
     }
 }
 
-impl<A: Actor> RawAddress<A> for Child<A> {
+impl<A: Actor> Addressable<A> for Process<A> {
     fn raw_address(&self) -> &Address<A> {
-        &self.address
+        &self.address().raw_address()
     }
 }
 
-//-------------------------------------
-// Address
-//-------------------------------------
+//--------------------------------------------------------------------------------------------------
+//  Address
+//--------------------------------------------------------------------------------------------------
 
 #[derive(Debug)]
 pub struct Address<A: Actor + ?Sized> {
-    pub(crate) sender: PacketSender<A>,
+    sender: PacketSender<A>,
 }
 
-impl<A: Actor> Clone for Address<A> {
-    fn clone(&self) -> Self {
-        Self {
-            sender: self.sender.clone(),
-        }
-    }
-}
+//--------------------------------------------------------------------------------------------------
+//  Address: public methods
+//--------------------------------------------------------------------------------------------------
 
 impl<'a, 'b, A: Actor> Address<A>
 {
+    /// Whether this actor is still alive
+    pub fn is_alive(&self) -> bool {
+        self.sender.is_alive()
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+//  Address: private methods
+//--------------------------------------------------------------------------------------------------
+
+impl<'a, 'b, A: Actor> Address<A>
+{
+    pub(crate) fn new(sender: PacketSender<A>) -> Self {
+        Self {
+            sender
+        }
+    }
+
     pub(crate) fn new_msg<P: Send + 'static>(
         &'a self,
         function: MsgFnType1<A, P>,
@@ -93,7 +121,7 @@ impl<'a, 'b, A: Actor> Address<A>
         params: P,
     ) -> Msg<'a, A, P>
     where
-        F: Future<Output = MsgFlow<A>> + Send + 'static,
+        F: Future<Output = Flow<A>> + Send + 'static,
     {
         let handler_fn = HandlerFn::Async(
             |actor: &mut A, state: &mut <A as Actor>::State, handler_packet: HandlerPacket| {
@@ -217,7 +245,7 @@ impl<'a, 'b, A: Actor> Address<A>
         params: P,
     ) -> Msg<'a, A, P>
     where
-        F: Future<Output = MsgFlow<A>> + Send + 'static,
+        F: Future<Output = Flow<A>> + Send + 'static,
     {
         let handler_fn = HandlerFn::Async(
             |actor: &mut A, _: &mut <A as Actor>::State, handler_packet: HandlerPacket| {
@@ -313,14 +341,29 @@ impl<'a, 'b, A: Actor> Address<A>
     }
 }
 
+//--------------------------------------------------------------------------------------------------
+//  Address: implement traits
+//--------------------------------------------------------------------------------------------------
+
+impl<A: Actor> Clone for Address<A> {
+    fn clone(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+        }
+    }
+}
+
 mod test {
-    use crate::{actor::Exiting, callable::Callable, func, sending::UnboundedSend, state::State};
-
     use super::*;
-
+    use crate::actor::ExitReason;
+    use crate::flows::{InitFlow, ExitFlow};
+    use crate::state::BasicState;
+    use crate::{actor::Spawn, sending::UnboundedSend, func};
+    use crate::callable::Callable;
+    
     #[tokio::test]
     async fn all_functions_dont_segfault_test() -> anyhow::Result<()> {
-        let (child, address) = MyActor.spawn();
+        let (child, address) = MyActor::spawn(MyActor);
 
         let res1 = address.new_msg(MyActor::test_a, 10).send()?;
         let res2 = address.new_msg_async(MyActor::test_b, 10).send()?;
@@ -384,31 +427,31 @@ mod test {
     struct MyActor;
 
     impl MyActor {
-        fn test_e(&mut self, c: u32) -> MsgFlow<Self> {
-            MsgFlow::Ok
+        fn test_e(&mut self, c: u32) -> Flow<Self> {
+            Flow::Ok
         }
 
-        fn test_a(&mut self, state: &mut State<Self>, c: u32) -> MsgFlow<Self> {
-            MsgFlow::Ok
+        fn test_a(&mut self, state: &mut BasicState<Self>, c: u32) -> Flow<Self> {
+            Flow::Ok
         }
 
-        fn test_a2(&mut self, s: &str, c: u32) -> MsgFlow<Self> {
-            MsgFlow::Ok
+        fn test_a2(&mut self, s: &str, c: u32) -> Flow<Self> {
+            Flow::Ok
         }
 
-        async fn test_f<'r>(&'r mut self, c: u32) -> MsgFlow<Self> {
-            MsgFlow::Ok
+        async fn test_f<'r>(&'r mut self, c: u32) -> Flow<Self> {
+            Flow::Ok
         }
 
-        async fn test_b(&mut self, state: &mut State<Self>, c: u32) -> MsgFlow<Self> {
-            MsgFlow::Ok
+        async fn test_b(&mut self, state: &mut BasicState<Self>, c: u32) -> Flow<Self> {
+            Flow::Ok
         }
 
         fn test_g(&mut self, c: u32) -> ReqFlow<Self, &'static str> {
             ReqFlow::Reply("ok")
         }
 
-        fn test_c(&mut self, state: &mut State<Self>, c: u32) -> ReqFlow<Self, &'static str> {
+        fn test_c(&mut self, state: &mut BasicState<Self>, c: u32) -> ReqFlow<Self, &'static str> {
             ReqFlow::Reply("ok")
         }
 
@@ -426,14 +469,14 @@ mod test {
     }
 
     impl Actor for MyActor {
-        type ExitError = anyhow::Error;
-        type Returns = u32;
-        type State = State<Self>;
-        type Address = Address<Self>;
-        type ExitNormal = ();
+        type Exit = u32;
 
-        fn exiting(self, state: &mut Self::State, exit: Exiting<Self>) -> Self::Returns {
-            0
+        fn handle_exit(self, state: &mut Self::State, exit: ExitReason<Self>) -> ExitFlow<Self> {
+            ExitFlow::ContinueExit(0)
+        }
+
+        fn init(init: Self::Init, state: &mut Self::State) -> InitFlow<Self> {
+            InitFlow::Init(init)
         }
     }
 }

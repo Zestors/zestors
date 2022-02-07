@@ -5,9 +5,9 @@ use std::{
 use futures::{Future, FutureExt};
 
 use crate::{
-    actor::{Actor, IsUnbounded, Unbounded},
-    address::RawAddress,
-    flows::{MsgFlow, ReqFlow},
+    actor::{Actor},
+    address::Addressable,
+    flows::{Flow, ReqFlow},
     messaging::{Msg, Reply, Req},
 };
 
@@ -66,9 +66,9 @@ pub struct ReqIDNoState<T>(T);
 pub struct ReqAsyncIDNoState<T>(T);
 
 pub(crate) type MsgFnType1<'b, A, P1> =
-    fn(&'b mut A, &'b mut <A as Actor>::State, P1) -> MsgFlow<A>;
+    fn(&'b mut A, &'b mut <A as Actor>::State, P1) -> Flow<A>;
 
-pub(crate) type MsgFnTypeNostate1<'b, A, P1> = fn(&'b mut A, P1) -> MsgFlow<A>;
+pub(crate) type MsgFnTypeNostate1<'b, A, P1> = fn(&'b mut A, P1) -> Flow<A>;
 
 
 //-------------------------------------
@@ -76,7 +76,7 @@ pub(crate) type MsgFnTypeNostate1<'b, A, P1> = fn(&'b mut A, P1) -> MsgFlow<A>;
 //-------------------------------------
 
 impl<'a, A: Actor, P, F> FnTrait<MsgID<()>, A, P, (), ()> for F where
-    F: Fn(&'a mut A, &'a mut <A as Actor>::State, P) -> MsgFlow<A>
+    F: Fn(&'a mut A, &'a mut <A as Actor>::State, P) -> Flow<A>
 {
 }
 
@@ -84,9 +84,9 @@ impl<'a, 'b, F, P, A, S> Callable<'a, 'b, MsgID<()>, F, P, (), (), Msg<'a, A, P>
 where
     A: Actor,
     F: FnTrait<MsgID<()>, A, P, (), ()>,
-    F: Fn(&'a mut A, &'a mut <A as Actor>::State, P) -> MsgFlow<A>,
+    F: Fn(&'a mut A, &'a mut <A as Actor>::State, P) -> Flow<A>,
     P: Send + 'static,
-    S: RawAddress<A>,
+    S: Addressable<A>,
 {
     fn call(&'a self, function: RemoteFunction<F>, params: P) -> Msg<'a, A, P> {
         let func: MsgFnType1<'b, A, P> = unsafe { transmute(function.ptr) };
@@ -103,7 +103,7 @@ pub(crate) type MsgAsyncFnType<'b, A, P, F> = fn(&'b mut A, &'b mut <A as Actor>
 impl<'a, A: Actor, P, F, G> FnTrait<MsgAsyncID<()>, A, P, (), G> for F
 where
     F: Fn(&'a mut A, &'a mut <A as Actor>::State, P) -> G,
-    G: Future<Output = MsgFlow<A>>,
+    G: Future<Output = Flow<A>>,
 {
 }
 
@@ -112,9 +112,9 @@ where
     A: Actor,
     F: FnTrait<MsgAsyncID<()>, A, P, (), G>,
     F: Fn(&'b mut A, &'b mut <A as Actor>::State, P) -> G,
-    G: Future<Output = MsgFlow<A>> + Send + 'static,
+    G: Future<Output = Flow<A>> + Send + 'static,
     P: Send + 'static,
-    S: RawAddress<A>,
+    S: Addressable<A>,
 {
     fn call(&'a self, function: RemoteFunction<F>, params: P) -> Msg<'a, A, P> {
         let func: MsgAsyncFnType<'b, A, P, G> = unsafe { transmute(function.ptr) };
@@ -141,7 +141,7 @@ where
     F: Fn(&'b mut A, &'b mut <A as Actor>::State, P) -> ReqFlow<A, R>,
     P: Send + 'static,
     R: Send + 'static,
-    S: RawAddress<A>,
+    S: Addressable<A>,
 {
     fn call(&'a self, function: RemoteFunction<F>, params: P) -> Req<'a, A, P, R> {
         let func: ReqFnType<'b, A, P, R> = unsafe { transmute(function.ptr) };
@@ -171,7 +171,7 @@ where
     G: Future<Output = ReqFlow<A, R>> + Send + 'static,
     P: Send + 'static,
     R: Send + 'static,
-    S: RawAddress<A>,
+    S: Addressable<A>,
 {
     fn call(&'a self, function: RemoteFunction<F>, params: P) -> Req<'a, A, P, R> {
         let func: ReqAsyncFnType<'b, A, P, G> = unsafe { transmute(function.ptr) };
@@ -184,7 +184,7 @@ where
 //-------------------------------------
 
 impl<'a, A: Actor, P, F> FnTrait<MsgIDNoState<()>, A, P, (), ()> for F where
-    F: Fn(&'a mut A, P) -> MsgFlow<A>
+    F: Fn(&'a mut A, P) -> Flow<A>
 {
 }
 
@@ -192,9 +192,9 @@ impl<'a, 'b, F, P, A, S> Callable<'a, 'b, MsgIDNoState<()>, F, P, (), (), Msg<'a
 where
     A: Actor,
     F: FnTrait<MsgIDNoState<()>, A, P, (), ()>,
-    F: Fn(&'b mut A, P) -> MsgFlow<A>,
+    F: Fn(&'b mut A, P) -> Flow<A>,
     P: Send + 'static,
-    S: RawAddress<A>,
+    S: Addressable<A>,
 {
     fn call(&'a self, function: RemoteFunction<F>, params: P) -> Msg<'a, A, P> {
         let func: MsgFnTypeNostate1<'b, A, P> = unsafe { transmute(function.ptr) };
@@ -211,7 +211,7 @@ pub(crate) type MsgAsyncFnNostateType<'b, A, P, F> = fn(&'b mut A, P) -> F;
 impl<'a, A: Actor, P, F, G> FnTrait<MsgAsyncIDNoState<()>, A, P, (), G> for F
 where
     F: Fn(&'a mut A, P) -> G,
-    G: Future<Output = MsgFlow<A>>,
+    G: Future<Output = Flow<A>>,
 {
 }
 
@@ -221,9 +221,9 @@ where
     A: Actor,
     F: FnTrait<MsgAsyncIDNoState<()>, A, P, (), G>,
     F: Fn(&'b mut A, P) -> G,
-    G: Future<Output = MsgFlow<A>> + Send + 'static,
+    G: Future<Output = Flow<A>> + Send + 'static,
     P: Send + 'static,
-    S: RawAddress<A>,
+    S: Addressable<A>,
 {
     fn call(&'a self, function: RemoteFunction<F>, params: P) -> Msg<'a, A, P> {
         let func: MsgAsyncFnNostateType<'b, A, P, G> = unsafe { transmute(function.ptr) };
@@ -251,7 +251,7 @@ where
     F: Fn(&'b mut A, P) -> ReqFlow<A, R>,
     P: Send + 'static,
     R: Send + 'static,
-    S: RawAddress<A>,
+    S: Addressable<A>,
 {
     fn call(&'a self, function: RemoteFunction<F>, params: P) -> Req<'a, A, P, R> {
         let func: ReqFnNostateType<'b, A, P, R> = unsafe { transmute(function.ptr) };
@@ -281,7 +281,7 @@ where
     G: Future<Output = ReqFlow<A, R>> + Send + 'static,
     P: Send + 'static,
     R: Send + 'static,
-    S: RawAddress<A>,
+    S: Addressable<A>,
 {
     fn call(&'a self, function: RemoteFunction<F>, params: P) -> Req<'a, A, P, R> {
         let func: ReqAsyncFnNostateType<'b, A, P, G> = unsafe { transmute(function.ptr) };

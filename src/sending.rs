@@ -4,9 +4,9 @@ use derive_more::{Display, Error};
 use futures::Future;
 
 use crate::{
-    actor::{Actor, IsBounded, IsUnbounded, Unbounded},
+    actor::{Actor,},
     callable::{Callable, RemoteFunction},
-    messaging::{Msg, Reply, Req}, errors::{ActorDied, TrySendError},
+    messaging::{Msg, Reply, Req}, errors::{ActorDied, TrySendError}, packets::{IsUnbounded, IsBounded},
 };
 use std::fmt::Debug;
 
@@ -56,7 +56,7 @@ pub trait BoundedSend<'a, 'b, I, F, P, R, G, A> {
         function: RemoteFunction<F>,
         params: P,
     ) -> Pin<Box<dyn Future<Output = Result<R, ActorDied<P>>> + 'a>>;
-    fn blocking_send(&'a self, function: RemoteFunction<F>, params: P) -> Result<R, ActorDied<P>>;
+    // fn blocking_send(&'a self, function: RemoteFunction<F>, params: P) -> Result<R, ActorDied<P>>;
 }
 
 impl<'a, 'b, I, F, P, R, G, A, T> BoundedSend<'a, 'b, I, F, P, Reply<R>, G, A> for T
@@ -84,13 +84,13 @@ where
         Box::pin(async move { self.call(function, params).async_send().await })
     }
 
-    fn blocking_send(
-        &'a self,
-        function: RemoteFunction<F>,
-        params: P,
-    ) -> Result<Reply<R>, ActorDied<P>> {
-        self.call(function, params).blocking_send()
-    }
+//     fn blocking_send(
+//         &'a self,
+//         function: RemoteFunction<F>,
+//         params: P,
+//     ) -> Result<Reply<R>, ActorDied<P>> {
+//         self.call(function, params).blocking_send()
+//     }
 }
 
 impl<'a, 'b, I, F, P, G, A, T> BoundedSend<'a, 'b, I, F, P, (), G, A> for T
@@ -113,9 +113,9 @@ where
         Box::pin(async move { self.call(function, params).async_send().await })
     }
 
-    fn blocking_send(&'a self, function: RemoteFunction<F>, params: P) -> Result<(), ActorDied<P>> {
-        self.call(function, params).blocking_send()
-    }
+    // fn blocking_send(&'a self, function: RemoteFunction<F>, params: P) -> Result<(), ActorDied<P>> {
+    //     self.call(function, params).blocking_send()
+    // }
 }
 
 

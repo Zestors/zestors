@@ -1,11 +1,11 @@
 use std::{any::Any, pin::Pin};
 
-use futures::Future;
+use futures::{Future, Stream, StreamExt};
 
 use crate::{
-    actor::Actor,
-    flows::{InternalFlow, MsgFlow},
-    messaging::{InnerRequest, Reply},
+    actor::{Actor, StreamOutput},
+    flows::{InternalFlow, Flow},
+    messaging::{InnerRequest, PacketReceiver, PacketSender, Reply},
 };
 
 //-------------------------------------
@@ -25,6 +25,24 @@ pub(crate) enum HandlerFn<A: Actor + ?Sized> {
     Sync(HandlerFnSync<A>),
     Async(HandlerFnAsync<A>),
 }
+
+//-------------------------------------
+// Inbox stuff
+//-------------------------------------
+
+pub unsafe trait InboxType {}
+
+unsafe impl InboxType for Unbounded {}
+unsafe impl InboxType for Bounded {}
+
+pub trait IsBounded {}
+pub trait IsUnbounded {}
+
+impl IsUnbounded for Unbounded {}
+impl IsBounded for Bounded {}
+
+pub struct Unbounded;
+pub struct Bounded;
 
 //-------------------------------------
 // Packet
@@ -64,11 +82,9 @@ pub(crate) struct HandlerPacket {
     pub(crate) data: PacketData,
 }
 
-unsafe impl Send for HandlerPacket {}
-
 /// Contains either just parameters, or parameters with an [InnerRequest]
 #[derive(Debug)]
-pub(crate) struct PacketData(Box<dyn Any>);
+pub(crate) struct PacketData(Box<dyn Any + Send>);
 
 impl PacketData {
     pub(crate) fn new_msg<P: 'static + Send>(params: P) -> Self {
@@ -140,4 +156,26 @@ impl<A: Actor> Packet<A> {
     }
 }
 
-unsafe impl<A: Actor> Send for Packet<A> {}
+
+impl<A: Actor> Stream for PacketReceiver<A> {
+    type Item = StreamOutput<A>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.as_mut()
+            .receiver
+            .poll_next_unpin(cx)
+            .map(|packet| packet.map(|packet| StreamOutput::Packet(packet)))
+    }
+}
+
+impl<A: Actor> Drop for PacketReceiver<A> {
+    fn drop(&mut self) {
+        self.receiver.close();
+        while let Ok(packet) = self.receiver.try_recv() {
+            drop(packet)
+        }
+    }
+}

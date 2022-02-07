@@ -4,17 +4,17 @@ use derive_more::{Display, Error};
 use futures::{Future, FutureExt};
 
 use crate::{
-    actor::{Actor, Bounded, InboxType, IsBounded, IsUnbounded, Unbounded},
+    actor::Actor,
     errors::{
         ActorDied, ActorDiedAfterSending, SendRecvError, TryRecvError, TrySendError,
         TrySendRecvError,
     },
-    flows::MsgFlow,
-    packets::{HandlerFn, Packet},
+    flows::Flow,
+    packets::{Bounded, HandlerFn, InboxType, IsBounded, IsUnbounded, Packet, Unbounded},
 };
 
 /// A [Req], which has been sent returns a [Reply], this can be awaited
-/// to return the reply to the [Req].
+/// to return the reply to a [Req].
 #[derive(Debug)]
 pub struct Reply<T> {
     receiver: oneshot::Receiver<T>,
@@ -22,7 +22,10 @@ pub struct Reply<T> {
 
 impl<T> Reply<T> {
     pub async fn async_recv(self) -> Result<T, ActorDiedAfterSending> {
-        self.await
+        match self.receiver.await {
+            Ok(t) => Ok(t),
+            Err(e) => Err(ActorDiedAfterSending),
+        }
     }
 
     pub fn try_recv(self) -> Result<T, TryRecvError> {
@@ -325,34 +328,55 @@ where
 /// A sender of [Packet]s
 #[derive(Debug)]
 pub struct PacketSender<A: Actor + ?Sized> {
-    sender: flume::Sender<Packet<A>>,
+    sender: async_channel::Sender<Packet<A>>,
 }
 
 impl<A: Actor> PacketSender<A> {
+    pub(crate) fn is_alive(&self) -> bool {
+        !self.sender.is_closed()
+    }
+
     pub(crate) fn try_send_packet(&self, packet: Packet<A>) -> Result<(), PacketTrySendError<A>> {
+        
         match self.sender.try_send(packet) {
             Ok(()) => Ok(()),
             Err(e) => match e {
-                flume::TrySendError::Full(packet) => Err(PacketTrySendError::Full(packet)),
-                flume::TrySendError::Disconnected(packet) => {
+                async_channel::TrySendError::Full(packet) => Err(PacketTrySendError::Full(packet)),
+                async_channel::TrySendError::Closed(packet) => {
                     Err(PacketTrySendError::Disconnected(packet))
                 }
             },
         }
+
+        // if !self.is_alive() {
+        //     Err(PacketTrySendError::Disconnected(packet))
+        // } else {
+        //     res
+        // }
     }
 
-    pub(crate) async fn send_packet_async(&self, packet: Packet<A>) -> Result<(), PacketSendError<A>> {
-        match self.sender.send_async(packet).await {
+    pub(crate) async fn send_packet_async(
+        &self,
+        packet: Packet<A>,
+    ) -> Result<(), PacketSendError<A>> {
+        // if !self.is_alive() {
+        //     return Err(PacketSendError::Disconnected(packet))
+        // }
+        match self.sender.send(packet).await {
             Ok(()) => Ok(()),
             Err(e) => Err(PacketSendError::Disconnected(e.0)),
         }
     }
 
     pub(crate) fn send_packet_blocking(&self, packet: Packet<A>) -> Result<(), PacketSendError<A>> {
-        match self.sender.send(packet) {
-            Ok(()) => Ok(()),
-            Err(e) => Err(PacketSendError::Disconnected(e.0)),
-        }
+        // if !self.is_alive() {
+        //     return Err(PacketSendError::Disconnected(packet))
+        // }
+        todo!()
+        // match self.sender.try_send(packet) {
+        //     Ok(()) => Ok(()),
+        //     Err(e) => Err(PacketSendError::Disconnected(e)),
+        // }
     }
 }
 
@@ -376,36 +400,30 @@ impl<A: Actor> Clone for PacketSender<A> {
 /// A receiver of [Packet]s
 #[derive(Debug)]
 pub struct PacketReceiver<A: Actor> {
-    pub receiver: flume::Receiver<Packet<A>>,
+    pub receiver: async_channel::Receiver<Packet<A>>,
 }
-
-unsafe impl<A: Actor> Send for PacketReceiver<A> {}
-unsafe impl<A: Actor> Sync for PacketReceiver<A> {}
 
 pub trait NewInbox<A: Actor, B: InboxType>: InboxType {
     fn new_packet_sender(cap: usize) -> (PacketSender<A>, PacketReceiver<A>);
 }
 
-
 impl<A: Actor> NewInbox<A, Bounded> for Bounded {
-    fn new_packet_sender(_cap: usize) -> (PacketSender<A>, PacketReceiver<A>) {
-        println!("new bounded!");
-        PacketSender::new(None)
+    fn new_packet_sender(cap: usize) -> (PacketSender<A>, PacketReceiver<A>) {
+        PacketSender::new(Some(cap))
     }
 }
 
 impl<A: Actor> NewInbox<A, Unbounded> for Unbounded {
-    fn new_packet_sender(cap: usize) -> (PacketSender<A>, PacketReceiver<A>) {
-        println!("new unbounded!");
-        PacketSender::new(Some(cap))
+    fn new_packet_sender(_cap: usize) -> (PacketSender<A>, PacketReceiver<A>) {
+        PacketSender::new(None)
     }
 }
 
 impl<A: Actor> PacketSender<A> {
     fn new(size: Option<usize>) -> (PacketSender<A>, PacketReceiver<A>) {
         let (tx, rx) = match size {
-            Some(size) => flume::bounded(size),
-            None => flume::unbounded(),
+            Some(size) => async_channel::bounded(size),
+            None => async_channel::unbounded(),
         };
 
         // tokio::sync::mpsc::channel();
@@ -419,6 +437,6 @@ impl<A: Actor> PacketSender<A> {
 
 impl<A: Actor> PacketReceiver<A> {
     pub async fn recv(&mut self) -> Option<Packet<A>> {
-        self.receiver.recv_async().await.ok()
+        self.receiver.recv().await.ok()
     }
 }
