@@ -3,8 +3,8 @@ use std::{any::Any, pin::Pin};
 use futures::{Future, Stream, StreamExt};
 
 use crate::{
-    actor::{Actor, StreamOutput},
-    flows::{InternalFlow, Flow},
+    actor::{Actor},
+    flows::{Flow, InternalFlow},
     messaging::{InnerRequest, PacketReceiver, PacketSender, Reply},
 };
 
@@ -156,18 +156,14 @@ impl<A: Actor> Packet<A> {
     }
 }
 
-
 impl<A: Actor> Stream for PacketReceiver<A> {
-    type Item = StreamOutput<A>;
+    type Item = Packet<A>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        self.as_mut()
-            .receiver
-            .poll_next_unpin(cx)
-            .map(|packet| packet.map(|packet| StreamOutput::Packet(packet)))
+        self.as_mut().receiver.poll_next_unpin(cx)
     }
 }
 

@@ -179,7 +179,7 @@ impl<A: Actor> Drop for Process<A> {
 #[derive(Debug)]
 pub enum ProcessExit<A: Actor> {
     /// The actor has handled it's exit in a proper manner
-    Handled(A::Exit),
+    Handled(A::ExitWith),
     /// The initialisation of this actor has failed
     InitFailed,
     /// The actor has panicked. Inside is the panic information.

@@ -1,135 +1,186 @@
-use std::{
-    marker::PhantomData,
-    ops::{Deref, DerefMut},
-    pin::Pin,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::time::Duration;
 
 use futures::{
     future,
-    stream::{self, Map, Next, PollNext, SelectWithStrategy},
-    Future, FutureExt, StreamExt,
+    stream::{self, PollNext},
+    StreamExt,
 };
 
 use crate::{
     abort::{AbortReceiver, AbortSender, ToAbort},
-    action::Action,
     address::{Address, Addressable},
     flows::{ExitFlow, Flow, InitFlow, InternalFlow},
-    messaging::{NewInbox, PacketReceiver, PacketSender},
-    packets::{HandlerFn, Packet, Unbounded},
+    messaging::{NewInbox, PacketReceiver},
+    packets::{Packet, Unbounded},
     process::Process,
-    state::{self, BasicState, State, StateStreamItem},
+    state::{ActorState, State, StreamItem},
     AnyhowError,
 };
 
+//--------------------------------------------------------------------------------------------------
+//  Actor trait
+//--------------------------------------------------------------------------------------------------
+
 /// This is the main trait, which `Zestors` revolves around. All actors have to implement this.
+/// if this trait is implemented, it can be spawned with either [spawn]. (or [Spawn::spawn] if
+/// [Actor::Init] == [Actor]). See module documentation ([crate]) for more general
+/// information.
 ///
-/// There is only one required method which needs to be implemented: `exiting()`, all other methods
-/// have sensible defaults. It is possible to override these types and methods one at a time,
-/// as is necessary.
+/// ### Methods:
+/// There are two required methods which must be implemented manually: [Actor::init] and
+/// [Actor::handle_exit].
 ///
-/// The following is the simplest actor implementation:
-/// ```ignore
+/// [Actor::init] is called whenever the actor has just spawned on a new
+/// `tokio::task`. This method should take an [Actor::Init], and then return the [Actor] itself.
+///
+/// [Actor::handle_exit] is called whenever this actor is trying to exit. This method can decide
+/// what to do based on different [ExitReason]s, see the documentation of [ExitReason] for what
+/// these reasons can be. **Important**: This method will **not** be called if this [Actor] is
+/// exiting because of a `panic` or `hard-abort`.
+///
+/// ### Types:
+/// There are a bunch of associated types, which all have sensible defaults, but can be overridden
+/// when necessary. The following types can be overridden: [Actor::ExitError], [Actor::ExitNormal],
+/// [Actor::ExitWith], [Actor::State], [Actor::Address], [Actor::Inbox].
+///
+/// ### Generics:
+/// There are two associated generics, which can be used to customize an actor. These also have
+/// sensible defaults, but can be overridden: [Actor::INBOX_CAPACITY] and [Actor::ABORT_TIMER].
+///
+/// ### Basic implementation:
+/// ```
+/// # use zestors::{InitFlow, ExitFlow, ExitReason, Actor, Spawn, spawn};
+/// #
+/// struct MyActor {}
+///
 /// impl Actor for MyActor {
-///     fn exit(self, state: &mut Self::State, exit: Exiting<Self>) -> Self::Returns {
-///         ()
-///     }
-///
-///     fn initialise(init: Self::Init, state: &mut Self::State) -> InitFlow<Self> {
+///     fn init(init: Self::Init, state: &mut Self::State) -> InitFlow<Self> {
 ///         InitFlow::Init(init)
 ///     }
+///
+///     fn handle_exit(self, state: &mut Self::State, reason: ExitReason<Self>) -> ExitFlow<Self> {
+///         ExitFlow::ContinueExit(reason)
+///     }
 /// }
-/// ```
 ///
-/// ## Overrideable methods:
-/// ```ignore
-/// /// The error type that can be used to stop this [Actor].
-/// type ExitError = AnyhowError;
-///
-/// /// The type that is used to stop this [Actor] normally.
-/// type ExitNormal = ();
-///
-/// /// The type that is returned when this [Actor] exits.
-/// type Returns: Send = ();
-///
-/// /// The [ActorState] that is passed to all handler functions.
-/// type State: ActorState<Self> = State<Self>;
-///
-/// /// The address that is returned when this actor is spawned.
-/// type Address: FromAddress<Self> = Address<Self>;
-///
-/// /// Whether the inbox should be [Bounded] or [Unbounded].
-/// type Inbox: NewInbox<Self, Self::Inbox> = Unbounded;
-///
-/// /// If the inbox is [Bounded], this will be the inbox capacity
-/// const INBOX_CAP: usize = 0;
-///
-/// /// What this actor should be initialized with
-/// type Init = Self;
-///
-/// /// Spawn this [Actor], and return an [Address] of this [Actor].
-/// /// This is called when this [Actor] starts, and is executed on a new tokio `Task`
-/// fn initialise(init: Self::Init, state: &mut Self::State) -> InitFlow<Self>;
-///
-/// /// This is called when this [Actor] exits.
-/// fn handle_exit(self, state: &mut Self::State, exit: HandleExit<Self>) -> Self::Returns;
-///
-/// ```
+/// #[tokio::main]
+/// async fn main() {
+///     let (process, address) = spawn::<MyActor>(MyActor{});
+///     // or: let (process, address) = MyActor{}.spawn();
+/// }
 ///
 pub trait Actor: Send + Sync + 'static + Sized {
-    /// The error type that can be used to stop this [Actor].
-    type ExitError: Send = AnyhowError;
-    /// The type that is used to stop this [Actor] normally.
-    type ExitNormal: Send = ();
-    /// The type that is returned when this [Actor] exits.
-    type Exit: Send = ();
-    /// The [ActorState] that is passed to all handler functions.
-    type State: State<Self> = BasicState<Self>;
-    /// The address that is returned when this actor is spawned.
-    type Address: From<Address<Self>> + Addressable<Self> + Send + Clone = Address<Self>;
-    /// Whether the inbox should be [Bounded] or [Unbounded].
-    /// If setting this to [Bounded], don't forget to set `INBOX_CAPACITY` as well.
-    type Inbox: NewInbox<Self, Self::Inbox> = Unbounded;
-    /// What this actor should be initialized with
+    /// The value that can be used to initialise this actor. This value is then passed on to
+    /// [Actor::init], which initialises the actor and returns a `Self`.
+    ///
+    /// This value is also used to [spawn] this actor.
+    ///
+    /// The default value for this is `Self`, which means that first `Self` has to be created,
+    /// and then the actor can be spawned with this value.
     type Init: Send = Self;
-    /// If the inbox is [Bounded], this will be the inbox capacity
+
+    /// The error type that can be used to stop this [Actor]. [Flow], [ReqFlow] or [InitFlow] can
+    /// all propagate this error by applying `?` in a function with these return types.
+    /// [Actor::handle_exit] is then called with this error value.
+    ///
+    /// The default value is [AnyhowError], which is just a type alias for [anyhow::Error]. This
+    /// makes it easy to apply `?` to any error type within a function, to make the actor exit.
+    type ExitError: Send = AnyhowError;
+
+    /// The type that is used to stop this [Actor] normally. [Flow], [ReqFlow] or [InitFlow] can
+    /// return this type. [Actor::handle_exit] is then called with this value.
+    ///
+    /// The default value for this is `()`.
+    type ExitNormal: Send = ();
+
+    /// The type that is returned when this [Actor] exits. This value is the return type of
+    /// [Actor::handle_exit].
+    ///
+    /// The default value for this is [ExitReason]. This means that [Actor::handle_exit] can
+    /// directly pass on the [ExitReason] to return type of the [Process] of this actor.
+    type ExitWith: Send = ExitReason<Self>;
+
+    /// The [ActorState] that is passed to all handler functions.
+    ///
+    /// For 99% of applications, the default state of [State] should work perfectly fine. The state
+    /// can be used to schedule futures, or get the [Actor::Address] of your own actor.
+    type State: ActorState<Self> = State<Self>;
+
+    /// The address that is returned when this actor is spawned.
+    ///
+    /// The default value for this is [Address], which works fine for sending [Msg]s or [Req]sts.
+    /// However, since [Address] is not defined in your local crate, it's impossible to directly
+    /// implement methods on this. For this reason, it is possible to exchange the `Address<Self>`
+    /// for a custom struct (like `MyActorAddress`).
+    ///
+    /// This struct must implement [From<Address<Self>>] and [Addressable<Self>] in order to be
+    /// directly usable as a [Actor::Address].
+    type Address: From<Address<Self>> + Addressable<Self> + Send + Clone = Address<Self>;
+
+    /// Whether the inbox should be [Bounded] or [Unbounded]. If setting this to [Bounded],
+    /// don't forget to set [Actor::INBOX_CAPACITY] as well.
+    ///
+    /// The default value for this is [Unbounded].
+    type Inbox: NewInbox<Self, Self::Inbox> = Unbounded;
+
+    /// If the [Actor::Inbox] is [Bounded], this will be the inbox capacity. If [Unbounded], this
+    /// value does not do anything.
+    ///
+    /// The default for this value is `0`.
     const INBOX_CAPACITY: usize = 0;
-    /// How long should a process wait by default before hard aborting this actor
+
+    /// This value determines how long this [Actor] should have before it is shut down if it's
+    /// [Process] is dropped. When the associated [Process] is dropped, it will have
+    /// [Actor::ABORT_TIMER] time after receiving a `soft-abort`, before receiving being
+    /// `hard-abort`ed.
+    ///
+    /// The default value is 5 seconds.
     const ABORT_TIMER: Duration = Duration::from_secs(5);
 
-    /// Initialise this actor. This is executed on the spawned `tokio::task`.
+    /// This method is called whenever this actor starts. [spawn]ing an actor takes as a parameter
+    /// the [Actor::Init] value. After a new `tokio::task` is spawned, this function is called with
+    /// the parameters passed to [spawn].
+    ///
+    /// This function returns an [InitFlow], which can either initialise the actor with `Self`, or it
+    /// can cancel initialisation and return an error.
+    ///
+    /// Cancelation does **not** call [Actor::handle_exit], but directly exits the process instead.
     fn init(init: Self::Init, state: &mut Self::State) -> InitFlow<Self>;
 
-    /// This is called when this [Actor] exits.
+    /// Whenever this actor exits for any [ExitReason] (excluding `panics` or `hard-aborts`),
+    /// this function is called with the reason. It is possible to either continue the exit,
+    /// or resume execution instead.
     fn handle_exit(self, state: &mut Self::State, reason: ExitReason<Self>) -> ExitFlow<Self>;
 }
 
+//--------------------------------------------------------------------------------------------------
+//  Spawn
+//--------------------------------------------------------------------------------------------------
+
+/// Spawn an [Actor] on a new `tokio::task`. Usage:
+/// ```ignore
+/// spawn::<MyActor>(init);
+/// ```
 pub fn spawn<A: Actor>(init: A::Init) -> (Process<A>, A::Address) {
-    // create the packet senders
-    let (sender, receiver) =
-        <A::Inbox as NewInbox<A, A::Inbox>>::new_packet_sender(A::INBOX_CAPACITY);
-
+    // create the packet channel which is either bounded or unbounded
+    let (sender, receiver) = <A::Inbox as NewInbox<A, A::Inbox>>::new_channel(A::INBOX_CAPACITY);
+    // create the abort sender
     let (abort_sender, abort_receiver) = AbortSender::new();
-
-    // create the return address from this raw address
+    // create the address
     let address = <A::Address as From<Address<A>>>::from(Address::new(sender));
     // create the state
     let state = A::State::starting(address.clone());
-
-    let handle = tokio::task::spawn(spawned_new(init, state, receiver, abort_receiver));
-
-    let child = Process::new(handle, address.clone(), abort_sender, true);
-
-    // return the address
-    (child, address)
+    // spawn the task
+    let handle = tokio::task::spawn(event_loop(init, state, receiver, abort_receiver));
+    // wrap handle in a new process
+    let process = Process::new(handle, address.clone(), abort_sender, true);
+    // return the process and the address
+    (process, address)
 }
 
 pub trait Spawn: Actor<Init = Self> {
+    /// Spawn an actor for which [Actor::Init] == `Self`. See [spawn] documentation for more
+    /// information
     fn spawn(self) -> (Process<Self>, Self::Address);
 }
 
@@ -139,139 +190,29 @@ impl<A: Actor<Init = Self>> Spawn for A {
     }
 }
 
-async fn spawned<A: Actor<State = S>, S: State<A>>(
-    init: A::Init,
-    mut state: S,
-    receiver: PacketReceiver<A>,
-    abort_receiver: AbortReceiver,
-) -> InternalExitReason<A> {
-    //-------------------------------------
-    // Initialization
-    //-------------------------------------
-    let mut optional_abort_receiver = Some(abort_receiver);
-    let mut optional_before: Option<Action<A>> = None;
+//--------------------------------------------------------------------------------------------------
+//  ExitReason
+//--------------------------------------------------------------------------------------------------
 
-    // initialise the actor
-    let mut actor = match <A as Actor>::init(init, &mut state) {
-        InitFlow::Init(actor) => actor,
-        InitFlow::InitAndBefore(actor, before) => {
-            optional_before = Some(before);
-            actor
-        }
-        InitFlow::Exit => return InternalExitReason::InitFailed,
-    };
-
-    let mut global_state = Some(state);
-    let mut global_receiver_stream = Some(receiver);
-
-    //-------------------------------------
-    // Loop
-    //-------------------------------------
-    let res = loop {
-        // Create a new combined stream
-        let mut combined_stream = stream::select_with_strategy(
-            global_state
-                .take()
-                .unwrap()
-                .map(|scheduled| StreamOutput::Scheduled(scheduled)),
-            global_receiver_stream.take().unwrap(),
-            left_first_strat,
-        );
-
-        // Take a single value from it
-        let next_val = match optional_abort_receiver.take() {
-            // There is still an abort receiver
-            Some(abort_receiver) => {
-                match future::select(abort_receiver, combined_stream.next()).await {
-                    future::Either::Right((next_val, abort_receiver)) => {
-                        optional_abort_receiver = Some(abort_receiver);
-                        next_val.expect("Addresses should never all be dropped")
-                    }
-                    future::Either::Left((to_abort, next_val)) => match to_abort {
-                        // Process has been aborted
-                        ToAbort::Abort => {
-                            // Destroy the combined stream again
-                            let (temp_state, temp_receiver_stream) = combined_stream.into_inner();
-                            global_state = Some(temp_state.into_inner());
-                            global_receiver_stream = Some(temp_receiver_stream);
-                            break ExitReason::SoftAbort;
-                        }
-                        // Process is now detatched
-                        ToAbort::Detatch => next_val
-                            .await
-                            .expect("Addresses should never all be dropped"),
-                    },
-                }
-            }
-            // Abort receiver has already been consumed
-            None => combined_stream
-                .next()
-                .await
-                .expect("Addresses should never all be dropped"),
-        };
-
-        // Destroy the combined stream again
-        let (temp_state, temp_receiver_stream) = combined_stream.into_inner();
-        global_state = Some(temp_state.into_inner());
-        global_receiver_stream = Some(temp_receiver_stream);
-
-        // Check if Before<A> is set
-        if let Some(handler) = optional_before.take() {
-            match handler
-                .handle(&mut actor, &mut global_state.as_mut().unwrap())
-                .await
-            {
-                Flow::Ok => (),
-                Flow::ExitWithError(error) => break ExitReason::Error(error),
-                Flow::NormalExit(normal) => break ExitReason::Normal(normal),
-                Flow::Before(_ignore) => (), // ignore before if it was set by before,
-            }
-        }
-
-        // Handle the value from the combined stream
-        let flow = match next_val {
-            StreamOutput::Scheduled(action_or_flow) => action_or_flow
-                .handle(&mut actor, &mut global_state.as_mut().unwrap())
-                .await
-                .into_internal(),
-            StreamOutput::Packet(packet) => {
-                packet
-                    .handle(&mut actor, &mut global_state.as_mut().unwrap())
-                    .await
-            }
-        };
-
-        // Handle the flow returned from handling the value
-        match flow {
-            InternalFlow::Ok => (),
-            InternalFlow::After(handler) => {
-                match handler
-                    .handle(&mut actor, &mut global_state.as_mut().unwrap())
-                    .await
-                {
-                    Flow::Ok => (),
-                    Flow::Before(handler) => optional_before = Some(handler),
-                    Flow::ExitWithError(error) => break ExitReason::Error(error),
-                    Flow::NormalExit(normal) => break ExitReason::Normal(normal),
-                }
-            }
-            InternalFlow::Before(handler) => optional_before = Some(handler),
-            InternalFlow::ErrorExit(error) => break ExitReason::Error(error),
-            InternalFlow::NormalExit(normal) => break ExitReason::Normal(normal),
-        };
-    };
-
-    //-------------------------------------
-    // Exiting
-    //-------------------------------------
-    match actor.handle_exit(&mut global_state.as_mut().unwrap(), res) {
-        ExitFlow::ContinueExit(handled) => InternalExitReason::Handled(handled),
-        ExitFlow::Resume(_) => todo!(),
-        ExitFlow::ResumeAndBefore(_, _) => todo!(),
-    }
+/// The exit reason which is passed along to [Actor::handle_exit]. The reason for an exit can be
+/// either [ExitReason::Error], [ExitReason::Normal] or [ExitReason::SoftAbort].
+///
+/// If the actor `panic`s or is `hard-abort`ed, then this function will **not** be called, but the
+/// process exits directly.
+pub enum ExitReason<A: Actor> {
+    /// A `Flow` has returned an error variant.
+    Error(A::ExitError),
+    /// A `Flow` has returned an exit_normal variant.
+    Normal(A::ExitNormal),
+    /// The soft_abort message has been received. This can only be done once per [Process].
+    SoftAbort,
 }
 
-async fn spawned_new<A: Actor<State = S>, S: State<A>>(
+//--------------------------------------------------------------------------------------------------
+//  event_loop
+//--------------------------------------------------------------------------------------------------
+
+async fn event_loop<A: Actor<State = S>, S: ActorState<A>>(
     init: A::Init,
     mut state: S,
     mut receiver: PacketReceiver<A>,
@@ -297,7 +238,7 @@ async fn spawned_new<A: Actor<State = S>, S: State<A>>(
         // Wait for next thing to do
         //-------------------------------------
         let (temp_state, temp_receiver, loop_output) =
-            next_thing_to_do(&mut optional_abort_receiver, state, receiver).await;
+            next_event(&mut optional_abort_receiver, state, receiver).await;
         state = temp_state;
         receiver = temp_receiver;
 
@@ -335,7 +276,7 @@ async fn spawned_new<A: Actor<State = S>, S: State<A>>(
         // Do the thing
         //-------------------------------------
         match loop_output {
-            LoopOutput::Stream(StreamOutput::Packet(packet)) => {
+            NextEvent::Stream(CombinedStreamOutput::Packet(packet)) => {
                 match packet.handle(&mut actor, &mut state).await {
                     InternalFlow::Ok => (),
                     InternalFlow::After(action) => optional_after = Some(action),
@@ -366,7 +307,7 @@ async fn spawned_new<A: Actor<State = S>, S: State<A>>(
                     }
                 }
             }
-            LoopOutput::Stream(StreamOutput::Scheduled(scheduled)) => {
+            NextEvent::Stream(CombinedStreamOutput::Scheduled(scheduled)) => {
                 match scheduled
                     .handle(&mut actor, &mut state)
                     .await
@@ -401,7 +342,7 @@ async fn spawned_new<A: Actor<State = S>, S: State<A>>(
                     }
                 }
             }
-            LoopOutput::SoftAbort => {
+            NextEvent::SoftAbort => {
                 match <A as Actor>::handle_exit(actor, &mut state, ExitReason::SoftAbort) {
                     ExitFlow::ContinueExit(exit) => return InternalExitReason::Handled(exit),
                     ExitFlow::Resume(temp_actor) => actor = temp_actor,
@@ -445,14 +386,19 @@ async fn spawned_new<A: Actor<State = S>, S: State<A>>(
     }
 }
 
-async fn next_thing_to_do<A: Actor<State = S>, S: State<A>>(
+//--------------------------------------------------------------------------------------------------
+//  next_event
+//--------------------------------------------------------------------------------------------------
+
+// return the next event which should be handled by this actor.
+async fn next_event<A: Actor<State = S>, S: ActorState<A>>(
     optional_abort_receiver: &mut Option<AbortReceiver>,
     state: S,
     receiver: PacketReceiver<A>,
-) -> (S, PacketReceiver<A>, LoopOutput<A, S>) {
+) -> (S, PacketReceiver<A>, NextEvent<A, S>) {
     let mut combined_stream = stream::select_with_strategy(
-        state.map(|scheduled| StreamOutput::Scheduled(scheduled)),
-        receiver,
+        state.map(|scheduled| CombinedStreamOutput::Scheduled(scheduled)),
+        receiver.map(|packet| CombinedStreamOutput::Packet(packet)),
         left_first_strat,
     );
 
@@ -462,23 +408,23 @@ async fn next_thing_to_do<A: Actor<State = S>, S: State<A>>(
             match future::select(abort_receiver, combined_stream.next()).await {
                 future::Either::Right((next_val, abort_receiver)) => {
                     optional_abort_receiver.replace(abort_receiver);
-                    LoopOutput::Stream(next_val.expect("Addresses should never all be dropped"))
+                    NextEvent::Stream(next_val.expect("Addresses should never all be dropped"))
                 }
                 future::Either::Left((to_abort, next)) => match to_abort {
                     // Process has been aborted
                     ToAbort::Abort => {
                         drop(next);
-                        LoopOutput::SoftAbort
+                        NextEvent::SoftAbort
                     }
                     // Process has been detatched
-                    ToAbort::Detatch => LoopOutput::Stream(
+                    ToAbort::Detatch => NextEvent::Stream(
                         next.await.expect("Addresses should never all be dropped"),
                     ),
                 },
             }
         }
         // Abort receiver has already been consumed
-        None => LoopOutput::Stream(
+        None => NextEvent::Stream(
             combined_stream
                 .next()
                 .await
@@ -487,46 +433,34 @@ async fn next_thing_to_do<A: Actor<State = S>, S: State<A>>(
     };
 
     // Destroy the combined stream again
-    let (mapped_state, receiver) = combined_stream.into_inner();
-    let state = mapped_state.into_inner();
-    (state, receiver, next_val)
+    let (state, receiver) = combined_stream.into_inner();
+    (state.into_inner(), receiver.into_inner(), next_val)
 }
 
-enum LoopOutput<A: Actor<State = S>, S: State<A>> {
-    Stream(StreamOutput<A>),
+//--------------------------------------------------------------------------------------------------
+//  Helper types
+//--------------------------------------------------------------------------------------------------
+
+/// The next event that should be handled by the actor.
+enum NextEvent<A: Actor<State = S>, S: ActorState<A>> {
+    Stream(CombinedStreamOutput<A>),
     SoftAbort,
 }
 
-type NextValue<'a, A, S> = Next<
-    'a,
-    SelectWithStrategy<
-        Map<S, fn(StateStreamItem<A>) -> StreamOutput<A>>,
-        PacketReceiver<A>,
-        fn(&mut ()) -> PollNext,
-        (),
-    >,
->;
-
+/// Strategy for selecting the left stream
 fn left_first_strat(_: &mut ()) -> PollNext {
     PollNext::Left
 }
 
-pub enum StreamOutput<A: Actor> {
+/// The output of the combined stream
+enum CombinedStreamOutput<A: Actor> {
     Packet(Packet<A>),
-    Scheduled(StateStreamItem<A>),
+    Scheduled(StreamItem<A>),
 }
 
-/// The enum which is passed to the `exiting()` callback.
-pub enum ExitReason<A: Actor> {
-    /// This actor has exited with an error.
-    Error(A::ExitError),
-    /// This actor has exited normally.
-    Normal(A::ExitNormal),
-    /// A soft_abort message has been received.
-    SoftAbort,
-}
-
+/// An internal exitreason, which is then converted into the actual exit reason upon awaiting a
+/// process.
 pub(crate) enum InternalExitReason<A: Actor> {
     InitFailed,
-    Handled(A::Exit),
+    Handled(A::ExitWith),
 }

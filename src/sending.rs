@@ -4,18 +4,30 @@ use derive_more::{Display, Error};
 use futures::Future;
 
 use crate::{
-    actor::{Actor,},
-    callable::{Callable, RemoteFunction},
-    messaging::{Msg, Reply, Req}, errors::{ActorDied, TrySendError}, packets::{IsUnbounded, IsBounded},
+    actor::Actor,
+    callable::{Callable, Fun},
+    errors::{ActorDied, TrySendError},
+    messaging::{Msg, Reply, Req},
+    packets::{IsBounded, IsUnbounded},
 };
 use std::fmt::Debug;
+
+fn test_main() {
+    call_remote(|val| {
+        10;
+    })
+}
+
+fn call_remote<F: FnOnce(u32)>(f: F) {
+    f(10)
+}
 
 //-------------------------------------
 // UnboundedSend
 //-------------------------------------
 
 pub trait UnboundedSend<'a, 'b, I, F, P, R, G, A> {
-    fn send(&'a self, function: RemoteFunction<F>, params: P) -> Result<R, ActorDied<P>>;
+    fn send(&'a self, function: Fun<F>, params: P) -> Result<R, ActorDied<P>>;
 }
 
 impl<'a, 'b, I, F, P, G, A, T> UnboundedSend<'a, 'b, I, F, P, (), G, A> for T
@@ -26,7 +38,7 @@ where
     P: Send + 'static,
     F: 'a,
 {
-    fn send(&'a self, function: RemoteFunction<F>, params: P) -> Result<(), ActorDied<P>> {
+    fn send(&'a self, function: Fun<F>, params: P) -> Result<(), ActorDied<P>> {
         self.call(function, params).send()
     }
 }
@@ -40,7 +52,7 @@ where
     R: Send + 'static,
     F: 'a,
 {
-    fn send(&'a self, function: RemoteFunction<F>, params: P) -> Result<Reply<R>, ActorDied<P>> {
+    fn send(&'a self, function: Fun<F>, params: P) -> Result<Reply<R>, ActorDied<P>> {
         self.call(function, params).send()
     }
 }
@@ -50,10 +62,10 @@ where
 //-------------------------------------
 
 pub trait BoundedSend<'a, 'b, I, F, P, R, G, A> {
-    fn try_send(&'a self, function: RemoteFunction<F>, params: P) -> Result<R, TrySendError<P>>;
+    fn try_send(&'a self, function: Fun<F>, params: P) -> Result<R, TrySendError<P>>;
     fn async_send(
         &'a self,
-        function: RemoteFunction<F>,
+        function: Fun<F>,
         params: P,
     ) -> Pin<Box<dyn Future<Output = Result<R, ActorDied<P>>> + 'a>>;
     // fn blocking_send(&'a self, function: RemoteFunction<F>, params: P) -> Result<R, ActorDied<P>>;
@@ -68,29 +80,25 @@ where
     R: Send + 'static,
     F: 'a,
 {
-    fn try_send(
-        &'a self,
-        function: RemoteFunction<F>,
-        params: P,
-    ) -> Result<Reply<R>, TrySendError<P>> {
+    fn try_send(&'a self, function: Fun<F>, params: P) -> Result<Reply<R>, TrySendError<P>> {
         self.call(function, params).try_send()
     }
 
     fn async_send(
         &'a self,
-        function: RemoteFunction<F>,
+        function: Fun<F>,
         params: P,
     ) -> Pin<Box<dyn Future<Output = Result<Reply<R>, ActorDied<P>>> + 'a>> {
         Box::pin(async move { self.call(function, params).async_send().await })
     }
 
-//     fn blocking_send(
-//         &'a self,
-//         function: RemoteFunction<F>,
-//         params: P,
-//     ) -> Result<Reply<R>, ActorDied<P>> {
-//         self.call(function, params).blocking_send()
-//     }
+    //     fn blocking_send(
+    //         &'a self,
+    //         function: RemoteFunction<F>,
+    //         params: P,
+    //     ) -> Result<Reply<R>, ActorDied<P>> {
+    //         self.call(function, params).blocking_send()
+    //     }
 }
 
 impl<'a, 'b, I, F, P, G, A, T> BoundedSend<'a, 'b, I, F, P, (), G, A> for T
@@ -101,13 +109,13 @@ where
     P: Send + 'static,
     F: 'a,
 {
-    fn try_send(&'a self, function: RemoteFunction<F>, params: P) -> Result<(), TrySendError<P>> {
+    fn try_send(&'a self, function: Fun<F>, params: P) -> Result<(), TrySendError<P>> {
         self.call(function, params).try_send()
     }
 
     fn async_send(
         &'a self,
-        function: RemoteFunction<F>,
+        function: Fun<F>,
         params: P,
     ) -> Pin<Box<dyn Future<Output = Result<(), ActorDied<P>>> + 'a>> {
         Box::pin(async move { self.call(function, params).async_send().await })
@@ -117,9 +125,6 @@ where
     //     self.call(function, params).blocking_send()
     // }
 }
-
-
-
 
 // //-------------------------------------
 // // UnboundedSendRecv
@@ -181,4 +186,3 @@ where
 //         params: P,
 //     ) -> Result<R, SendRecvError<P>>;
 // }
-

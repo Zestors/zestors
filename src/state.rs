@@ -22,8 +22,8 @@ use crate::{
 /// todo:
 /// it should be possible for this state not to have overhead if scheduling of calls is not
 /// necessary.
-pub trait State<A: Actor>:
-    Send + 'static + Sized + Stream<Item = StateStreamItem<A>> + Unpin
+pub trait ActorState<A: Actor>:
+    Send + 'static + Sized + Stream<Item = StreamItem<A>> + Unpin
 {
     fn starting(address: A::Address) -> Self;
     fn address(&self) -> &A::Address;
@@ -34,18 +34,18 @@ pub trait State<A: Actor>:
 //--------------------------------------------------------------------------------------------------
 
 /// The return type of the stream implementation that all actor states should implement
-pub enum StateStreamItem<A: Actor> {
+pub enum StreamItem<A: Actor> {
     Action(Action<A>),
     Flow(Flow<A>),
 }
 
-impl<A: Actor> StateStreamItem<A> {
+impl<A: Actor> StreamItem<A> {
     /// If this is an action, handle it and return the flow.
     /// Otherwise just return the flow directly.
     pub async fn handle(self, actor: &mut A, state: &mut A::State) -> Flow<A> {
         match self {
-            StateStreamItem::Action(action) => action.handle(actor, state).await,
-            StateStreamItem::Flow(flow) => flow,
+            StreamItem::Action(action) => action.handle(actor, state).await,
+            StreamItem::Flow(flow) => flow,
         }
     }
 }
@@ -56,16 +56,16 @@ impl<A: Actor> StateStreamItem<A> {
 
 /// This is the default state implementation, that should be fine for 99% of use cases. It offers
 /// a lot of functionality, while still being quite fast.
-pub struct BasicState<A: Actor + ?Sized> {
+pub struct State<A: Actor + ?Sized> {
     address: A::Address,
-    scheduled: FuturesUnordered<Pin<Box<dyn Future<Output = StateStreamItem<A>> + Send>>>,
+    scheduled: FuturesUnordered<Pin<Box<dyn Future<Output = StreamItem<A>> + Send>>>,
 }
 
-impl<A: Actor> BasicState<A> {
+impl<A: Actor> State<A> {
     /// Schedule a future that should be ran on this actor. It will be executed on the actor
     /// with priority over incoming messages.
     pub fn schedule<F: 'static + Future<Output = Flow<A>> + Send>(&mut self, future: F) {
-        let future = Box::pin(async move { StateStreamItem::Flow(future.await) });
+        let future = Box::pin(async move { StreamItem::Flow(future.await) });
         self.scheduled.push(future)
     }
 
@@ -80,7 +80,7 @@ impl<A: Actor> BasicState<A> {
     ) {
         let future = Box::pin(async move {
             let output = future.await;
-            StateStreamItem::Action(Action::new_sync(output, function))
+            StreamItem::Action(Action::new_sync(output, function))
         });
         self.scheduled.push(future)
     }
@@ -97,13 +97,13 @@ impl<A: Actor> BasicState<A> {
     ) {
         let future = Box::pin(async move {
             let output = future.await;
-            StateStreamItem::Action(Action::new_async(output, function))
+            StreamItem::Action(Action::new_async(output, function))
         });
         self.scheduled.push(future)
     }
 }
 
-impl<A: Actor> State<A> for BasicState<A> {
+impl<A: Actor> ActorState<A> for State<A> {
     fn starting(address: A::Address) -> Self {
         Self {
             address,
@@ -116,8 +116,8 @@ impl<A: Actor> State<A> for BasicState<A> {
     }
 }
 
-impl<A: Actor> Stream for BasicState<A> {
-    type Item = StateStreamItem<A>;
+impl<A: Actor> Stream for State<A> {
+    type Item = StreamItem<A>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -127,7 +127,7 @@ impl<A: Actor> Stream for BasicState<A> {
     }
 }
 
-impl<A: Actor> Unpin for BasicState<A> {}
+impl<A: Actor> Unpin for State<A> {}
 
 //--------------------------------------------------------------------------------------------------
 //  MinimalState: a minimal state that is as fast as possible
@@ -137,7 +137,7 @@ pub struct MinimalState<A: Actor + ?Sized> {
     address: A::Address,
 }
 
-impl<A: Actor> State<A> for MinimalState<A> {
+impl<A: Actor> ActorState<A> for MinimalState<A> {
     fn starting(address: A::Address) -> Self {
         Self { address }
     }
@@ -148,7 +148,7 @@ impl<A: Actor> State<A> for MinimalState<A> {
 }
 
 impl<A: Actor> Stream for MinimalState<A> {
-    type Item = StateStreamItem<A>;
+    type Item = StreamItem<A>;
 
     fn poll_next(
         self: Pin<&mut Self>,

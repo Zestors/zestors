@@ -6,7 +6,7 @@
 [x] address.rs 
 [x] process.rs 
 [x] state.rs 
-[ ] actor.rs
+[x] actor.rs
 [ ] callable.rs 
 [ ] messaging.rs 
 [ ] packets.rs 

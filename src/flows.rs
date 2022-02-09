@@ -85,7 +85,7 @@ pub enum InitFlow<A: Actor> {
 /// an `A::Exit`, or a resume.
 pub enum ExitFlow<A: Actor> {
     /// Continue this exit, with exit value `Actor::Exit`.
-    ContinueExit(A::Exit),
+    ContinueExit(A::ExitWith),
     /// Resume execution of this actor.
     Resume(A),
     /// Resume execution of this actor. 

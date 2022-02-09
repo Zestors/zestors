@@ -1,4 +1,5 @@
 use futures::Future;
+use zestors_codegen::{static_assert_registered, register_once};
 use std::intrinsics::transmute;
 
 use crate::{
@@ -12,6 +13,7 @@ use crate::{
     messaging::{Msg, PacketSender, Req},
     packets::{HandlerFn, HandlerPacket, Packet},
 };
+
 //--------------------------------------------------------------------------------------------------
 //  Addressable and FromAddress traits
 //--------------------------------------------------------------------------------------------------
@@ -343,8 +345,8 @@ mod test {
     use super::*;
     use crate::actor::ExitReason;
     use crate::flows::{InitFlow, ExitFlow};
-    use crate::state::BasicState;
-    use crate::{actor::Spawn, sending::UnboundedSend, func};
+    use crate::state::State;
+    use crate::{actor::Spawn, sending::UnboundedSend, fun};
     use crate::callable::Callable;
     
     #[tokio::test]
@@ -385,16 +387,16 @@ mod test {
         assert_eq!(res7, "ok");
         assert_eq!(res8, "ok");
 
-        let res1 = child.send(func!(MyActor::test_a), 10)?;
+        let res1 = child.send(fun!(MyActor::test_a), 10)?;
         // let res1 = child.send(func!(MyActor::test_a2), ("hi", 10)).await?;
 
-        let res2 = child.call(func!(MyActor::test_b), 10).send()?;
-        let res3 = child.send(func!(MyActor::test_c), 10)?.await?;
-        let res4 = address.send(func!(MyActor::test_d), 10)?.await?;
-        let res5 = child.call(func!(MyActor::test_e), 10).send()?;
-        let res6 = child.send(func!(MyActor::test_f), 10)?;
-        let res7 = address.send(func!(MyActor::test_g), 10)?.await?;
-        let res8 = child.send(func!(MyActor::test_h), 10)?.await?;
+        let res2 = child.call(fun!(MyActor::test_b), 10).send()?;
+        let res3 = child.send(fun!(MyActor::test_c), 10)?.await?;
+        let res4 = address.send(fun!(MyActor::test_d), 10)?.await?;
+        let res5 = child.call(fun!(MyActor::test_e), 10).send()?;
+        let res6 = child.send(fun!(MyActor::test_f), 10)?;
+        let res7 = address.send(fun!(MyActor::test_g), 10)?.await?;
+        let res8 = child.send(fun!(MyActor::test_h), 10)?.await?;
 
         assert_eq!(res1, ());
         assert_eq!(res2, ());
@@ -417,7 +419,7 @@ mod test {
             Flow::Ok
         }
 
-        fn test_a(&mut self, state: &mut BasicState<Self>, c: u32) -> Flow<Self> {
+        fn test_a(&mut self, state: &mut State<Self>, c: u32) -> Flow<Self> {
             Flow::Ok
         }
 
@@ -429,7 +431,7 @@ mod test {
             Flow::Ok
         }
 
-        async fn test_b(&mut self, state: &mut BasicState<Self>, c: u32) -> Flow<Self> {
+        async fn test_b(&mut self, state: &mut State<Self>, c: u32) -> Flow<Self> {
             Flow::Ok
         }
 
@@ -437,7 +439,7 @@ mod test {
             ReqFlow::Reply("ok")
         }
 
-        fn test_c(&mut self, state: &mut BasicState<Self>, c: u32) -> ReqFlow<Self, &'static str> {
+        fn test_c(&mut self, state: &mut State<Self>, c: u32) -> ReqFlow<Self, &'static str> {
             ReqFlow::Reply("ok")
         }
 
@@ -455,7 +457,7 @@ mod test {
     }
 
     impl Actor for MyActor {
-        type Exit = u32;
+        type ExitWith = u32;
 
         fn handle_exit(self, state: &mut Self::State, exit: ExitReason<Self>) -> ExitFlow<Self> {
             ExitFlow::ContinueExit(0)

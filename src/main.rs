@@ -1,21 +1,25 @@
-use std::time::Duration;
+use std::{marker::PhantomData, time::Duration};
 
-use futures::StreamExt;
 use zestors::{
     actor::{spawn, Actor, ExitReason, Spawn},
     address::{Address, Addressable},
     callable::Callable,
-    flows::{ExitFlow, IntoReplyAble, Flow, InitFlow, ReqFlow},
-    func,
+    flows::{ExitFlow, Flow, InitFlow, ReqFlow},
+    fun,
     messaging::{Reply, Req},
-    packets::Unbounded,
-    sending::{BoundedSend, UnboundedSend},
-    state::{State, BasicState}, process::ProcessExit,
+    process::ProcessExit,
+    sending::UnboundedSend,
+    state::{State, ActorState},
 };
+
+
+
+fn test_this<T>() {}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let (mut process, address) = spawn::<Calculator>(());
+    process.call(fun!(Calculator::echo::<u32>), 10);
     // let (child, address) = Calculator::new().spawn();
     // let raw_address = process.raw_address().clone();
 
@@ -77,13 +81,13 @@ async fn main() -> anyhow::Result<()> {
     // println!("awaited process: {:?}", process.await);
 
     let tes: Reply<_> = address
-        .send(func!(Calculator::print_after_1_sec), 100)
+        .send(fun!(Calculator::print_after_1_sec), 100)
         .unwrap();
 
     tes.async_recv().await.unwrap();
 
     let tes = address
-        .send(func!(Calculator::print_after_1_sec), 100)
+        .send(fun!(Calculator::print_after_1_sec), 100)
         .unwrap()
         .await
         .unwrap();
@@ -100,6 +104,17 @@ async fn main() -> anyhow::Result<()> {
     // println!("everything done final!");
 
     Ok(())
+}
+
+struct MyActor;
+impl Actor for MyActor {
+    fn init(init: Self::Init, state: &mut Self::State) -> InitFlow<Self> {
+        InitFlow::Init(init)
+    }
+
+    fn handle_exit(self, state: &mut Self::State, reason: ExitReason<Self>) -> ExitFlow<Self> {
+        ExitFlow::ContinueExit(reason)
+    }
 }
 
 #[derive(Debug)]
@@ -123,6 +138,10 @@ impl Calculator {
         Flow::Ok
     }
 
+    pub fn echo<T>(&mut self, t: T) -> ReqFlow<Self, T> {
+        ReqFlow::Reply(t)
+    }
+
     pub fn get_count(&mut self, _: ()) -> ReqFlow<Self, i64> {
         ReqFlow::Reply(self.count)
     }
@@ -132,7 +151,11 @@ impl Calculator {
         Flow::Ok
     }
 
-    pub fn print_after_1_sec(&mut self, state: &mut BasicState<Self>, val: u32) -> ReqFlow<Self, ()> {
+    pub fn print_after_1_sec(
+        &mut self,
+        state: &mut State<Self>,
+        val: u32,
+    ) -> ReqFlow<Self, ()> {
         state.schedule_and_then(
             async move {
                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -144,9 +167,7 @@ impl Calculator {
             },
         );
 
-        state
-            .address()
-            .send(func!(Calculator::sleep), ())?;
+        state.address().send(fun!(Calculator::sleep), ())?;
 
         ReqFlow::Reply(())
     }
@@ -155,7 +176,7 @@ impl Calculator {
 impl Actor for Calculator {
     type Address = CalculatorAddress;
     type Init = ();
-    type Exit = ExitReason<Self>;
+    type ExitWith = ExitReason<Self>;
 
     fn handle_exit(self, _state: &mut Self::State, exit: ExitReason<Self>) -> ExitFlow<Self> {
         match &exit {
@@ -166,11 +187,11 @@ impl Actor for Calculator {
             ExitReason::Normal(n) => {
                 println!("exited normally: {:?}", n);
                 ExitFlow::ContinueExit(exit)
-            },
+            }
             ExitReason::SoftAbort => {
                 println!("Soft aborted");
                 ExitFlow::ContinueExit(exit)
-            },
+            }
         }
     }
 
@@ -196,15 +217,15 @@ impl Addressable<Calculator> for CalculatorAddress {
 
 impl CalculatorAddress {
     pub fn add(&self, amount: u64) {
-        self.send(func!(Calculator::add), amount).unwrap();
+        self.send(fun!(Calculator::add), amount).unwrap();
     }
 
     pub fn subtract(&self, amount: u64) {
-        self.send(func!(Calculator::subtract), amount).unwrap();
+        self.send(fun!(Calculator::subtract), amount).unwrap();
     }
 
     pub async fn get(&self) -> i64 {
-        self.send(func!(Calculator::get_count), ())
+        self.send(fun!(Calculator::get_count), ())
             .unwrap()
             .await
             .unwrap()

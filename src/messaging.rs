@@ -404,17 +404,17 @@ pub struct PacketReceiver<A: Actor> {
 }
 
 pub trait NewInbox<A: Actor, B: InboxType>: InboxType {
-    fn new_packet_sender(cap: usize) -> (PacketSender<A>, PacketReceiver<A>);
+    fn new_channel(cap: usize) -> (PacketSender<A>, PacketReceiver<A>);
 }
 
 impl<A: Actor> NewInbox<A, Bounded> for Bounded {
-    fn new_packet_sender(cap: usize) -> (PacketSender<A>, PacketReceiver<A>) {
+    fn new_channel(cap: usize) -> (PacketSender<A>, PacketReceiver<A>) {
         PacketSender::new(Some(cap))
     }
 }
 
 impl<A: Actor> NewInbox<A, Unbounded> for Unbounded {
-    fn new_packet_sender(_cap: usize) -> (PacketSender<A>, PacketReceiver<A>) {
+    fn new_channel(_cap: usize) -> (PacketSender<A>, PacketReceiver<A>) {
         PacketSender::new(None)
     }
 }
