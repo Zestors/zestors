@@ -19,7 +19,7 @@ fn test_this<T>() {}
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let (mut process, address) = spawn::<Calculator>(());
-    process.call(fun!(Calculator::echo::<u32>), 10);
+    // process.call(fun!(Calculator::echo::<u32>), 10);
     // let (child, address) = Calculator::new().spawn();
     // let raw_address = process.raw_address().clone();
 
@@ -167,7 +167,7 @@ impl Calculator {
             },
         );
 
-        state.address().send(fun!(Calculator::sleep), ())?;
+        // state.address().send(fun!(Calculator::sleep), ())?;
 
         ReqFlow::Reply(())
     }
@@ -216,18 +216,18 @@ impl Addressable<Calculator> for CalculatorAddress {
 }
 
 impl CalculatorAddress {
-    pub fn add(&self, amount: u64) {
-        self.send(fun!(Calculator::add), amount).unwrap();
-    }
+    // pub fn add(&self, amount: u64) {
+    //     self.send(fun!(Calculator::add), amount).unwrap();
+    // }
 
-    pub fn subtract(&self, amount: u64) {
-        self.send(fun!(Calculator::subtract), amount).unwrap();
-    }
+    // pub fn subtract(&self, amount: u64) {
+    //     self.send(fun!(Calculator::subtract), amount).unwrap();
+    // }
 
-    pub async fn get(&self) -> i64 {
-        self.send(fun!(Calculator::get_count), ())
-            .unwrap()
-            .await
-            .unwrap()
-    }
+    // pub async fn get(&self) -> i64 {
+    //     self.send(fun!(Calculator::get_count), ())
+    //         .unwrap()
+    //         .await
+    //         .unwrap()
+    // }
 }

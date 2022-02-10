@@ -1,6 +1,4 @@
-use std::{
-    any::Any, fmt::Debug, intrinsics::transmute, marker::PhantomData, mem::transmute_copy, pin::Pin,
-};
+use std::{intrinsics::transmute, marker::PhantomData};
 
 use futures::Future;
 
@@ -11,183 +9,8 @@ use crate::{
     messaging::{Msg, Req},
 };
 
-trait SendFut<T>: Future<Output = T> + Send + 'static {}
-impl<T> SendFut<T> for T where T: Future<Output = T> + Send + 'static {}
-
 //--------------------------------------------------------------------------------------------------
-//  Msg
-//--------------------------------------------------------------------------------------------------
-pub struct MsgIdState;
-trait MsgFnParams<A: Actor>: FnOnce(&mut A, &mut A::State) -> Flow<A> {}
-impl<A: Actor, F> MsgFnParams<A> for F where F: FnOnce(&mut A, &mut A::State) -> Flow<A> {}
-
-pub struct MsgIDParamsState;
-trait MsgFn<A: Actor, P>: FnOnce(&mut A, &mut A::State, P) -> Flow<A>
-where
-    P: Send + 'static,
-{
-}
-impl<A: Actor, F, P> MsgFn<A, P> for F
-where
-    F: FnOnce(&mut A, &mut A::State, P) -> Flow<A>,
-    P: Send + 'static,
-{
-}
-
-//--------------------------------------------------------------------------------------------------
-//  MsgAsync
-//--------------------------------------------------------------------------------------------------
-pub struct MsgAsyncID;
-trait MsgAsyncFn<A: Actor, P, G>: FnOnce(&mut A, &mut A::State, P) -> G
-where
-    G: SendFut<Flow<A>>,
-    P: Send + 'static,
-{
-}
-impl<A: Actor, F, P, G> MsgAsyncFn<A, P, G> for F
-where
-    F: FnOnce(&mut A, &mut A::State, P) -> G,
-    G: SendFut<Flow<A>>,
-    P: Send + 'static,
-{
-}
-
-//--------------------------------------------------------------------------------------------------
-//  Req
-//--------------------------------------------------------------------------------------------------
-pub struct ReqID;
-trait ReqFn<A: Actor, P, R>: FnOnce(&mut A, &mut A::State, P) -> ReqFlow<A, R>
-where
-    P: Send + 'static,
-    R: Send + 'static,
-{
-}
-impl<A: Actor, F, P, R> ReqFn<A, P, R> for F
-where
-    F: FnOnce(&mut A, &mut A::State, P) -> ReqFlow<A, R>,
-    P: Send + 'static,
-    R: Send + 'static,
-{
-}
-
-//--------------------------------------------------------------------------------------------------
-//  ReqAsync
-//--------------------------------------------------------------------------------------------------
-pub struct ReqAsyncID;
-trait ReqAsyncFn<A: Actor, P, R, G>: FnOnce(&mut A, &mut A::State, P) -> G
-where
-    G: SendFut<ReqFlow<A, R>>,
-    P: Send + 'static,
-    R: Send + 'static,
-{
-}
-impl<A: Actor, F, P, R, G> ReqAsyncFn<A, P, R, G> for F
-where
-    F: FnOnce(&mut A, &mut A::State, P) -> G,
-    G: SendFut<ReqFlow<A, R>>,
-    P: Send + 'static,
-    R: Send + 'static,
-{
-}
-
-//--------------------------------------------------------------------------------------------------
-//  MsgNoState
-//--------------------------------------------------------------------------------------------------
-pub struct MsgIDNoState;
-trait MsgFnNoState<A: Actor, P>: FnOnce(&mut A, P) -> Flow<A>
-where
-    P: Send + 'static,
-{
-}
-impl<A: Actor, F, P> MsgFnNoState<A, P> for F
-where
-    F: FnOnce(&mut A, P) -> Flow<A>,
-    P: Send + 'static,
-{
-}
-
-//--------------------------------------------------------------------------------------------------
-//  MsgAsyncNoState
-//--------------------------------------------------------------------------------------------------
-pub struct MsgAsyncIDNoState;
-trait MsgAsyncFnNoState<A: Actor, P, G>: FnOnce(&mut A, &mut A::State, P) -> G
-where
-    G: SendFut<Flow<A>>,
-    P: Send + 'static,
-{
-}
-impl<A: Actor, F, P, G> MsgAsyncFnNoState<A, P, G> for F
-where
-    F: FnOnce(&mut A, &mut A::State, P) -> G,
-    G: SendFut<Flow<A>>,
-    P: Send + 'static,
-{
-}
-
-//--------------------------------------------------------------------------------------------------
-//  ReqIdNoState
-//--------------------------------------------------------------------------------------------------
-pub struct ReqIDNoState;
-trait ReqFnNoState<A: Actor, P, R>: FnOnce(&mut A, &mut A::State, P) -> ReqFlow<A, R>
-where
-    P: Send + 'static,
-    R: Send + 'static,
-{
-}
-impl<A: Actor, F, P, R> ReqFnNoState<A, P, R> for F
-where
-    F: FnOnce(&mut A, &mut A::State, P) -> ReqFlow<A, R>,
-    P: Send + 'static,
-    R: Send + 'static,
-{
-}
-
-//--------------------------------------------------------------------------------------------------
-//  ReqAsyncNoState
-//--------------------------------------------------------------------------------------------------
-pub struct ReqAsyncIDNoState;
-trait ReqAsyncFnNoState<A: Actor, P, R, G>: FnOnce(&mut A, &mut A::State, P) -> G
-where
-    G: SendFut<ReqFlow<A, R>>,
-    P: Send + 'static,
-    R: Send + 'static,
-{
-}
-impl<A: Actor, F, P, R, G> ReqAsyncFnNoState<A, P, R, G> for F
-where
-    F: FnOnce(&mut A, &mut A::State, P) -> G,
-    G: SendFut<ReqFlow<A, R>>,
-    P: Send + 'static,
-    R: Send + 'static,
-{
-}
-// enum CallableFunction<A, F1, F2, F3, F4, F5, F6, F7, F8>
-// where
-//     A: Actor,
-//     F1: MsgFn<A>,
-// {
-//     Msg(F1, PhantomData<A>),
-//     MsgAsync(F2, PhantomData<A>),
-//     Req(F3, PhantomData<A>),
-//     ReqAsync(F4, PhantomData<A>),
-//     MsgNoState(F5, PhantomData<A>),
-//     MsgAsyncNoState(F6, PhantomData<A>),
-//     ReqNoState(F7, PhantomData<A>),
-//     ReqAsyncNoState(F8, PhantomData<A>),
-// }
-
-// impl<A, F1, F2, F3, F4, F5, F6, F7, F8> CallableFunction<A, F1, F2, F3, F4, F5, F6, F7, F8>
-// where
-//     A: Actor,
-//     F1: MsgFn<A>,
-// {
-//     fn new1(fun: F1) -> Self {
-
-//     }
-// }
-
-//--------------------------------------------------------------------------------------------------
-//  fun! macro + Fun struct
+//  Fun
 //--------------------------------------------------------------------------------------------------
 
 /// A macro used to create a [Fun] which is used to [Callable::call] an actor with.
@@ -195,6 +18,13 @@ where
 macro_rules! fun {
     ($x:expr) => {
         unsafe { $crate::callable::Fun::new(($x) as usize, $x) }
+    };
+}
+
+#[macro_export]
+macro_rules! call {
+    ($address:ident, |$actor:ident, $state:ident, $param:ident| $block:block) => {
+        
     };
 }
 
@@ -213,237 +43,143 @@ impl<'a, F> Fun<F> {
             f: PhantomData,
         }
     }
+
+    // unsafe fn test() {
+    //     let res = Self::new(||{} as usize, ||{});
+    // }
 }
 
 //--------------------------------------------------------------------------------------------------
 //  Callable trait definition
 //--------------------------------------------------------------------------------------------------
 pub trait Callable<'a, 'b, I, F, P, R, G, X> {
-    fn call(&'a self, function: Fun<F>, params: P) -> X;
+    fn call(&'a self, function: F, params: P) -> X;
 }
 
 // These are all function traits, to be implemented by functions with that amount of arguments
-pub(crate) trait FnTrait<I, A, P1, R, G> {}
+pub(crate) trait FnTrait<I, A, P, R, G> {}
 
-// These are the unique identifiers of every single function type supported.
-// T should be one of the arguments that follow.
+trait SendFut<T>: Future<Output = T> + Send + 'static {}
+impl<T> SendFut<T> for T where T: Future<Output = T> + Send + 'static {}
 
-pub(crate) type MsgFnType1<'b, A, P1> = fn(&'b mut A, &'b mut <A as Actor>::State, P1) -> Flow<A>;
+//--------------------------------------------------------------------------------------------------
+//  Msg
+//--------------------------------------------------------------------------------------------------
+pub struct MsgId;
+pub(crate) type MsgFn<'b, A, P> = fn(&'b mut A, &'b mut <A as Actor>::State, P) -> Flow<A>;
 
-pub(crate) type MsgFnTypeNostate1<'b, A, P1> = fn(&'b mut A, P1) -> Flow<A>;
-
-//-------------------------------------
-// A: Msg
-//-------------------------------------
-
-impl<'a, A: Actor, P, F> FnTrait<MsgIDParamsState, A, P, (), ()> for F where
+impl<'a, A: Actor, P, F> FnTrait<MsgId, A, P, (), ()> for F where
     F: Fn(&'a mut A, &'a mut <A as Actor>::State, P) -> Flow<A>
 {
 }
 
-impl<'a, 'b, F, P, A, S> Callable<'a, 'b, MsgIDParamsState, F, P, (), (), Msg<'a, A, P>> for S
+impl<'a, 'b, F, P, A, S> Callable<'a, 'b, MsgId, F, P, (), (), Msg<'a, A, P>> for S
 where
     A: Actor,
-    F: FnTrait<MsgIDParamsState, A, P, (), ()>,
-    F: Fn(&'a mut A, &'a mut <A as Actor>::State, P) -> Flow<A>,
+    F: FnTrait<MsgId, A, P, (), ()>,
+    F: Fn(&'a mut A, &'a mut <A as Actor>::State, P) -> Flow<A> + Copy,
     P: Send + 'static,
     S: Addressable<A>,
 {
-    fn call(&'a self, function: Fun<F>, params: P) -> Msg<'a, A, P> {
-        let func: MsgFnType1<'b, A, P> = unsafe { transmute(function.ptr) };
-        self.raw_address().new_msg(func, params)
+    fn call(&'a self, function: F, params: P) -> Msg<'a, A, P> {
+        let func: MsgFn<'b, A, P> = |actor, state, params| {
+            // function(actor, state, params)
+            Flow::Ok
+        };
+
+        let x = func as usize;
+        // self.raw_address().new_msg(func, params)
+        todo!()
     }
 }
 
-//-------------------------------------
-// B: MsgAsync
-//-------------------------------------
+// fn helper(function: fn())
 
-pub(crate) type MsgAsyncFnType<'b, A, P, F> = fn(&'b mut A, &'b mut <A as Actor>::State, P) -> F;
+//--------------------------------------------------------------------------------------------------
+//  AsyncMsg
+//--------------------------------------------------------------------------------------------------
 
-impl<'a, A: Actor, P, F, G> FnTrait<MsgAsyncID, A, P, (), G> for F
+pub struct AsyncMsgId;
+pub(crate) type AsyncMsgFn<'b, A, P, F> = fn(&'b mut A, &'b mut <A as Actor>::State, P) -> F;
+
+impl<'a, A: Actor, P, F, G> FnTrait<AsyncMsgId, A, P, (), G> for F
 where
     F: Fn(&'a mut A, &'a mut <A as Actor>::State, P) -> G,
     G: Future<Output = Flow<A>>,
 {
 }
 
-impl<'a, 'b, F, P, A, G, S> Callable<'a, 'b, MsgAsyncID, F, P, (), G, Msg<'a, A, P>> for S
+impl<'a, 'b, F, P, A, G, S> Callable<'a, 'b, AsyncMsgId, F, P, (), G, Msg<'a, A, P>> for S
 where
     A: Actor,
-    F: FnTrait<MsgAsyncID, A, P, (), G>,
+    F: FnTrait<AsyncMsgId, A, P, (), G>,
     F: Fn(&'b mut A, &'b mut <A as Actor>::State, P) -> G,
     G: Future<Output = Flow<A>> + Send + 'static,
     P: Send + 'static,
     S: Addressable<A>,
 {
-    fn call(&'a self, function: Fun<F>, params: P) -> Msg<'a, A, P> {
-        let func: MsgAsyncFnType<'b, A, P, G> = unsafe { transmute(function.ptr) };
-        self.raw_address().new_msg_async::<P, G>(func, params)
+    fn call(&'a self, function: F, params: P) -> Msg<'a, A, P> {
+        todo!()
+        // let func: AsyncMsgFn<'b, A, P, G> = unsafe { transmute(function.ptr) };
+        // self.raw_address().new_msg_async::<P, G>(func, params)
     }
 }
 
-//-------------------------------------
-// C: Req
-//-------------------------------------
+//--------------------------------------------------------------------------------------------------
+//  Req
+//--------------------------------------------------------------------------------------------------
 
-pub(crate) type ReqFnType<'b, A, P, R> =
-    fn(&'b mut A, &'b mut <A as Actor>::State, P) -> ReqFlow<A, R>;
+pub struct ReqId;
+pub(crate) type ReqFn<'b, A, P, R> = fn(&'b mut A, &'b mut <A as Actor>::State, P) -> ReqFlow<A, R>;
 
-impl<'a, A: Actor, P, F, R> FnTrait<ReqID, A, P, R, ()> for F where
+impl<'a, A: Actor, P, F, R> FnTrait<ReqId, A, P, R, ()> for F where
     F: Fn(&'a mut A, &'a mut <A as Actor>::State, P) -> ReqFlow<A, R>
 {
 }
 
-impl<'a, 'b, F, P, A, R, S> Callable<'a, 'b, ReqID, F, P, R, (), Req<'a, A, P, R>> for S
+impl<'a, 'b, F, P, A, R, S> Callable<'a, 'b, ReqId, F, P, R, (), Req<'a, A, P, R>> for S
 where
     A: Actor,
-    F: FnTrait<ReqID, A, P, R, ()>,
+    F: FnTrait<ReqId, A, P, R, ()>,
     F: Fn(&'b mut A, &'b mut <A as Actor>::State, P) -> ReqFlow<A, R>,
     P: Send + 'static,
     R: Send + 'static,
     S: Addressable<A>,
 {
-    fn call(&'a self, function: Fun<F>, params: P) -> Req<'a, A, P, R> {
-        let func: ReqFnType<'b, A, P, R> = unsafe { transmute(function.ptr) };
-        self.raw_address().new_req(func, params)
+    fn call(&'a self, function: F, params: P) -> Req<'a, A, P, R> {
+        todo!()
+        // let func: ReqFn<'b, A, P, R> = unsafe { transmute(function.ptr) };
+        // self.raw_address().new_req(func, params)
     }
 }
 
-//-------------------------------------
-// D: ReqAsync
-//-------------------------------------
+//--------------------------------------------------------------------------------------------------
+//  AsyncReq
+//--------------------------------------------------------------------------------------------------
 
-pub(crate) type ReqAsyncFnType<'b, A, P, F> = fn(&'b mut A, &'b mut <A as Actor>::State, P) -> F;
+pub struct AsyncReqId;
+pub(crate) type AsyncReqFn<'b, A, P, F> = fn(&'b mut A, &'b mut <A as Actor>::State, P) -> F;
 
-impl<'a, A: Actor, P, F, G, R> FnTrait<ReqAsyncID, A, P, R, G> for F
+impl<'a, A: Actor, P, F, G, R> FnTrait<AsyncReqId, A, P, R, G> for F
 where
     F: Fn(&'a mut A, &'a mut <A as Actor>::State, P) -> G,
     G: Future<Output = ReqFlow<A, R>>,
 {
 }
 
-impl<'a, 'b, F, P, A, G, R, S> Callable<'a, 'b, ReqAsyncID, F, P, R, G, Req<'a, A, P, R>> for S
+impl<'a, 'b, F, P, A, G, R, S> Callable<'a, 'b, AsyncReqId, F, P, R, G, Req<'a, A, P, R>> for S
 where
     A: Actor,
-    F: FnTrait<ReqAsyncID, A, P, R, G>,
+    F: FnTrait<AsyncReqId, A, P, R, G>,
     F: Fn(&'b mut A, &'b mut <A as Actor>::State, P) -> G,
     G: Future<Output = ReqFlow<A, R>> + Send + 'static,
     P: Send + 'static,
     R: Send + 'static,
     S: Addressable<A>,
 {
-    fn call(&'a self, function: Fun<F>, params: P) -> Req<'a, A, P, R> {
-        let func: ReqAsyncFnType<'b, A, P, G> = unsafe { transmute(function.ptr) };
-        self.raw_address().new_req_async::<P, R, G>(func, params)
-    }
-}
-
-//-------------------------------------
-// E: MsgNostate
-//-------------------------------------
-
-impl<'a, A: Actor, P, F> FnTrait<MsgIDNoState, A, P, (), ()> for F where
-    F: Fn(&'a mut A, P) -> Flow<A>
-{
-}
-
-impl<'a, 'b, F, P, A, S> Callable<'a, 'b, MsgIDNoState, F, P, (), (), Msg<'a, A, P>> for S
-where
-    A: Actor,
-    F: FnTrait<MsgIDNoState, A, P, (), ()>,
-    F: Fn(&'b mut A, P) -> Flow<A>,
-    P: Send + 'static,
-    S: Addressable<A>,
-{
-    fn call(&'a self, function: Fun<F>, params: P) -> Msg<'a, A, P> {
-        let func: MsgFnTypeNostate1<'b, A, P> = unsafe { transmute(function.ptr) };
-        self.raw_address().new_msg_nostate(func, params)
-    }
-}
-
-//-------------------------------------
-// F: MsgAsyncNostate
-//-------------------------------------
-
-pub(crate) type MsgAsyncFnNostateType<'b, A, P, F> = fn(&'b mut A, P) -> F;
-
-impl<'a, A: Actor, P, F, G> FnTrait<MsgAsyncIDNoState, A, P, (), G> for F
-where
-    F: Fn(&'a mut A, P) -> G,
-    G: Future<Output = Flow<A>>,
-{
-}
-
-impl<'a, 'b, F, P, A, G, S> Callable<'a, 'b, MsgAsyncIDNoState, F, P, (), G, Msg<'a, A, P>> for S
-where
-    A: Actor,
-    F: FnTrait<MsgAsyncIDNoState, A, P, (), G>,
-    F: Fn(&'b mut A, P) -> G,
-    G: Future<Output = Flow<A>> + Send + 'static,
-    P: Send + 'static,
-    S: Addressable<A>,
-{
-    fn call(&'a self, function: Fun<F>, params: P) -> Msg<'a, A, P> {
-        let func: MsgAsyncFnNostateType<'b, A, P, G> = unsafe { transmute(function.ptr) };
-        self.raw_address()
-            .new_msg_async_nostate::<P, G>(func, params)
-    }
-}
-
-//-------------------------------------
-// G: ReqNostate
-//-------------------------------------
-
-pub(crate) type ReqFnNostateType<'b, A, P, R> = fn(&'b mut A, P) -> ReqFlow<A, R>;
-
-impl<'a, A: Actor, P, F, R> FnTrait<ReqIDNoState, A, P, R, ()> for F where
-    F: Fn(&'a mut A, P) -> ReqFlow<A, R>
-{
-}
-
-impl<'a, 'b, F, P, A, R, S> Callable<'a, 'b, ReqIDNoState, F, P, R, (), Req<'a, A, P, R>> for S
-where
-    A: Actor,
-    F: FnTrait<ReqIDNoState, A, P, R, ()>,
-    F: Fn(&'b mut A, P) -> ReqFlow<A, R>,
-    P: Send + 'static,
-    R: Send + 'static,
-    S: Addressable<A>,
-{
-    fn call(&'a self, function: Fun<F>, params: P) -> Req<'a, A, P, R> {
-        let func: ReqFnNostateType<'b, A, P, R> = unsafe { transmute(function.ptr) };
-        self.raw_address().new_req_nostate(func, params)
-    }
-}
-
-//-------------------------------------
-// H: ReqAsyncNostate
-//-------------------------------------
-
-pub(crate) type ReqAsyncFnNostateType<'b, A, P, F> = fn(&'b mut A, P) -> F;
-
-impl<'a, A: Actor, P, F, G, R> FnTrait<ReqAsyncIDNoState, A, P, R, G> for F
-where
-    F: Fn(&'a mut A, P) -> G,
-    G: Future<Output = ReqFlow<A, R>>,
-{
-}
-
-impl<'a, 'b, F, P, A, G, R, S> Callable<'a, 'b, ReqAsyncIDNoState, F, P, R, G, Req<'a, A, P, R>>
-    for S
-where
-    A: Actor,
-    F: FnTrait<ReqAsyncIDNoState, A, P, R, G>,
-    F: Fn(&'b mut A, P) -> G,
-    G: Future<Output = ReqFlow<A, R>> + Send + 'static,
-    P: Send + 'static,
-    R: Send + 'static,
-    S: Addressable<A>,
-{
-    fn call(&'a self, function: Fun<F>, params: P) -> Req<'a, A, P, R> {
-        let func: ReqAsyncFnNostateType<'b, A, P, G> = unsafe { transmute(function.ptr) };
-        self.raw_address()
-            .new_req_async_nostate::<P, R, G>(func, params)
+    fn call(&'a self, function: F, params: P) -> Req<'a, A, P, R> {
+        todo!()
+        // let func: AsyncReqFn<'b, A, P, G> = unsafe { transmute(function.ptr) };
+        // self.raw_address().new_req_async::<P, R, G>(func, params)
     }
 }

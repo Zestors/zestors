@@ -39,7 +39,8 @@ where
     F: 'a,
 {
     fn send(&'a self, function: Fun<F>, params: P) -> Result<(), ActorDied<P>> {
-        self.call(function, params).send()
+        todo!()
+        // self.call(function, params).send()
     }
 }
 
@@ -53,7 +54,8 @@ where
     F: 'a,
 {
     fn send(&'a self, function: Fun<F>, params: P) -> Result<Reply<R>, ActorDied<P>> {
-        self.call(function, params).send()
+        todo!()
+        // self.call(function, params).send()
     }
 }
 
@@ -81,7 +83,8 @@ where
     F: 'a,
 {
     fn try_send(&'a self, function: Fun<F>, params: P) -> Result<Reply<R>, TrySendError<P>> {
-        self.call(function, params).try_send()
+        todo!()
+        // self.call(function, params).try_send()
     }
 
     fn async_send(
@@ -89,7 +92,8 @@ where
         function: Fun<F>,
         params: P,
     ) -> Pin<Box<dyn Future<Output = Result<Reply<R>, ActorDied<P>>> + 'a>> {
-        Box::pin(async move { self.call(function, params).async_send().await })
+        todo!()
+        // Box::pin(async move { self.call(function, params).async_send().await })
     }
 
     //     fn blocking_send(
@@ -110,7 +114,8 @@ where
     F: 'a,
 {
     fn try_send(&'a self, function: Fun<F>, params: P) -> Result<(), TrySendError<P>> {
-        self.call(function, params).try_send()
+        todo!()
+        // self.call(function, params).try_send()
     }
 
     fn async_send(
@@ -118,7 +123,8 @@ where
         function: Fun<F>,
         params: P,
     ) -> Pin<Box<dyn Future<Output = Result<(), ActorDied<P>>> + 'a>> {
-        Box::pin(async move { self.call(function, params).async_send().await })
+        todo!()
+        // Box::pin(async move { self.call(function, params).async_send().await })
     }
 
     // fn blocking_send(&'a self, function: RemoteFunction<F>, params: P) -> Result<(), ActorDied<P>> {

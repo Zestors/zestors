@@ -18,3 +18,4 @@ pub use anyhow::Error as AnyhowError;
 
 pub use flows::{InitFlow, ExitFlow, Flow, ReqFlow};
 pub use actor::{Actor, ExitReason, Spawn, spawn};
+pub use callable::{Callable};
