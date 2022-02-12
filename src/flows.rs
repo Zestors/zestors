@@ -234,7 +234,7 @@ impl<A: Actor, E> FromResidual<Result<Infallible, E>> for InitFlow<A> {
     fn from_residual(residual: Result<Infallible, E>) -> Self {
         match residual {
             Ok(_inf) => unreachable!(),
-            Err(e) => InitFlow::Exit,
+            Err(_) => InitFlow::Exit,
         }
     }
 }

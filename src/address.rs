@@ -6,7 +6,7 @@ use crate::{
     flows::{InternalFlow, MsgFlow, ReqFlow},
     messaging::{Msg, Req},
     packet::{HandlerFn, HandlerPacket, Packet},
-    spawn, inbox::PacketSender,
+    inbox::PacketSender,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -257,7 +257,6 @@ pub(crate) type AsyncReqFn<'b, A, P, F> = fn(&'b mut A, &'b mut <A as Actor>::St
 mod test {
     use super::*;
     use crate::actor::ExitReason;
-    use crate::actor::Spawn;
     use crate::flows::{ExitFlow, InitFlow};
     use crate::state::State;
 
@@ -267,15 +266,15 @@ mod test {
     //     });
     // }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn all_functions_dont_segfault_test() -> anyhow::Result<()> {
-        let (child, address) = spawn::<MyActor>(MyActor);
+        let (child, address) = crate::spawn::<MyActor>(MyActor);
 
         let res1 = address.msg(10, MyActor::test_a).send()?;
 
         Address::msg(&&&&&address, 10, |_, _, _| MsgFlow::Ok);
 
-        let val: u32 = 10;
+        let _val: u32 = 10;
 
         child.msg(10, |_, _, _| MsgFlow::Ok);
 
@@ -371,6 +370,7 @@ mod test {
     #[derive(Debug)]
     pub struct MyActor;
 
+    #[allow(dead_code, unused_variables)]
     impl MyActor {
         fn test_e(&mut self, c: u32) -> MsgFlow<Self> {
             MsgFlow::Ok
@@ -413,6 +413,7 @@ mod test {
         }
     }
 
+    #[allow(dead_code, unused_variables)]
     impl Actor for MyActor {
         type ExitWith = u32;
 

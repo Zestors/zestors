@@ -1,13 +1,12 @@
 use crate::{
     actor::Actor,
-    address::Address,
     errors::{
         ActorDied, ActorDiedAfterSending, SendRecvError, TryRecvError, TrySendError,
         TrySendRecvError,
     },
     packet::{Packet}, inbox::{PacketSender, PacketTrySendError, PacketSendError, IsUnbounded, IsBounded},
 };
-use futures::{Future, FutureExt, StreamExt};
+use futures::{Future, FutureExt};
 use std::{marker::PhantomData, task::Poll};
 
 //--------------------------------------------------------------------------------------------------
@@ -52,7 +51,7 @@ impl<T> Future for Reply<T> {
     ) -> Poll<Self::Output> {
         self.receiver.poll_unpin(cx).map(|ready| match ready {
             Ok(t) => Ok(t),
-            Err(e) => Err(ActorDiedAfterSending),
+            Err(_e) => Err(ActorDiedAfterSending),
         })
     }
 }
@@ -155,7 +154,7 @@ where
             Err(PacketTrySendError::Disconnected(packet)) => {
                 Err(SendRecvError::ActorDied(packet.get_params_req::<P, R>()))
             }
-            Err(PacketTrySendError::Full(packet)) => unreachable!("should be unbounded"),
+            Err(PacketTrySendError::Full(_packet)) => unreachable!("should be unbounded"),
         }
     }
 
@@ -177,7 +176,7 @@ where
                 PacketTrySendError::Disconnected(packet) => {
                     Err(SendRecvError::ActorDied(packet.get_params_req::<P, R>()))
                 }
-                PacketTrySendError::Full(packet) => {
+                PacketTrySendError::Full(_packet) => {
                     unreachable!("Should be unbounded!")
                 }
             },

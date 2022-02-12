@@ -153,7 +153,7 @@ impl<A: Actor> Packet<A> {
     }
 
     pub(crate) fn get_params_req<P: 'static, R: 'static>(self) -> P {
-        let (params, r): (P, InternalRequest<R>) = self.handler_packet.data.downcast_req().unwrap();
+        let (params, _r): (P, InternalRequest<R>) = self.handler_packet.data.downcast_req().unwrap();
         params
     }
 
