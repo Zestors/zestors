@@ -1,20 +1,18 @@
+use crate::{
+    actor::Actor,
+    flows::InternalFlow,
+    messaging::{InternalRequest, Reply},
+};
+use futures::Future;
 use std::{any::Any, pin::Pin};
 
-use futures::{Future, Stream, StreamExt};
+//--------------------------------------------------------------------------------------------------
+//  HandlerFn
+//--------------------------------------------------------------------------------------------------
 
-use crate::{
-    actor::{Actor},
-    flows::{Flow, InternalFlow},
-    messaging::{InnerRequest, PacketReceiver, PacketSender, Reply},
-};
-
-//-------------------------------------
-// HandlerFn
-//-------------------------------------
-
-pub(crate) type HandlerFnSync<A> =
+pub(crate) type SyncHandlerFn<A> =
     unsafe fn(&mut A, &mut <A as Actor>::State, HandlerPacket) -> InternalFlow<A>;
-pub(crate) type HandlerFnAsync<A> =
+pub(crate) type AsyncHandlerFn<A> =
     for<'a> unsafe fn(
         &'a mut A,
         &'a mut <A as Actor>::State,
@@ -22,37 +20,19 @@ pub(crate) type HandlerFnAsync<A> =
     ) -> Pin<Box<dyn Future<Output = InternalFlow<A>> + 'a + Send>>;
 
 pub(crate) enum HandlerFn<A: Actor + ?Sized> {
-    Sync(HandlerFnSync<A>),
-    Async(HandlerFnAsync<A>),
+    Sync(SyncHandlerFn<A>),
+    Async(AsyncHandlerFn<A>),
 }
 
-//-------------------------------------
-// Inbox stuff
-//-------------------------------------
-
-pub unsafe trait InboxType {}
-
-unsafe impl InboxType for Unbounded {}
-unsafe impl InboxType for Bounded {}
-
-pub trait IsBounded {}
-pub trait IsUnbounded {}
-
-impl IsUnbounded for Unbounded {}
-impl IsBounded for Bounded {}
-
-pub struct Unbounded;
-pub struct Bounded;
-
-//-------------------------------------
-// Packet
-//-------------------------------------
+//--------------------------------------------------------------------------------------------------
+//  Packet
+//--------------------------------------------------------------------------------------------------
 
 /// A single [Packet] which is sent to call a function remotely. It contains
 /// a pointer to the correct handler function, as well as a [HandlerPacket].
-pub struct Packet<A: Actor + ?Sized> {
-    pub(crate) handler_fn: HandlerFn<A>,
-    pub(crate) handler_packet: HandlerPacket,
+pub(crate) struct Packet<A: Actor + ?Sized> {
+    handler_fn: HandlerFn<A>,
+    handler_packet: HandlerPacket,
 }
 
 impl<A: Actor> Packet<A> {
@@ -74,13 +54,37 @@ impl<A: Actor> std::fmt::Debug for Packet<A> {
     }
 }
 
+//--------------------------------------------------------------------------------------------------
+//  HandlerPacket
+//--------------------------------------------------------------------------------------------------
+
 /// The [Packet] which is unpacked by the handler function. contains an untyped fn_pointer
 /// with [PacketData]
 #[derive(Debug)]
 pub(crate) struct HandlerPacket {
-    pub(crate) fn_ptr: usize,
-    pub(crate) data: PacketData,
+    fn_ptr: usize,
+    data: PacketData,
 }
+
+impl HandlerPacket {
+    pub(crate) fn downcast_msg<P: 'static>(self) -> P {
+        self.data.downcast_msg().unwrap()
+    }
+
+    pub(crate) fn downcast_req<P: 'static, R: 'static>(
+        self,
+    ) -> (P, InternalRequest<R>) {
+        self.data.downcast_req().unwrap()
+    }
+
+    pub(crate) fn fn_ptr(&self) -> usize {
+        self.fn_ptr
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+//  PacketData
+//--------------------------------------------------------------------------------------------------
 
 /// Contains either just parameters, or parameters with an [InnerRequest]
 #[derive(Debug)]
@@ -93,7 +97,7 @@ impl PacketData {
 
     pub(crate) fn new_req<P: 'static + Send, R: 'static + Send>(
         params: P,
-        request: InnerRequest<R>,
+        request: InternalRequest<R>,
     ) -> Self {
         Self(Box::new((params, request)))
     }
@@ -105,7 +109,9 @@ impl PacketData {
         }
     }
 
-    pub(crate) fn downcast_req<P: 'static, R: 'static>(self) -> Result<(P, InnerRequest<R>), Self> {
+    pub(crate) fn downcast_req<P: 'static, R: 'static>(
+        self,
+    ) -> Result<(P, InternalRequest<R>), Self> {
         match self.0.downcast() {
             Ok(params) => Ok(*params),
             Err(boxed) => Err(Self(boxed)),
@@ -133,7 +139,7 @@ impl<A: Actor> Packet<A> {
         fn_ptr: usize,
         params: P,
     ) -> (Self, Reply<R>) {
-        let (req, reply) = InnerRequest::<R>::new();
+        let (req, reply) = InternalRequest::<R>::new();
 
         let packet = Self {
             handler_fn,
@@ -146,32 +152,12 @@ impl<A: Actor> Packet<A> {
         (packet, reply)
     }
 
-    pub fn get_params_req<P: 'static, R: 'static>(self) -> P {
-        let (params, r): (P, InnerRequest<R>) = self.handler_packet.data.downcast_req().unwrap();
+    pub(crate) fn get_params_req<P: 'static, R: 'static>(self) -> P {
+        let (params, r): (P, InternalRequest<R>) = self.handler_packet.data.downcast_req().unwrap();
         params
     }
 
-    pub fn get_params_msg<P: 'static>(self) -> P {
+    pub(crate) fn get_params_msg<P: 'static>(self) -> P {
         self.handler_packet.data.downcast_msg().unwrap()
-    }
-}
-
-impl<A: Actor> Stream for PacketReceiver<A> {
-    type Item = Packet<A>;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        self.as_mut().receiver.poll_next_unpin(cx)
-    }
-}
-
-impl<A: Actor> Drop for PacketReceiver<A> {
-    fn drop(&mut self) {
-        self.receiver.close();
-        while let Ok(packet) = self.receiver.try_recv() {
-            drop(packet)
-        }
     }
 }

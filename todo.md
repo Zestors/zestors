@@ -7,11 +7,12 @@
 [x] process.rs 
 [x] state.rs 
 [x] actor.rs
-[ ] callable.rs 
-[ ] messaging.rs 
-[ ] packets.rs 
-[ ] sending.rs 
+[x] messaging.rs
+[x] inbox.rs
+[ ] packet.rs -> Can be much better
 [ ] lib.rs
+    [x] callable.rs
+    [x] sending.rs 
 
 # General
 [ ] Create derive(Address) macro

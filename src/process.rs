@@ -5,7 +5,7 @@ use futures::{Future, FutureExt};
 use crate::{
     abort::AbortSender,
     actor::{Actor, InternalExitReason},
-    address::{Address, Addressable},
+    address::{Address, Addressable, RawAddress},
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -57,10 +57,10 @@ impl<A: Actor> Process<A> {
         self.abort_sender.is_none()
     }
 
-    /// Get a reference to the address of this process. (`Actor::Address`)
-    pub fn address(&self) -> &A::Address {
-        &self.address
-    }
+    // /// Get a reference to the address of this process. (`Actor::Address`)
+    // pub fn raw_address(&self) -> &Add {
+    //     &self.address
+    // }
 
     /// Whether this process is attached.
     pub fn is_attatched(&self) -> bool {
@@ -117,6 +117,10 @@ impl<A: Actor> Process<A> {
 }
 
 //--------------------------------------------------------------------------------------------------
+//  msg and req methods for process
+//--------------------------------------------------------------------------------------------------
+
+//--------------------------------------------------------------------------------------------------
 //  implement traits for Process
 //--------------------------------------------------------------------------------------------------
 
@@ -170,6 +174,16 @@ impl<A: Actor> Drop for Process<A> {
         }
     }
 }
+
+impl<A: Actor> RawAddress for Process<A> {
+    type Actor = A;
+    
+    fn raw_address(&self) -> &Address<A> {
+        &self.address.raw_address()
+    }
+}
+
+impl<A: Actor> Addressable<A> for Process<A> {}
 
 //--------------------------------------------------------------------------------------------------
 //  ProcessExit
