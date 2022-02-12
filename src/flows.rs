@@ -10,7 +10,7 @@ use crate::{action::Action, actor::Actor};
 //--------------------------------------------------------------------------------------------------
 
 /// The flow for handling a `Req`. Similarly to how a lot of functions return a `Result<T, E>`,
-/// when using `Zestors`, `Actor` functions instead return `ReqFlow<Self, R>` or `Flow<Self>`.
+/// when using `Zestors`, `Actor` functions instead return `ReqFlow<Self, R>` or `MsgFlow<Self>`.
 ///
 /// A `ReqFlow` indicates that a [Reply] will be sent back to the caller. The first generic of 
 /// `ReqFlow` should always be `Self`, and the second parameter can be return type of this [Req].
@@ -43,22 +43,22 @@ pub enum ReqFlow<A: Actor + ?Sized, R> {
 
 /// The flow for handling a `Msg` or an `Action`. Similarly to how a lot of functions return a
 /// `Result<T, E>`, when using `Zestors`, `Actor` functions instead return `ReqFlow<Self, R>`
-/// or `Flow<Self>`. The generic parameter of `Flow` should always be `Self`.
+/// or `MsgFlow<Self>`. The generic parameter of `MsgFlow` should always be `Self`.
 ///
-/// Errors for `Flow` can be propagated in 1 by applying `?` directly. This propagates the error
+/// Errors for `MsgFlow` can be propagated in 1 by applying `?` directly. This propagates the error
 /// directly into an `ExitWithError(E)`, which can subsequently be handled by the `handle_exit()`
 /// callback. Errors that can be propagated here must implement `Into<Self::ExitError>`.
 ///
 /// ### Care!
-/// If `Flow::Before` is the return type of an `Action` from another `Flow::Before`, then this
+/// If `MsgFlow::Before` is the return type of an `Action` from another `MsgFlow::Before`, then this
 /// Action will be silently ignored and NOT executed!
 #[derive(Debug)]
-pub enum Flow<A: Actor + ?Sized> {
+pub enum MsgFlow<A: Actor + ?Sized> {
     /// Ok.
     Ok,
     /// Right before handling the next message, execute this `Action`.
     /// ### Care!
-    /// If this `Action` returns another `Flow::Before`, then this `Action` will be silently ignored
+    /// If this `Action` returns another `MsgFlow::Before`, then this `Action` will be silently ignored
     /// and NOT executed!
     Before(Action<A>),
     /// Exit with an error.
@@ -125,13 +125,13 @@ impl<A: Actor, R> ReqFlow<A, R> {
     }
 }
 
-impl<A: Actor> Flow<A> {
+impl<A: Actor> MsgFlow<A> {
     pub(crate) fn into_internal(self) -> InternalFlow<A> {
         match self {
-            Flow::Ok => InternalFlow::Ok,
-            Flow::Before(handler) => InternalFlow::Before(handler),
-            Flow::ExitWithError(error) => InternalFlow::ErrorExit(error),
-            Flow::NormalExit(normal) => InternalFlow::NormalExit(normal),
+            MsgFlow::Ok => InternalFlow::Ok,
+            MsgFlow::Before(handler) => InternalFlow::Before(handler),
+            MsgFlow::ExitWithError(error) => InternalFlow::ErrorExit(error),
+            MsgFlow::NormalExit(normal) => InternalFlow::NormalExit(normal),
         }
     }
 }
@@ -218,14 +218,14 @@ where
     }
 }
 
-impl<A: Actor, E> FromResidual<Result<Infallible, E>> for Flow<A>
+impl<A: Actor, E> FromResidual<Result<Infallible, E>> for MsgFlow<A>
 where
     E: Into<A::ExitError>,
 {
     fn from_residual(residual: Result<Infallible, E>) -> Self {
         match residual {
             Ok(_inf) => unreachable!(),
-            Err(e) => Flow::ExitWithError(e.into()),
+            Err(e) => MsgFlow::ExitWithError(e.into()),
         }
     }
 }

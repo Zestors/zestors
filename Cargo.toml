@@ -7,15 +7,13 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "^1", features = ["full"] }
-derive_more = "^0.99"
 futures = "^0.3"
 async-trait = "^0.1"
 anyhow = "^1"
 oneshot = "^0.1"
-flume = "0.10"
-uuid = { version = "0.8", features = ["v4"] }
-tokio-stream = "0.1.8"
 async-channel = "1.6"
 zestors-codegen = { path = "../zestors-codegen" }
-lazy_static = "1"
-indexmap = "1.8"
+# indexmap = "1.8"
+
+[dev-dependencies]
+derive_more = "^0.99"

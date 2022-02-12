@@ -8,13 +8,12 @@ use futures::{
 
 use crate::{
     abort::{AbortReceiver, AbortSender, ToAbort},
-    address::{Address, Addressable},
-    flows::{ExitFlow, Flow, InitFlow, InternalFlow},
-    messaging::{NewInbox, PacketReceiver},
-    packets::{Packet, Unbounded},
+    address::{Address, RawAddress},
+    flows::{ExitFlow, InitFlow, InternalFlow, MsgFlow},
+    packet::{Packet},
     process::Process,
     state::{ActorState, State, StreamItem},
-    AnyhowError,
+    AnyhowError, inbox::{Unbounded, Capacity, packet_channel, PacketReceiver},
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -108,20 +107,22 @@ pub trait Actor: Send + Sync + 'static + Sized {
 
     /// The address that is returned when this actor is spawned.
     ///
-    /// The default value for this is [Address], which works fine for sending [Msg]s or [Req]sts.
+    /// The default value for this is `Address<Self>`, which works fine for sending [Msg]s or [Req]sts.
     /// However, since [Address] is not defined in your local crate, it's impossible to directly
-    /// implement methods on this. For this reason, it is possible to exchange the `Address<Self>`
-    /// for a custom struct (like `MyActorAddress`).
+    /// implement methods on this. Therefore, we allow you to pass in a custom address.
     ///
-    /// This struct must implement [From<Address<Self>>] and [Addressable<Self>] in order to be
+    /// This struct must implement [From<Address<Self>>] and [RawAddress<Actor = Self>] in order to be
     /// directly usable as a [Actor::Address].
-    type Address: From<Address<Self>> + Addressable<Self> + Send + Clone = Address<Self>;
+    /// 
+    /// Custom addresses can be derived using [crate::derive::Address], and
+    /// optionally [crate::derive::Addressable].
+    type Address: From<Address<Self>> + RawAddress<Actor = Self> + Send = Address<Self>;
 
     /// Whether the inbox should be [Bounded] or [Unbounded]. If setting this to [Bounded],
     /// don't forget to set [Actor::INBOX_CAPACITY] as well.
     ///
     /// The default value for this is [Unbounded].
-    type Inbox: NewInbox<Self, Self::Inbox> = Unbounded;
+    type Inbox: Capacity<Self::Inbox> = Unbounded;
 
     /// If the [Actor::Inbox] is [Bounded], this will be the inbox capacity. If [Unbounded], this
     /// value does not do anything.
@@ -153,6 +154,21 @@ pub trait Actor: Send + Sync + 'static + Sized {
     fn handle_exit(self, state: &mut Self::State, reason: ExitReason<Self>) -> ExitFlow<Self>;
 }
 
+pub trait FromAddress<A: Actor> {
+    fn from_raw(address: Address<A>) -> Self;
+    fn from_raw_ref(address: &Address<A>) -> &Self;
+}
+
+impl<'a, A: Actor> FromAddress<A> for Address<A> {
+    fn from_raw(address: Address<A>) -> Self {
+        address
+    }
+
+    fn from_raw_ref(address: &Address<A>) -> &Self {
+        address
+    }
+}
+
 //--------------------------------------------------------------------------------------------------
 //  Spawn
 //--------------------------------------------------------------------------------------------------
@@ -162,20 +178,22 @@ pub trait Actor: Send + Sync + 'static + Sized {
 /// spawn::<MyActor>(init);
 /// ```
 pub fn spawn<A: Actor>(init: A::Init) -> (Process<A>, A::Address) {
-    // create the packet channel which is either bounded or unbounded
-    let (sender, receiver) = <A::Inbox as NewInbox<A, A::Inbox>>::new_channel(A::INBOX_CAPACITY);
+    // Get the capacity for the channel.
+    let capacity = <A::Inbox as Capacity<A::Inbox>>::capacity(A::INBOX_CAPACITY);
+    // Create the sender and receiver.
+    let (sender, receiver) = packet_channel(capacity);
+    // Create the raw address from this sender.
+    let raw_address = Address::new(sender);
     // create the abort sender
     let (abort_sender, abort_receiver) = AbortSender::new();
-    // create the address
-    let address = <A::Address as From<Address<A>>>::from(Address::new(sender));
     // create the state
-    let state = A::State::starting(address.clone());
+    let state = A::State::starting(raw_address.clone().into());
     // spawn the task
     let handle = tokio::task::spawn(event_loop(init, state, receiver, abort_receiver));
     // wrap handle in a new process
-    let process = Process::new(handle, address.clone(), abort_sender, true);
+    let process = Process::new(handle, raw_address.clone().into(), abort_sender, true);
     // return the process and the address
-    (process, address)
+    (process, raw_address.into())
 }
 
 pub trait Spawn: Actor<Init = Self> {
@@ -247,9 +265,9 @@ async fn event_loop<A: Actor<State = S>, S: ActorState<A>>(
         //-------------------------------------
         if let Some(action) = optional_before.take() {
             match action.handle(&mut actor, &mut state).await {
-                Flow::Ok => (),
-                Flow::Before(_) => (), // ignore before from before
-                Flow::ExitWithError(e) => {
+                MsgFlow::Ok => (),
+                MsgFlow::Before(_) => (), // ignore before from before
+                MsgFlow::ExitWithError(e) => {
                     match <A as Actor>::handle_exit(actor, &mut state, ExitReason::Error(e)) {
                         ExitFlow::ContinueExit(exit) => return InternalExitReason::Handled(exit),
                         ExitFlow::Resume(temp_actor) => actor = temp_actor,
@@ -259,7 +277,7 @@ async fn event_loop<A: Actor<State = S>, S: ActorState<A>>(
                         }
                     }
                 }
-                Flow::NormalExit(n) => {
+                MsgFlow::NormalExit(n) => {
                     match <A as Actor>::handle_exit(actor, &mut state, ExitReason::Normal(n)) {
                         ExitFlow::ContinueExit(exit) => return InternalExitReason::Handled(exit),
                         ExitFlow::Resume(temp_actor) => actor = temp_actor,
@@ -359,9 +377,9 @@ async fn event_loop<A: Actor<State = S>, S: ActorState<A>>(
         //-------------------------------------
         if let Some(action) = optional_after.take() {
             match action.handle(&mut actor, &mut state).await {
-                Flow::Ok => (),
-                Flow::Before(_) => (), // ignore before from before
-                Flow::ExitWithError(e) => {
+                MsgFlow::Ok => (),
+                MsgFlow::Before(_) => (), // ignore before from before
+                MsgFlow::ExitWithError(e) => {
                     match <A as Actor>::handle_exit(actor, &mut state, ExitReason::Error(e)) {
                         ExitFlow::ContinueExit(exit) => return InternalExitReason::Handled(exit),
                         ExitFlow::Resume(temp_actor) => actor = temp_actor,
@@ -371,7 +389,7 @@ async fn event_loop<A: Actor<State = S>, S: ActorState<A>>(
                         }
                     }
                 }
-                Flow::NormalExit(n) => {
+                MsgFlow::NormalExit(n) => {
                     match <A as Actor>::handle_exit(actor, &mut state, ExitReason::Normal(n)) {
                         ExitFlow::ContinueExit(exit) => return InternalExitReason::Handled(exit),
                         ExitFlow::Resume(temp_actor) => actor = temp_actor,
