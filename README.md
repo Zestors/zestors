@@ -2,7 +2,7 @@
   <p>
 
 [![Crates.io version shield](https://img.shields.io/crates/v/zestors.svg)](https://crates.io/crates/zestors)
-[![Docs](https://docs.rs/zestors/badge.svg)](https://crates.io/crates/zestors)
+[![Docs](https://docs.rs/zestors/badge.svg)](https://docs.rs/zestors/0.0.1/)
 [![Crates.io license shield](https://img.shields.io/crates/l/zestors.svg)](https://crates.io/crates/zestors)
 
  </p>
