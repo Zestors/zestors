@@ -24,8 +24,8 @@
 //! [process::Process]. Addresses can be freely cloned, while there can only ever be a single
 //! process. Both processes and addresses can be used to send messages to an [actor::Actor].
 //!
-//! Sending messages can be done through associated methods `.msg()`, `.msg_async()`, `req()`, and
-//! `req_async()`. Functions passed to these functions will be executed on the actor. Functions
+//! Sending messages can be done through associated methods `.msg()`, `.msg_async()`, `.req()`, and
+//! `.req_async()`. Functions passed to these functions will be executed on the actor. Functions
 //! to `msg` should return a [flows::MsgFlow], while `req` functions should return a
 //! [flows::ReqFlow].
 //!
