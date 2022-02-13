@@ -1,13 +1,14 @@
 [package]
 name = "zestors"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "A simple, fast and flexible actor framework for building robust distributed applications, heavily insipired by Erlang."
-# homepage = 
+repository = "https://github.com/Zestors/zestors"
+keywords = ["actor", "actors", "actor-system", "actor-framework", "process"]
+categories = ["asynchronous", "concurrency"]
 
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 tokio = { version = "^1", features = ["full"] }
@@ -16,7 +17,7 @@ async-trait = "^0.1"
 anyhow = "^1"
 oneshot = "^0.1"
 async-channel = "1.6"
-zestors-codegen = { path = "../zestors-codegen" }
+zestors-codegen = "0.0.2"
 # indexmap = "1.8"
 
 [dev-dependencies]

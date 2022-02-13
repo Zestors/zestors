@@ -51,8 +51,8 @@ use zestors::{
 //
 // For this example we will use a (very) simple calculator:
 
-#`derive(Address)` // optionally also derive (Addressable)
-#`address(CalculatorAddress)` // (optional) name for generated address, this the default.
+#[derive(Address)] // optionally also derive (Addressable)
+#[address(CalculatorAddress)] // (optional) name for generated address, this the default.
 struct Calculator {
     count: i64,
 }
@@ -134,7 +134,7 @@ impl CalculatorAddress {
 
 // We're all done with out simple actor. We can now use it!
 
-#`tokio::main`
+#[tokio::main]
 pub async fn main() {
     // First we spawn the actor, this returns a `Process<Calculator`, and a
     // `CalculatorAddress`.
