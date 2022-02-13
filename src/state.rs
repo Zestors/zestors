@@ -124,35 +124,3 @@ impl<A: Actor> Stream for State<A> {
 }
 
 impl<A: Actor> Unpin for State<A> {}
-
-//--------------------------------------------------------------------------------------------------
-//  MinimalState: a minimal state that is as fast as possible
-//--------------------------------------------------------------------------------------------------
-
-/// A minimal state, for when speed matters and other functionality is not necessary.
-pub struct MinimalState<A: Actor + ?Sized> {
-    address: A::Address,
-}
-
-impl<A: Actor> ActorState<A> for MinimalState<A> {
-    fn starting(address: A::Address) -> Self {
-        Self { address }
-    }
-
-    fn address(&self) -> &A::Address {
-        &self.address
-    }
-}
-
-impl<A: Actor> Stream for MinimalState<A> {
-    type Item = StreamItem<A>;
-
-    fn poll_next(
-        self: Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        Poll::Ready(None)
-    }
-}
-
-impl<A: Actor> Unpin for MinimalState<A> {}

@@ -1,6 +1,7 @@
-use crate::{packet::Packet, Actor};
 use futures::{Stream, StreamExt};
 use std::pin::Pin;
+
+use crate::{packet::Packet, actor::Actor};
 
 //--------------------------------------------------------------------------------------------------
 //  Capacity

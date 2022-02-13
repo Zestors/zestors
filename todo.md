@@ -9,12 +9,12 @@
 [x] actor.rs
 [x] messaging.rs
 [x] inbox.rs
-[ ] packet.rs -> Can be much better
+[x] packet.rs -> Can be much better
 [ ] lib.rs
     [x] callable.rs
     [x] sending.rs 
 
 # General
-[ ] Create derive(Address) macro
+[x] Create derive(Address) macro
 [ ] Crate documentation
 [ ] Tests

@@ -10,10 +10,11 @@ use crate::{
     abort::{AbortReceiver, AbortSender, ToAbort},
     address::{Address, RawAddress},
     flows::{ExitFlow, InitFlow, InternalFlow, MsgFlow},
-    packet::{Packet},
+    inbox::{packet_channel, Capacity, PacketReceiver, Unbounded},
+    packet::Packet,
     process::Process,
     state::{ActorState, State, StreamItem},
-    AnyhowError, inbox::{Unbounded, Capacity, packet_channel, PacketReceiver},
+    AnyhowError,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -48,7 +49,7 @@ use crate::{
 ///
 /// ### Basic implementation:
 /// ```
-/// # use zestors::{InitFlow, ExitFlow, ExitReason, Actor, Spawn, spawn};
+/// # use zestors::{flows::{InitFlow, ExitFlow}, actor::{ExitReason, Actor, Spawn, spawn}};
 /// #
 /// struct MyActor {}
 ///
@@ -113,7 +114,7 @@ pub trait Actor: Send + Sync + 'static + Sized {
     ///
     /// This struct must implement [From<Address<Self>>] and [RawAddress<Actor = Self>] in order to be
     /// directly usable as a [Actor::Address].
-    /// 
+    ///
     /// Custom addresses can be derived using [crate::derive::Address], and
     /// optionally [crate::derive::Addressable].
     type Address: From<Address<Self>> + RawAddress<Actor = Self> + Send = Address<Self>;
@@ -152,21 +153,6 @@ pub trait Actor: Send + Sync + 'static + Sized {
     /// this function is called with the reason. It is possible to either continue the exit,
     /// or resume execution instead.
     fn handle_exit(self, state: &mut Self::State, reason: ExitReason<Self>) -> ExitFlow<Self>;
-}
-
-pub trait FromAddress<A: Actor> {
-    fn from_raw(address: Address<A>) -> Self;
-    fn from_raw_ref(address: &Address<A>) -> &Self;
-}
-
-impl<'a, A: Actor> FromAddress<A> for Address<A> {
-    fn from_raw(address: Address<A>) -> Self {
-        address
-    }
-
-    fn from_raw_ref(address: &Address<A>) -> &Self {
-        address
-    }
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -352,6 +338,7 @@ async fn event_loop<A: Actor<State = S>, S: ActorState<A>>(
                                 return InternalExitReason::Handled(exit)
                             }
                             ExitFlow::Resume(temp_actor) => actor = temp_actor,
+
                             ExitFlow::ResumeAndBefore(temp_actor, action) => {
                                 actor = temp_actor;
                                 optional_before = Some(action);

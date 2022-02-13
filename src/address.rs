@@ -268,7 +268,7 @@ mod test {
 
     #[tokio::test]
     async fn all_functions_dont_segfault_test() -> anyhow::Result<()> {
-        let (child, address) = crate::spawn::<MyActor>(MyActor);
+        let (child, address) = crate::actor::spawn::<MyActor>(MyActor);
 
         let res1 = address.msg(10, MyActor::test_a).send()?;
 

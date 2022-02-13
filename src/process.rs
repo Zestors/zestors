@@ -57,11 +57,6 @@ impl<A: Actor> Process<A> {
         self.abort_sender.is_none()
     }
 
-    // /// Get a reference to the address of this process. (`Actor::Address`)
-    // pub fn raw_address(&self) -> &Add {
-    //     &self.address
-    // }
-
     /// Whether this process is attached.
     pub fn is_attatched(&self) -> bool {
         self.is_attatched
@@ -115,10 +110,6 @@ impl<A: Actor> Process<A> {
         }
     }
 }
-
-//--------------------------------------------------------------------------------------------------
-//  msg and req methods for process
-//--------------------------------------------------------------------------------------------------
 
 //--------------------------------------------------------------------------------------------------
 //  implement traits for Process

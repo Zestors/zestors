@@ -10,7 +10,7 @@ pub struct ActorDied<T>(pub T);
 pub enum SendRecvError<T> {
     /// The [Actor] has died before the [Req] could be sent.
     ActorDied(T),
-    /// The [Actor] has died after the [Req] was sent.
+    /// The [Actor] has died after the [Req] was sent, but before it could reply.
     ActorDiedAfterSending,
 }
 
@@ -31,7 +31,7 @@ pub enum TrySendRecvError<T> {
     NoSpace(T),
     /// The [Actor] has died before the [Req] could be sent.
     ActorDied(T),
-    /// The [Actor] has died after the [Req] was sent.
+    /// The [Actor] has died after the [Req] was sent, but before it could reply.
     ActorDiedAfterSending,
 }
 
@@ -44,9 +44,9 @@ pub struct ActorDiedAfterSending;
 /// Error returned when trying to receive a [Reply] from an [Actor].
 #[derive(Debug)]
 pub enum TryRecvError {
-    /// The [Actor] has died after the [Req] was sent.
+    /// The [Actor] has died after the [Req] was sent, but before it could reply.
     ActorDiedAfterSending,
-    /// The [Actor] has not yet sent back a [Reply]
+    /// The [Actor] has not yet sent back a [Reply], but is still alive.
     NoReplyYet,
 }
 
