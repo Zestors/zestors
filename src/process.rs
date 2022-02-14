@@ -1,6 +1,7 @@
 use std::any::Any;
 
 use futures::{Future, FutureExt};
+use uuid::Uuid;
 
 use crate::{
     abort::AbortSender,
@@ -26,7 +27,7 @@ pub struct Process<A: Actor> {
     abort_sender: Option<AbortSender>,
     address: A::Address,
     is_attached: bool,
-    registration: Option<u128>
+    registration: Option<Uuid>
 }
 
 //--------------------------------------------------------------------------------------------------
