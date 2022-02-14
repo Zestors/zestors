@@ -25,7 +25,8 @@ pub struct Process<A: Actor> {
     handle: Option<tokio::task::JoinHandle<InternalExitReason<A>>>,
     abort_sender: Option<AbortSender>,
     address: A::Address,
-    is_attatched: bool,
+    is_attached: bool,
+    registration: Option<u128>
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -37,13 +38,14 @@ impl<A: Actor> Process<A> {
         handle: tokio::task::JoinHandle<InternalExitReason<A>>,
         address: A::Address,
         abort_sender: AbortSender,
-        attatched: bool,
+        attached: bool,
     ) -> Self {
         Self {
             handle: Some(handle),
             abort_sender: Some(abort_sender),
             address,
-            is_attatched: attatched,
+            is_attached: attached,
+            registration: None
         }
     }
 
@@ -58,22 +60,22 @@ impl<A: Actor> Process<A> {
     }
 
     /// Whether this process is attached.
-    pub fn is_attatched(&self) -> bool {
-        self.is_attatched
+    pub fn is_attached(&self) -> bool {
+        self.is_attached
     }
 
-    /// Detatch this process, it will not be aborted if this [Process] is dropped. If called on
-    /// a process which has already been detatched, nothing happens.
-    pub fn detatch(&mut self) {
-        self.is_attatched = false;
+    /// detach this process, it will not be aborted if this [Process] is dropped. If called on
+    /// a process which has already been detached, nothing happens.
+    pub fn detach(&mut self) {
+        self.is_attached = false;
     }
 
-    /// Attatch this process, it will now be aborted if this [Process] is dropped. The actor
+    /// Attach this process, it will now be aborted if this [Process] is dropped. The actor
     /// will first receive a soft_abort, with a hard_abort after the abort_timer set by the [Actor].
     ///
-    /// If called on a process which is still attatched, nothing happens.
-    pub fn re_attatch(&mut self) {
-        self.is_attatched = true;
+    /// If called on a process which is still attached, nothing happens.
+    pub fn re_attach(&mut self) {
+        self.is_attached = true;
     }
 
     /// Hard abort this process at this moment. It will not receive a soft_abort message
@@ -143,8 +145,8 @@ impl<A: Actor> Future for Process<A> {
 
 impl<A: Actor> Drop for Process<A> {
     fn drop(&mut self) {
-        // If the process is attatched and alive, abort it.
-        if self.is_attatched && self.is_alive() {
+        // If the process is attached and alive, abort it.
+        if self.is_attached && self.is_alive() {
             // This is the only place where the handle is taken out.
             let handle = self.handle.take().unwrap();
 

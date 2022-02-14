@@ -170,7 +170,7 @@ pub trait RawAddress {
 /// etc. You will probably also want to implement `From<Address<Actor>>` for this custom address,
 /// to allow this address to be used as the associated type [Actor::Address].
 ///
-/// This trait has no methods that need to be implemented, but it is necessary to implemente
+/// This trait has no methods that need to be implemented, but it is necessary to implement
 /// [RawAddress] in order to use this trait.
 /// 
 /// This can be derived using [crate::derive::Addressable].

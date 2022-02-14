@@ -421,7 +421,7 @@ async fn next_event<A: Actor<State = S>, S: ActorState<A>>(
                         drop(next);
                         NextEvent::SoftAbort
                     }
-                    // Process has been detatched
+                    // Process has been detached
                     ToAbort::Detatch => NextEvent::Stream(
                         next.await.expect("Addresses should never all be dropped"),
                     ),

@@ -229,7 +229,7 @@ where
         }
     }
 
-    /// If the [Actor::Inbox] is [Unbounded] (default), then it is not guaranteed the inbox has
+    /// If the [Actor::Inbox] is [Bbounded], then it is not guaranteed the inbox has
     /// space. Therefore to guarantee the message arrives, it must sometimes wait for space to be
     /// free. This method waits asynchronously until there is space in the inbox and then sends
     /// the message.
@@ -391,7 +391,7 @@ where
         }
     }
 
-    /// If the [Actor::Inbox] is [Unbounded] (default), then it is not guaranteed the inbox has
+    /// If the [Actor::Inbox] is [Bounded], then it is not guaranteed the inbox has
     /// space. Therefore to guarantee the message arrives, it must sometimes wait for space to be
     /// free. This method waits asynchronously until there is space in the inbox and then sends
     /// the message.

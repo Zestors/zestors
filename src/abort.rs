@@ -44,6 +44,6 @@ impl Future for AbortReceiver {
 pub(crate) enum ToAbort {
     /// The process should abort
     Abort,
-    /// The process has been detatched
+    /// The process has been detached
     Detatch,
 }

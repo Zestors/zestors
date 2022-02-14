@@ -18,7 +18,14 @@ anyhow = "^1"
 oneshot = "^0.1"
 async-channel = "1.6"
 zestors-codegen = "0.0.2"
-# indexmap = "1.8"
+
+# distributed only dependencies
+build_id = "0.2.1"
+uuid = { version = "0.8", features = ["v4", "serde"] }
+serde = { version = "1", features = ["derive"] }
+bincode = "1.3"
+hyper = { version = "0.14", features = ["full"] }
+indexmap = "1.8"
 
 [dev-dependencies]
 derive_more = "^0.99"

@@ -40,8 +40,8 @@ to `msg` should return a `MsgFlow`, while `req` functions should return a
 `hard_abort`ed or `soft_abort`ed in order to make them
 exit. If a process is dropped, then the destructor will first try to soft_abort, if this fails
 after the timeout set by `ABORT_TIMER`, then it will hard_abort it instead. If
-you would like to disable this behaviour, then it is possible to `detatch` a
-process. It can be reattatched with `re_attatch`.
+you would like to disable this behaviour, then it is possible to `detach` a
+process. It can be reattached with `re_attach`.
 
 All public structs/traits/functions are documented, so for more information you can take a look
 at those docs. It would probably also be a good idea to look at the `Actor` trait 
