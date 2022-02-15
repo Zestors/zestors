@@ -26,6 +26,9 @@ serde = { version = "1", features = ["derive"] }
 bincode = "1.3"
 hyper = { version = "0.14", features = ["full"] }
 indexmap = "1.8"
+h2 = "0.3.11"
+tokio-tungstenite = { version = "0.16", features = ["native-tls"] }
+sha2 = "0.10"
 
 [dev-dependencies]
 derive_more = "^0.99"

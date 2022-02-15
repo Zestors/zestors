@@ -22,6 +22,7 @@ use crate::{
 /// will be forcefully aborted with hard_abort.
 ///
 /// A Process can be awaited to return the [ProcessExit] value.
+#[derive(Debug)]
 pub struct Process<A: Actor> {
     handle: Option<tokio::task::JoinHandle<InternalExitReason<A>>>,
     abort_sender: Option<AbortSender>,
@@ -48,6 +49,22 @@ impl<A: Actor> Process<A> {
             is_attached: attached,
             registration: None
         }
+    }
+
+    pub fn address(&self) -> &A::Address {
+        &self.address
+    }
+
+    pub fn get_uuid(&self) -> Option<Uuid> {
+        self.registration
+    }
+
+    pub(crate) fn set_uuid(&mut self, uuid: Uuid) -> Option<Uuid> {
+        self.registration.replace(uuid)
+    }
+
+    pub(crate) fn unset_uuid(&mut self) -> Option<Uuid> {
+        self.registration.take()
     }
 
     /// Whether this process is still alive.

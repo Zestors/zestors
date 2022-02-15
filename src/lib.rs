@@ -1,6 +1,7 @@
 #![feature(try_trait_v2)]
 #![feature(associated_type_defaults)]
-
+#![feature(once_cell)]
+#![feature(map_try_insert)]
 //! ## Zestors
 //! A simple, fast and flexible actor framework for building robust distributed applications,
 //! heavily insipired by Erlang.

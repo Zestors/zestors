@@ -7,6 +7,7 @@ pub(crate) struct AbortReceiver {
 
 /// A oneshot channel used for receiving an abort message
 /// Dropping this will not abort the process
+#[derive(Debug)]
 pub(crate) struct AbortSender {
     sender: oneshot::Sender<()>,
 }

@@ -161,6 +161,8 @@ impl<'a, 'b, A: Actor> Address<A> {
 /// well.
 /// 
 /// This can be derived using [crate::derive::Address].
+// TODO: remove the raw address, but instead just match all functions manually that can be acted
+// upon an address
 pub trait RawAddress {
     type Actor: Actor;
     fn raw_address(&self) -> &Address<Self::Actor>;

@@ -117,7 +117,7 @@ pub trait Actor: Send + Sync + 'static + Sized {
     ///
     /// Custom addresses can be derived using [crate::derive::Address], and
     /// optionally [crate::derive::Addressable].
-    type Address: From<Address<Self>> + RawAddress<Actor = Self> + Send = Address<Self>;
+    type Address: From<Address<Self>> + RawAddress<Actor = Self> + Send + Sync + Clone = Address<Self>;
 
     /// Whether the inbox should be [Bounded] or [Unbounded]. If setting this to [Bounded],
     /// don't forget to set [Actor::INBOX_CAPACITY] as well.
@@ -468,4 +468,13 @@ enum CombinedStreamOutput<A: Actor> {
 pub(crate) enum InternalExitReason<A: Actor> {
     InitFailed,
     Handled(A::ExitWith),
+}
+
+impl<A: Actor> std::fmt::Debug for InternalExitReason<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InitFailed => write!(f, "InitFailed"),
+            Self::Handled(arg0) => f.debug_tuple("Handled").finish(),
+        }
+    }
 }
