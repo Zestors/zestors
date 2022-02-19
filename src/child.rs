@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::{any::Any, time::Duration};
 
 use futures::{Future, FutureExt};
 use uuid::Uuid;
@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::{
     abort::AbortSender,
     actor::{Actor, InternalExitReason},
-    address::{Address, Addressable, RawAddress},
+    address::{Address, Addressable},
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -23,22 +23,22 @@ use crate::{
 ///
 /// A Process can be awaited to return the [ProcessExit] value.
 #[derive(Debug)]
-pub struct Process<A: Actor> {
+pub struct Child<A: Actor> {
     handle: Option<tokio::task::JoinHandle<InternalExitReason<A>>>,
     abort_sender: Option<AbortSender>,
-    address: A::Address,
+    address: Address<A>,
     is_attached: bool,
-    registration: Option<Uuid>
+    registration: Option<Uuid>,
 }
 
 //--------------------------------------------------------------------------------------------------
 //  implement Process
 //--------------------------------------------------------------------------------------------------
 
-impl<A: Actor> Process<A> {
+impl<A: Actor> Child<A> {
     pub(crate) fn new(
         handle: tokio::task::JoinHandle<InternalExitReason<A>>,
-        address: A::Address,
+        address: Address<A>,
         abort_sender: AbortSender,
         attached: bool,
     ) -> Self {
@@ -47,11 +47,11 @@ impl<A: Actor> Process<A> {
             abort_sender: Some(abort_sender),
             address,
             is_attached: attached,
-            registration: None
+            registration: None,
         }
     }
 
-    pub fn address(&self) -> &A::Address {
+    pub fn address(&self) -> &Address<A> {
         &self.address
     }
 
@@ -65,11 +65,6 @@ impl<A: Actor> Process<A> {
 
     pub(crate) fn unset_uuid(&mut self) -> Option<Uuid> {
         self.registration.take()
-    }
-
-    /// Whether this process is still alive.
-    pub fn is_alive(&self) -> bool {
-        self.address.raw_address().is_alive()
     }
 
     /// Whether this process has already been soft-aborted. Soft-aborting can only be done once.
@@ -135,9 +130,9 @@ impl<A: Actor> Process<A> {
 //  implement traits for Process
 //--------------------------------------------------------------------------------------------------
 
-impl<A: Actor> Unpin for Process<A> {}
+impl<A: Actor> Unpin for Child<A> {}
 
-impl<A: Actor> Future for Process<A> {
+impl<A: Actor> Future for Child<A> {
     type Output = ProcessExit<A>;
 
     fn poll(
@@ -161,7 +156,7 @@ impl<A: Actor> Future for Process<A> {
     }
 }
 
-impl<A: Actor> Drop for Process<A> {
+impl<A: Actor> Drop for Child<A> {
     fn drop(&mut self) {
         // If the process is attached and alive, abort it.
         if self.is_attached && self.is_alive() {
@@ -186,15 +181,11 @@ impl<A: Actor> Drop for Process<A> {
     }
 }
 
-impl<A: Actor> RawAddress for Process<A> {
-    type Actor = A;
-    
-    fn raw_address(&self) -> &Address<A> {
-        &self.address.raw_address()
+impl<A: Actor> Addressable<A> for Child<A> {
+    fn address(&self) -> &Address<A> {
+        &self.address.address()
     }
 }
-
-impl<A: Actor> Addressable<A> for Process<A> {}
 
 //--------------------------------------------------------------------------------------------------
 //  ProcessExit

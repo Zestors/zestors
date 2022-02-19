@@ -80,22 +80,22 @@ pub enum InitFlow<A: Actor> {
     Exit,
 }
 
-/// The flow for handling an actor exiting. This can either continue the exit, or resume the actor 
-/// with a new state. Errors can not be propagated, but must be handled here and turned into either 
-/// an `A::Exit`, or a resume.
-pub enum ExitFlow<A: Actor> {
-    /// Continue this exit, with exit value `Actor::Exit`.
-    ContinueExit(A::ExitWith),
-    /// Resume execution of this actor.
-    Resume(A),
-    /// Resume execution of this actor. 
-    /// Right before handling the next message, execute this 'Action`.
-    ResumeAndBefore(A, Action<A>),
-}
+// /// The flow for handling an actor exiting. This can either continue the exit, or resume the actor 
+// /// with a new state. Errors can not be propagated, but must be handled here and turned into either 
+// /// an `A::Exit`, or a resume.
+// pub enum ExitFlow<A: Actor> {
+//     /// Continue this exit, with exit value `Actor::Exit`.
+//     ContinueExit(A::ExitWith),
+//     /// Resume execution of this actor.
+//     Resume(A),
+//     /// Resume execution of this actor. 
+//     /// Right before handling the next message, execute this 'Action`.
+//     ResumeAndBefore(A, Action<A>),
+// }
 
 /// This is an internally used flow. ReqFlows and Flows are converted into this one,
 /// so that the actor can easily handle them
-pub(crate) enum InternalFlow<A: Actor + ?Sized> {
+pub(crate) enum EventFlow<A: Actor + ?Sized> {
     Ok,
     After(Action<A>),
     Before(Action<A>),
@@ -108,30 +108,30 @@ pub(crate) enum InternalFlow<A: Actor + ?Sized> {
 //--------------------------------------------------------------------------------------------------
 
 impl<A: Actor, R> ReqFlow<A, R> {
-    pub(crate) fn take_reply(self) -> (InternalFlow<A>, Option<R>) {
+    pub(crate) fn take_reply(self) -> (EventFlow<A>, Option<R>) {
         match self {
-            ReqFlow::Reply(reply) => (InternalFlow::Ok, Some(reply)),
-            ReqFlow::ReplyAndAfter(reply, handler) => (InternalFlow::After(handler), Some(reply)),
-            ReqFlow::ReplyAndBefore(reply, handler) => (InternalFlow::Before(handler), Some(reply)),
+            ReqFlow::Reply(reply) => (EventFlow::Ok, Some(reply)),
+            ReqFlow::ReplyAndAfter(reply, handler) => (EventFlow::After(handler), Some(reply)),
+            ReqFlow::ReplyAndBefore(reply, handler) => (EventFlow::Before(handler), Some(reply)),
             ReqFlow::ReplyAndExitWithError(reply, error) => {
-                (InternalFlow::ErrorExit(error), Some(reply))
+                (EventFlow::ErrorExit(error), Some(reply))
             }
-            ReqFlow::ExitWithError(error) => (InternalFlow::ErrorExit(error), None),
+            ReqFlow::ExitWithError(error) => (EventFlow::ErrorExit(error), None),
             ReqFlow::ReplyAndNormalExit(reply, normal) => {
-                (InternalFlow::NormalExit(normal), Some(reply))
+                (EventFlow::NormalExit(normal), Some(reply))
             }
-            ReqFlow::NormalExit(normal) => (InternalFlow::NormalExit(normal), None),
+            ReqFlow::NormalExit(normal) => (EventFlow::NormalExit(normal), None),
         }
     }
 }
 
 impl<A: Actor> MsgFlow<A> {
-    pub(crate) fn into_internal(self) -> InternalFlow<A> {
+    pub(crate) fn into_internal(self) -> EventFlow<A> {
         match self {
-            MsgFlow::Ok => InternalFlow::Ok,
-            MsgFlow::Before(handler) => InternalFlow::Before(handler),
-            MsgFlow::ExitWithError(error) => InternalFlow::ErrorExit(error),
-            MsgFlow::NormalExit(normal) => InternalFlow::NormalExit(normal),
+            MsgFlow::Ok => EventFlow::Ok,
+            MsgFlow::Before(handler) => EventFlow::Before(handler),
+            MsgFlow::ExitWithError(error) => EventFlow::ErrorExit(error),
+            MsgFlow::NormalExit(normal) => EventFlow::NormalExit(normal),
         }
     }
 }

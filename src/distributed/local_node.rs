@@ -1,7 +1,6 @@
 use std::{
     any::Any,
     collections::HashMap,
-    convert::Infallible,
     lazy::SyncOnceCell,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{Arc, RwLock},
@@ -9,18 +8,27 @@ use std::{
 
 use crate::{
     actor::{Actor, Spawn},
-    process::Process,
+    address::Address,
+    child::Child,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
     task::JoinHandle,
 };
-use tokio_tungstenite::tungstenite;
+use tokio_native_tls::{
+    native_tls::{self, TlsAcceptorBuilder},
+    TlsAcceptor,
+};
+use tokio_tungstenite::{tungstenite, MaybeTlsStream};
 use uuid::Uuid;
 
 use super::{
-    protocol::ProtocolStream,
-    server::{InnerNodeConn, Node, NodeConnectingError, NodeExit, Server, ServerExit, ServerMsg},
+    challenge,
+    cluster::Cluster,
+    node::Node,
+    server::{NodeExit, NodeSetupError, Server, ServerExit, ServerMsg},
+    ws_stream::WsStream,
+    BuildId, Token, NodeId,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -31,11 +39,11 @@ static LOCAL_NODE: SyncOnceCell<LocalNode> = SyncOnceCell::new();
 
 /// Initialize the local node. Panics if already [initialize]d.
 pub async fn initialize(
-    cookie: Uuid,
-    name: String,
+    token: Token,
+    node_id: NodeId,
     socket: SocketAddr,
 ) -> Result<&'static LocalNode, InitializationError> {
-    let local_node = LocalNode::initialize(cookie, name, socket).await?;
+    let local_node = LocalNode::initialize(token, node_id, socket).await?;
     LOCAL_NODE.set(local_node).unwrap();
     Ok(LOCAL_NODE.get().unwrap())
 }
@@ -50,12 +58,12 @@ pub fn get() -> &'static LocalNode {
 //--------------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
-pub struct LocalNode(Arc<InnerLocalNode>);
+pub struct LocalNode(Arc<LocalNodeCore>);
 
 impl LocalNode {
     pub async fn initialize(
-        cookie: Uuid,
-        name: String,
+        token: Token,
+        node_id: NodeId,
         addr: SocketAddr,
     ) -> Result<Self, InitializationError> {
         // Start listening on the socket.
@@ -64,7 +72,7 @@ impl LocalNode {
             .map_err(|e| InitializationError::SocketAddressNotAvailable(e))?;
 
         // Create the local node.
-        let local_node = Self::new(cookie, name, addr);
+        let local_node = Self::new(token, node_id, addr);
 
         // Spawn the task that will be listening
         let (sender, handle) = Server::new(listener, local_node.clone()).spawn();
@@ -75,136 +83,82 @@ impl LocalNode {
         Ok(local_node)
     }
 
-    pub fn build_id(&self) -> Uuid {
+    pub fn get_node(&self, node_id: NodeId) -> Option<Node> {
+        self.0.cluster.get_node(node_id)
+    }
+
+    pub fn build_id(&self) -> BuildId {
         self.0.build_id
     }
 
-    pub fn cookie(&self) -> Uuid {
-        self.0.cookie
+    pub fn token(&self) -> Token {
+        self.0.token
     }
 
-    pub fn node_id(&self) -> Uuid {
+    pub fn node_id(&self) -> NodeId {
         self.0.node_id
     }
 
-    pub async fn connect(&self, addr: SocketAddr) -> Result<(), NodeConnectingError> {
-        let (node_id, stream) = Node::outgoing_setup_and_challenge(self, addr).await?;
-        self.spawn_node(node_id, stream)?;
-        Ok(())
+    /// Attempt to connect directly to another node. This first challenges, and if successful
+    /// creates a connection to this node.
+    pub async fn connect(&self, addr: SocketAddr) -> Result<Node, NodeSetupError> {
+        // Setup tcp stream
+        let stream = TcpStream::connect(addr).await?;
+
+        // upgrade to ws
+        let stream = WsStream::handshake_as_client(MaybeTlsStream::Plain(stream)).await?;
+
+        // challenge as client
+        let (node_id, stream) = challenge::as_client(self, stream).await?;
+
+        let node = self.0.cluster.spawn_node(self, node_id, stream)?;
+
+        Ok(node)
     }
 
-    pub async fn connect_transitive(&self, addr: SocketAddr) -> Result<(), NodeConnectingError> {
-        todo!()
+    pub(crate) fn get_cluster(&self) -> &Cluster {
+        &self.0.cluster
     }
 
-    /// spawn a node that has already been challenged
-    pub(crate) fn spawn_node(
-        &self,
-        node_id: Uuid,
-        stream: ProtocolStream,
-    ) -> Result<Node, NodeConnectingError> {
-        // aquire the lock
-        let mut connected_nodes = self.0.connected_nodes.write().unwrap();
-        if connected_nodes.contains_key(&node_id) {
-            Err(NodeConnectingError::NodeAlreadyConnected)
-        } else {
-            let (sender, receiver) = async_channel::unbounded();
-            let addr = stream
-                .peer_addr()
-                .map_err(|e| NodeConnectingError::PeerDiedBeforeConn(tungstenite::Error::Io(e)))?;
 
-            let handle = tokio::task::spawn(Node::spawned(self.clone(), node_id, stream, receiver));
-
-            let node = Node::new(node_id, handle, sender, addr);
-
-            connected_nodes.insert(node_id, node.clone());
-
-            Ok(node)
-        }
-    }
-
-    fn new(cookie: Uuid, name: String, addr: SocketAddr) -> Self {
-        Self(Arc::new(InnerLocalNode {
-            cookie,
+    fn new(token: Token, node_id: NodeId, addr: SocketAddr) -> Self {
+        Self(Arc::new(LocalNodeCore {
+            token,
             addr,
             // Get build_id from binary.
             build_id: build_id::get(),
-            name,
-            // Generate a random node_id.
-            node_id: Uuid::new_v4(),
-            // No registered processes.
-            registered: RwLock::new(HashMap::new()),
+            node_id,
             // No connected nodes.
-            connected_nodes: RwLock::new(HashMap::new()),
+            cluster: Cluster::new(),
             // No `Process<Server>` yet.
             server: SyncOnceCell::new(),
         }))
     }
 }
 
+//------------------------------------------------------------------------------------------------
+//  Core
+//------------------------------------------------------------------------------------------------
+
 /// This is the local node, which can connect to other nodes that run the same binary. A node can be
 /// initialized with a unique name (`String`), an addr
 #[derive(Debug)]
-pub(crate) struct InnerLocalNode {
-    /// The cookie used to verify that a Node has permission to connect to the cluster.
-    cookie: Uuid,
+pub(crate) struct LocalNodeCore {
+    /// The token used to verify that a Node has permission to connect to the cluster.
+    token: Uuid,
     /// The address that this node is listening on.
     addr: SocketAddr,
     /// The build_id used to verify that two Nodes have the same binary.
-    build_id: Uuid,
+    build_id: BuildId,
     /// The name of this node, which can be used to find it from another node.
-    name: String,
-    /// The unique id of this node, randomly generated when this node spawns. Can be used to find
-    /// this node from another node.
-    node_id: Uuid,
-    /// All processes that are currently registered on this node. They can be found from another
-    /// node by their unique uid, generated upon registration.
-    registered: RwLock<HashMap<Uuid, RegisteredActor>>,
-    /// All nodes that are currently registered on this node.
-    connected_nodes: RwLock<HashMap<Uuid, Node>>,
+    node_id: NodeId,
+
+    cluster: Cluster,
     // The  join_handle of the server task
     server: SyncOnceCell<(async_channel::Sender<ServerMsg>, JoinHandle<ServerExit>)>,
 }
 
-impl InnerLocalNode {
-    pub fn register<A: Actor>(&self, process: &mut Process<A>) -> Result<(), RegistrationError> {
-        match process.get_uuid() {
-            Some(_) => Err(RegistrationError::AlreadyRegistered),
-            None => {
-                let uuid = Uuid::new_v4();
-
-                self.registered.write().unwrap().insert(
-                    uuid,
-                    RegisteredActor::new_address::<A>(process.address().clone()),
-                );
-
-                process.set_uuid(uuid);
-
-                Ok(())
-            }
-        }
-    }
-
-    pub fn unregister<A: Actor>(
-        &self,
-        process: &mut Process<A>,
-    ) -> Result<Uuid, UnRegistrationError> {
-        match process.unset_uuid() {
-            Some(uuid) => {
-                let removed = self.registered.write().unwrap().remove(&uuid);
-
-                assert!(if let Some(RegisteredActor::Address(_)) = removed {
-                    true
-                } else {
-                    false
-                });
-                Ok(uuid)
-            }
-
-            None => Err(UnRegistrationError::NotRegistered),
-        }
-    }
-
+impl LocalNodeCore {
     /// Panics if already set!!
     fn set_server_handle(
         &self,
@@ -236,23 +190,20 @@ enum RegisteredActor {
 }
 
 impl RegisteredActor {
-    fn new_address<A: Actor>(address: A::Address) -> Self {
+    fn new_address<A: Actor>(address: Address<A>) -> Self {
         Self::Address(Box::new(address))
     }
 
-    fn new_process<A: Actor>(process: Process<A>) -> Self {
+    fn new_process<A: Actor>(process: Child<A>) -> Self {
         Self::Process(Box::new(process))
     }
 }
 
-unsafe impl<A: Actor> Sync for Process<A> {}
+unsafe impl<A: Actor> Sync for Child<A> {}
 
 //--------------------------------------------------------------------------------------------------
 //  Errors
 //--------------------------------------------------------------------------------------------------
-
-#[derive(Debug)]
-pub struct NodeAlreadyConnected(ProtocolStream);
 
 #[derive(Debug)]
 pub enum RegistrationError {

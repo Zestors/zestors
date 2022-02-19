@@ -1,7 +1,7 @@
 use futures::{Stream, StreamExt};
-use std::pin::Pin;
+use std::{pin::Pin, marker::PhantomData};
 
-use crate::{packet::Packet, actor::Actor};
+use crate::{actor::Actor, action::Action};
 
 //--------------------------------------------------------------------------------------------------
 //  Capacity
@@ -22,6 +22,24 @@ impl Capacity<Unbounded> for Unbounded {
     fn capacity(_cap: usize) -> Option<usize> {
         None
     }
+}
+
+//--------------------------------------------------------------------------------------------------
+//  Channel
+//--------------------------------------------------------------------------------------------------
+
+pub(crate) fn channel<A: Actor>(
+    size: Option<usize>,
+) -> (ActionSender<A>, ActionReceiver<A>) {
+    let (sender, receiver) = match size {
+        Some(size) => async_channel::bounded(size),
+        None => async_channel::unbounded(),
+    };
+
+    let tx = ActionSender { sender };
+    let rx = ActionReceiver { receiver };
+
+    (tx, rx)
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -47,44 +65,44 @@ pub struct Unbounded;
 pub struct Bounded;
 
 //--------------------------------------------------------------------------------------------------
-//  PacketSender
+//  Sender
 //--------------------------------------------------------------------------------------------------
 
 /// A sender of [Packet]s
 #[derive(Debug)]
-pub(crate) struct PacketSender<A: Actor + ?Sized> {
-    sender: async_channel::Sender<Packet<A>>,
+pub(crate) struct ActionSender<A: ?Sized + Actor> {
+    sender: async_channel::Sender<Action<A>>,
 }
 
-impl<A: Actor> PacketSender<A> {
+impl<A: Actor> ActionSender<A> {
     pub(crate) fn is_alive(&self) -> bool {
         !self.sender.is_closed()
     }
 
-    pub(crate) fn try_send_packet(&self, packet: Packet<A>) -> Result<(), PacketTrySendError<A>> {
+    pub(crate) fn try_send(&self, packet: Action<A>) -> Result<(), ActionTrySendError<A>> {
         match self.sender.try_send(packet) {
             Ok(()) => Ok(()),
             Err(e) => match e {
-                async_channel::TrySendError::Full(packet) => Err(PacketTrySendError::Full(packet)),
+                async_channel::TrySendError::Full(packet) => Err(ActionTrySendError::Full(packet)),
                 async_channel::TrySendError::Closed(packet) => {
-                    Err(PacketTrySendError::Disconnected(packet))
+                    Err(ActionTrySendError::Disconnected(packet))
                 }
             },
         }
     }
 
-    pub(crate) async fn send_packet_async(
+    pub(crate) async fn send_async(
         &self,
-        packet: Packet<A>,
-    ) -> Result<(), PacketSendError<A>> {
-        match self.sender.send(packet).await {
+        action: Action<A>,
+    ) -> Result<(), ActionSendError<A>> {
+        match self.sender.send(action).await {
             Ok(()) => Ok(()),
-            Err(e) => Err(PacketSendError::Disconnected(e.0)),
+            Err(e) => Err(ActionSendError::Disconnected(e.0)),
         }
     }
 }
 
-impl<A: Actor> Clone for PacketSender<A> {
+impl<A: Actor> Clone for ActionSender<A> {
     fn clone(&self) -> Self {
         Self {
             sender: self.sender.clone(),
@@ -92,32 +110,20 @@ impl<A: Actor> Clone for PacketSender<A> {
     }
 }
 
-pub(crate) fn packet_channel<A: Actor>(
-    size: Option<usize>,
-) -> (PacketSender<A>, PacketReceiver<A>) {
-    let (tx, rx) = match size {
-        Some(size) => async_channel::bounded(size),
-        None => async_channel::unbounded(),
-    };
 
-    let tx = PacketSender { sender: tx };
-    let rx = PacketReceiver { receiver: rx };
-
-    (tx, rx)
-}
 
 //--------------------------------------------------------------------------------------------------
-//  PacketReceiver
+//  Receiver
 //--------------------------------------------------------------------------------------------------
 
 /// A receiver of [Packet]s
 #[derive(Debug)]
-pub(crate) struct PacketReceiver<A: Actor> {
-    pub receiver: async_channel::Receiver<Packet<A>>,
+pub(crate) struct ActionReceiver<A: Actor> {
+    pub receiver: async_channel::Receiver<Action<A>>,
 }
 
-impl<A: Actor> Stream for PacketReceiver<A> {
-    type Item = Packet<A>;
+impl<A: Actor> Stream for ActionReceiver<A> {
+    type Item = Action<A>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -127,7 +133,7 @@ impl<A: Actor> Stream for PacketReceiver<A> {
     }
 }
 
-impl<A: Actor> Drop for PacketReceiver<A> {
+impl<A: Actor> Drop for ActionReceiver<A> {
     fn drop(&mut self) {
         self.receiver.close();
         while let Ok(packet) = self.receiver.try_recv() {
@@ -140,11 +146,11 @@ impl<A: Actor> Drop for PacketReceiver<A> {
 //  PacketSend errors
 //--------------------------------------------------------------------------------------------------
 
-pub(crate) enum PacketTrySendError<A: Actor> {
-    Full(Packet<A>),
-    Disconnected(Packet<A>),
+pub(crate) enum ActionTrySendError<A: Actor> {
+    Full(Action<A>),
+    Disconnected(Action<A>),
 }
 
-pub(crate) enum PacketSendError<A: Actor> {
-    Disconnected(Packet<A>),
+pub(crate) enum ActionSendError<A: Actor> {
+    Disconnected(Action<A>),
 }

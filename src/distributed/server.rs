@@ -1,26 +1,18 @@
-use futures::SinkExt;
-use futures::StreamExt;
-use hyper::Request;
+use crate::distributed::ws_message::WsMsg;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
-use tokio_tungstenite::tungstenite::Message;
-use uuid::Uuid;
+use tokio_tungstenite::MaybeTlsStream;
 
-use crate::distributed::challenge::Challenge;
-use crate::distributed::challenge::ChallengeResponse;
-use crate::distributed::protocol::Protocol;
-use crate::distributed::protocol::ProtocolStream;
-
+use super::challenge;
 use super::challenge::ChallengeError;
-use super::local_node;
+use super::cluster::AddNodeError;
 use super::local_node::LocalNode;
-use super::local_node::NodeAlreadyConnected;
-use super::protocol::DeserializationError;
-use super::protocol::ProtocolRecv;
-use super::protocol::ProtocolSendError;
+use super::ws_stream::WsRecvError;
+use super::ws_stream::WsSendError;
+use super::ws_stream::WsStream;
+use super::NodeId;
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite;
 
@@ -42,6 +34,8 @@ impl Server {
         }
     }
 
+    /// Spawn a new server that starts listening on the given port. It will spawn tokio::tasks
+    /// for every new incoming connection, and add the nodes to the `LocalNode`.
     pub(crate) fn spawn(self) -> (async_channel::Sender<ServerMsg>, JoinHandle<ServerExit>) {
         let (sender, receiver) = async_channel::unbounded();
 
@@ -54,9 +48,8 @@ impl Server {
                             Ok((stream, addr)) => {
                                 Self::incoming_node(self.local_node.clone(), stream, addr)
                             },
-                            Err(_e) => (),
+                            Err(e) => break ServerExit::Io(e),
                         }
-
                     }
                     // Or we receive a message
                     msg = receiver.recv() => {
@@ -64,7 +57,7 @@ impl Server {
                             Ok(msg) => match msg {
                                 ServerMsg::Stop => break ServerExit::StopMsgReceived
                             },
-                            Err(e) => break ServerExit::AllAddressesDropped,
+                            Err(_) => break ServerExit::AllAddressesDropped,
                         }
                     }
                 }
@@ -74,15 +67,22 @@ impl Server {
         (sender, handle)
     }
 
-    pub(crate) fn incoming_node(local_node: LocalNode, stream: TcpStream, addr: SocketAddr) {
+    fn incoming_node(local_node: LocalNode, stream: TcpStream, addr: SocketAddr) {
         tokio::task::spawn(async move {
-            match Node::incoming_setup_and_challenge(&local_node, stream, addr).await {
-                Ok((node_id, stream)) => match local_node.spawn_node(node_id, stream) {
-                    Ok(_) => (),
-                    Err(e) => println!("Already registered: {:?}", e),
-                },
-                Err(e) => println!("challenge failed: {:?}", e),
-            }
+            // Attempt ws handshake as the server
+            let stream = WsStream::handshake_as_server(MaybeTlsStream::Plain(stream))
+                .await
+                .unwrap();
+
+            // Do challenge as the server
+            let (node_id, stream) = match challenge::as_server(&local_node, stream).await {
+                Ok(stream) => stream,
+                Err(_e) => return,
+            };
+
+            let _ = local_node
+                .get_cluster()
+                .spawn_node(&local_node, node_id, stream);
         });
     }
 }
@@ -90,6 +90,7 @@ impl Server {
 #[derive(Debug)]
 pub(crate) enum ServerExit {
     Ok,
+    Io(std::io::Error),
     AllAddressesDropped,
     StopMsgReceived,
 }
@@ -97,187 +98,6 @@ pub(crate) enum ServerExit {
 #[derive(Debug)]
 pub(crate) enum ServerMsg {
     Stop,
-}
-
-//--------------------------------------------------------------------------------------------------
-//  Node
-//--------------------------------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub(crate) struct Node(Arc<InnerNodeConn>);
-
-#[derive(Debug)]
-pub(crate) struct InnerNodeConn {
-    node_id: Uuid,
-    handle: JoinHandle<NodeExit>,
-    addr: SocketAddr,
-    sender: async_channel::Sender<NodeMsg>,
-}
-
-impl Node {
-    pub fn node_id(&self) -> &Uuid {
-        &self.0.node_id
-    }
-
-    pub(crate) fn new(
-        node_id: Uuid,
-        handle: JoinHandle<NodeExit>,
-        sender: async_channel::Sender<NodeMsg>,
-        addr: SocketAddr,
-    ) -> Self {
-        Self(Arc::new(InnerNodeConn {
-            node_id,
-            handle,
-            sender,
-            addr,
-        }))
-    }
-
-    pub(crate) async fn spawned(
-        local_node: LocalNode,
-        node_id: Uuid,
-        stream: ProtocolStream,
-        receiver: async_channel::Receiver<NodeMsg>,
-    ) -> NodeExit {
-        println!("Node has been spawned!");
-        NodeExit::NodeDisconnectedNormal
-    }
-
-    async fn incoming_setup_and_challenge(
-        local_node: &LocalNode,
-        stream: TcpStream,
-        addr: SocketAddr,
-    ) -> Result<(Uuid, ProtocolStream), NodeConnectingError> {
-        let mut stream = ProtocolStream::new_server_no_tls(stream).await?;
-
-        //----------------------------------------------------------------------------------------------
-        //  Challenging the client
-        //----------------------------------------------------------------------------------------------
-        let challenge = Challenge::new();
-        stream.send(Protocol::Challenge(challenge)).await?;
-
-        match stream.recv_next().await {
-            ProtocolRecv::Protocol(Protocol::ChallengeReply(challenge_response)) => {
-                match challenge_response.check_challenge(&challenge, &local_node) {
-                    Err(e) => {
-                        stream
-                            .send(Protocol::ChallengeResult(Err(e.clone())))
-                            .await?;
-                        return Err(e.into());
-                    }
-                    Ok(_) => {
-                        stream.send(Protocol::ChallengeResult(Ok(()))).await?;
-                    }
-                }
-            }
-            val => return Err(NodeConnectingError::DidntAdhereToProtocol(Box::new(val))),
-        };
-
-        //----------------------------------------------------------------------------------------------
-        //  Challenged by client
-        //----------------------------------------------------------------------------------------------
-
-        // wait for challenge
-        match stream.recv_next().await {
-            ProtocolRecv::Protocol(Protocol::Challenge(challenge)) => {
-                let response = ChallengeResponse::new(&local_node, &challenge);
-                stream.send(Protocol::ChallengeReply(response)).await?;
-            }
-            val => return Err(NodeConnectingError::DidntAdhereToProtocol(Box::new(val))),
-        }
-
-        // wait for challenge result
-        match stream.recv_next().await {
-            ProtocolRecv::Protocol(Protocol::ChallengeResult(result)) => {
-                if let Err(e) = result {
-                    return Err(e.into());
-                };
-            }
-            val => return Err(NodeConnectingError::DidntAdhereToProtocol(Box::new(val))),
-        }
-
-        //----------------------------------------------------------------------------------------------
-        //  Exchanging node ids
-        //----------------------------------------------------------------------------------------------
-
-        stream
-            .send(Protocol::SendNodeId(local_node.node_id()))
-            .await?;
-        let peer_node_id = match stream.recv_next().await {
-            ProtocolRecv::Protocol(Protocol::SendNodeId(id)) => id,
-            val => return Err(NodeConnectingError::DidntAdhereToProtocol(Box::new(val))),
-        };
-
-        Ok((peer_node_id, stream))
-    }
-
-    pub(crate) async fn outgoing_setup_and_challenge(
-        local_node: &LocalNode,
-        addr: SocketAddr,
-    ) -> Result<(Uuid, ProtocolStream), NodeConnectingError> {
-        let mut stream = ProtocolStream::new_client_no_tls(addr).await?;
-
-        //----------------------------------------------------------------------------------------------
-        //  Challenged by server
-        //----------------------------------------------------------------------------------------------
-
-        // wait for challenge
-        match stream.recv_next().await {
-            ProtocolRecv::Protocol(Protocol::Challenge(challenge)) => {
-                let response = ChallengeResponse::new(&local_node, &challenge);
-                stream.send(Protocol::ChallengeReply(response)).await?;
-            }
-            val => return Err(NodeConnectingError::DidntAdhereToProtocol(Box::new(val))),
-        }
-
-        // wait for challenge result
-        match stream.recv_next().await {
-            ProtocolRecv::Protocol(Protocol::ChallengeResult(result)) => {
-                if let Err(e) = result {
-                    return Err(e.into());
-                };
-            }
-            val => return Err(NodeConnectingError::DidntAdhereToProtocol(Box::new(val))),
-        }
-
-        //----------------------------------------------------------------------------------------------
-        //  Challenging the server
-        //----------------------------------------------------------------------------------------------
-
-        let challenge = Challenge::new();
-        stream.send(Protocol::Challenge(challenge)).await?;
-
-        match stream.recv_next().await {
-            ProtocolRecv::Protocol(Protocol::ChallengeReply(challenge_response)) => {
-                match challenge_response.check_challenge(&challenge, &local_node) {
-                    Err(e) => {
-                        stream
-                            .send(Protocol::ChallengeResult(Err(e.clone())))
-                            .await?;
-                        return Err(e.into());
-                    }
-                    Ok(_) => {
-                        stream.send(Protocol::ChallengeResult(Ok(()))).await?;
-                    }
-                }
-            }
-            val => return Err(NodeConnectingError::DidntAdhereToProtocol(Box::new(val))),
-        };
-
-        //----------------------------------------------------------------------------------------------
-        //  Exchanging node ids
-        //----------------------------------------------------------------------------------------------
-
-        let peer_node_id = match stream.recv_next().await {
-            ProtocolRecv::Protocol(Protocol::SendNodeId(id)) => id,
-            val => return Err(NodeConnectingError::DidntAdhereToProtocol(Box::new(val))),
-        };
-        stream
-            .send(Protocol::SendNodeId(local_node.node_id()))
-            .await?;
-
-        Ok((peer_node_id, stream))
-    }
 }
 
 #[derive(Debug)]
@@ -290,31 +110,55 @@ pub(crate) enum NodeExit {
 pub(crate) enum NodeMsg {}
 
 #[derive(Debug)]
-pub enum NodeConnectingError {
-    CantConnectToAddr(std::io::Error),
+pub enum NodeSetupError {
+    /// Could not set up a tcp-connection to the address.
+    Io(std::io::Error),
+    /// The websocket handshake failed.
     HandShakeFailed(tungstenite::Error),
-    DidntAdhereToProtocol(Box<dyn std::fmt::Debug + Send>),
+    /// The protocols did not match up.
+    Protocol(WsMsg, &'static str),
+    /// The challenge failed.
     ChallengeFailed(ChallengeError),
-    PeerDiedBeforeConn(tungstenite::Error),
-    NodeAlreadyConnected,
+    /// There was a problem receiving a message through the ws.
+    WsRecv(WsRecvError),
+    /// There was a problem sending a message through the ws.
+    WsSend(WsSendError),
+
+    NodeIdAlreadyRegistered,
+
+    NodeIdIsLocalNode,
 }
 
-impl From<ProtocolSendError> for NodeConnectingError {
-    fn from(e: ProtocolSendError) -> Self {
-        match e {
-            ProtocolSendError::Any(e) => Self::PeerDiedBeforeConn(e),
-        }
+impl From<WsRecvError> for NodeSetupError {
+    fn from(e: WsRecvError) -> Self {
+        Self::WsRecv(e)
     }
 }
 
-impl From<ChallengeError> for NodeConnectingError {
+impl From<WsSendError> for NodeSetupError {
+    fn from(e: WsSendError) -> Self {
+        Self::WsSend(e)
+    }
+}
+
+impl From<ChallengeError> for NodeSetupError {
     fn from(e: ChallengeError) -> Self {
         Self::ChallengeFailed(e)
     }
 }
 
-impl From<NodeAlreadyConnected> for NodeConnectingError {
-    fn from(e: NodeAlreadyConnected) -> Self {
-        Self::NodeAlreadyConnected
+impl From<std::io::Error> for NodeSetupError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl From<AddNodeError> for NodeSetupError {
+    fn from(e: AddNodeError) -> Self {
+        match e {
+            AddNodeError::NodeIdAlreadyRegistered => Self::NodeIdAlreadyRegistered,
+            AddNodeError::NodeIdIsLocalNode => Self::NodeIdIsLocalNode,
+            AddNodeError::Io(e) => Self::Io(e),
+        }
     }
 }

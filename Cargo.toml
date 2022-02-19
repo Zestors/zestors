@@ -28,7 +28,16 @@ hyper = { version = "0.14", features = ["full"] }
 indexmap = "1.8"
 h2 = "0.3.11"
 tokio-tungstenite = { version = "0.16", features = ["native-tls"] }
+tokio-native-tls = "0.3"
 sha2 = "0.10"
+chrono = { version = "0.4.19", features = ["serde"] }
+
+
+# async-raft = "0.6.1"
+raft = "0.6"
+memstore = "0.2"
+slog = "2.7"
+# protobuf = "2"
 
 [dev-dependencies]
 derive_more = "^0.99"

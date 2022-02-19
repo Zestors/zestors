@@ -1,7 +1,7 @@
 #![feature(try_trait_v2)]
 #![feature(associated_type_defaults)]
 #![feature(once_cell)]
-#![feature(map_try_insert)]
+#![feature(negative_impls)]
 //! ## Zestors
 //! A simple, fast and flexible actor framework for building robust distributed applications,
 //! heavily insipired by Erlang.
@@ -177,8 +177,8 @@ pub mod errors;
 pub mod flows;
 pub mod inbox;
 pub mod messaging;
-pub mod packet;
-pub mod process;
+// pub mod packet;
+pub mod child;
 pub mod state;
 pub mod distributed;
 

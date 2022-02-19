@@ -1,4 +1,4 @@
-use futures::{Future, FutureExt};
+use futures::{Future, FutureExt, future::FusedFuture};
 
 /// A oneshot channel used for sending an abort message.
 pub(crate) struct AbortReceiver {
@@ -26,7 +26,7 @@ impl AbortSender {
 }
 
 impl Future for AbortReceiver {
-    type Output = ToAbort;
+    type Output = AbortAction;
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
@@ -34,17 +34,17 @@ impl Future for AbortReceiver {
     ) -> std::task::Poll<Self::Output> {
         self.receiver.poll_unpin(cx).map(|res| match res {
             // if a message was received, the process should abort
-            Ok(()) => ToAbort::Abort,
+            Ok(()) => AbortAction::SoftAbort,
             // if no message was received, the process should not abort
-            Err(_) => ToAbort::Detatch,
+            Err(_) => AbortAction::Isolated,
         })
     }
 }
 
 /// Whether this process should abort or not
-pub(crate) enum ToAbort {
+pub(crate) enum AbortAction {
     /// The process should abort
-    Abort,
+    SoftAbort,
     /// The process has been detached
-    Detatch,
+    Isolated,
 }

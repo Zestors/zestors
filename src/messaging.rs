@@ -1,10 +1,13 @@
 use crate::{
+    action::Action,
     actor::Actor,
     errors::{
         ActorDied, ActorDiedAfterSending, SendRecvError, TryRecvError, TrySendError,
         TrySendRecvError,
     },
-    packet::{Packet}, inbox::{PacketSender, PacketTrySendError, PacketSendError, IsUnbounded, IsBounded},
+    inbox::{
+        ActionReceiver, ActionSendError, ActionSender, ActionTrySendError, IsBounded, IsUnbounded,
+    },
 };
 use futures::{Future, FutureExt};
 use std::{marker::PhantomData, task::Poll};
@@ -15,6 +18,7 @@ use std::{marker::PhantomData, task::Poll};
 
 /// When a [Req] is sent, you get a [Reply]. this can be awaited to return the reply to this [Req].
 #[derive(Debug)]
+#[must_use]
 pub struct Reply<T> {
     receiver: oneshot::Receiver<T>,
 }
@@ -89,12 +93,13 @@ impl<T> InternalRequest<T> {
 /// A request that can be sent. If this is sent, a [Reply] will be returned. This reply can then be
 /// `await`ed to return the actual reply.
 #[derive(Debug)]
+#[must_use]
 pub struct Req<'a, A, P, R>
 where
     A: Actor,
 {
-    packet: Packet<A>,
-    sender: &'a PacketSender<A>,
+    action: Action<A>,
+    sender: &'a ActionSender<A>,
     reply: Reply<R>,
     p: PhantomData<P>,
 }
@@ -104,13 +109,13 @@ where
     A: Actor,
 {
     /// create a new request.
-    pub(crate) fn new(sender: &'a PacketSender<A>, packet: Packet<A>, reply: Reply<R>) -> Self
+    pub(crate) fn new(sender: &'a ActionSender<A>, action: Action<A>, reply: Reply<R>) -> Self
     where
         P: 'static,
         R: 'static,
     {
         Self {
-            packet,
+            action,
             sender,
             reply,
             p: PhantomData,
@@ -128,12 +133,12 @@ where
         R: 'static,
         A::Inbox: IsUnbounded,
     {
-        match self.sender.try_send_packet(self.packet) {
+        match self.sender.try_send(self.action) {
             Ok(()) => Ok(self.reply),
-            Err(PacketTrySendError::Disconnected(packet)) => {
-                Err(ActorDied(packet.get_params_req::<P, R>()))
+            Err(ActionTrySendError::Disconnected(action)) => {
+                Err(ActorDied(action.get_params_req::<P, R>().unwrap()))
             }
-            Err(PacketTrySendError::Full(_)) => unreachable!("should be unbounded"),
+            Err(ActionTrySendError::Full(_)) => unreachable!("should be unbounded"),
         }
     }
 
@@ -149,12 +154,12 @@ where
         R: 'static,
         A::Inbox: IsUnbounded,
     {
-        match self.sender.try_send_packet(self.packet) {
+        match self.sender.try_send(self.action) {
             Ok(()) => Ok(self.reply.await?),
-            Err(PacketTrySendError::Disconnected(packet)) => {
-                Err(SendRecvError::ActorDied(packet.get_params_req::<P, R>()))
+            Err(ActionTrySendError::Disconnected(action)) => {
+                Err(SendRecvError::ActorDied(action.get_params_req::<P, R>().unwrap()))
             }
-            Err(PacketTrySendError::Full(_packet)) => unreachable!("should be unbounded"),
+            Err(ActionTrySendError::Full(_action)) => unreachable!("should be unbounded"),
         }
     }
 
@@ -170,13 +175,13 @@ where
         R: 'static,
         A::Inbox: IsUnbounded,
     {
-        match self.sender.try_send_packet(self.packet) {
+        match self.sender.try_send(self.action) {
             Ok(()) => Ok(self.reply.blocking_recv()?),
             Err(e) => match e {
-                PacketTrySendError::Disconnected(packet) => {
-                    Err(SendRecvError::ActorDied(packet.get_params_req::<P, R>()))
+                ActionTrySendError::Disconnected(action) => {
+                    Err(SendRecvError::ActorDied(action.get_params_req::<P, R>().unwrap()))
                 }
-                PacketTrySendError::Full(_packet) => {
+                ActionTrySendError::Full(_action) => {
                     unreachable!("Should be unbounded!")
                 }
             },
@@ -191,14 +196,14 @@ where
         R: 'static,
         A::Inbox: IsBounded,
     {
-        match self.sender.try_send_packet(self.packet) {
+        match self.sender.try_send(self.action) {
             Ok(()) => Ok(self.reply),
             Err(e) => match e {
-                PacketTrySendError::Disconnected(packet) => {
-                    Err(TrySendError::ActorDied(packet.get_params_req::<P, R>()))
+                ActionTrySendError::Disconnected(action) => {
+                    Err(TrySendError::ActorDied(action.get_params_req::<P, R>().unwrap()))
                 }
-                PacketTrySendError::Full(packet) => {
-                    Err(TrySendError::NoSpace(packet.get_params_req::<P, R>()))
+                ActionTrySendError::Full(action) => {
+                    Err(TrySendError::NoSpace(action.get_params_req::<P, R>().unwrap()))
                 }
             },
         }
@@ -216,14 +221,14 @@ where
         R: 'static,
         A::Inbox: IsBounded,
     {
-        match self.sender.try_send_packet(self.packet) {
+        match self.sender.try_send(self.action) {
             Ok(()) => Ok(self.reply.await?),
             Err(e) => match e {
-                PacketTrySendError::Disconnected(packet) => {
-                    Err(TrySendRecvError::ActorDied(packet.get_params_req::<P, R>()))
+                ActionTrySendError::Disconnected(action) => {
+                    Err(TrySendRecvError::ActorDied(action.get_params_req::<P, R>().unwrap()))
                 }
-                PacketTrySendError::Full(packet) => {
-                    Err(TrySendRecvError::NoSpace(packet.get_params_req::<P, R>()))
+                ActionTrySendError::Full(action) => {
+                    Err(TrySendRecvError::NoSpace(action.get_params_req::<P, R>().unwrap()))
                 }
             },
         }
@@ -241,10 +246,10 @@ where
         R: 'static,
         A::Inbox: IsBounded,
     {
-        match self.sender.send_packet_async(self.packet).await {
+        match self.sender.send_async(self.action).await {
             Ok(()) => Ok(self.reply),
-            Err(PacketSendError::Disconnected(packet)) => {
-                Err(ActorDied(packet.get_params_req::<P, R>()))
+            Err(ActionSendError::Disconnected(action)) => {
+                Err(ActorDied(action.get_params_req::<P, R>().unwrap()))
             }
         }
     }
@@ -261,10 +266,10 @@ where
         R: 'static,
         A::Inbox: IsBounded,
     {
-        match self.sender.send_packet_async(self.packet).await {
+        match self.sender.send_async(self.action).await {
             Ok(()) => Ok(self.reply.await?),
-            Err(PacketSendError::Disconnected(packet)) => {
-                Err(SendRecvError::ActorDied(packet.get_params_req::<P, R>()))
+            Err(ActionSendError::Disconnected(action)) => {
+                Err(SendRecvError::ActorDied(action.get_params_req::<P, R>().unwrap()))
             }
         }
     }
@@ -281,14 +286,14 @@ where
         R: 'static,
         A::Inbox: IsBounded,
     {
-        match self.sender.try_send_packet(self.packet) {
+        match self.sender.try_send(self.action) {
             Ok(()) => Ok(self.reply.blocking_recv()?),
             Err(e) => match e {
-                PacketTrySendError::Disconnected(packet) => {
-                    Err(TrySendRecvError::ActorDied(packet.get_params_req::<P, R>()))
+                ActionTrySendError::Disconnected(action) => {
+                    Err(TrySendRecvError::ActorDied(action.get_params_req::<P, R>().unwrap()))
                 }
-                PacketTrySendError::Full(packet) => {
-                    Err(TrySendRecvError::NoSpace(packet.get_params_req::<P, R>()))
+                ActionTrySendError::Full(action) => {
+                    Err(TrySendRecvError::NoSpace(action.get_params_req::<P, R>().unwrap()))
                 }
             },
         }
@@ -301,10 +306,10 @@ where
     //     R: 'static,
     //     A::Inbox: IsBounded,
     // {
-    //     match self.sender.send_packet_blocking(self.packet) {
+    //     match self.sender.send_action_blocking(self.action) {
     //         Ok(()) => Ok(self.reply),
-    //         Err(PacketSendError::Disconnected(packet)) => {
-    //             Err(ActorDied(packet.get_params_req::<P, R>()))
+    //         Err(PacketSendError::Disconnected(action)) => {
+    //             Err(ActorDied(action.get_params_req::<P, R>()))
     //         }
     //     }
     // }
@@ -315,10 +320,10 @@ where
     //     R: 'static,
     //     A::Inbox: IsBounded,
     // {
-    //     match self.sender.send_packet_blocking(self.packet) {
+    //     match self.sender.send_action_blocking(self.action) {
     //         Ok(()) => Ok(self.reply.blocking_recv()?),
-    //         Err(PacketSendError::Disconnected(packet)) => {
-    //             Err(SendRecvError::ActorDied(packet.get_params_req::<P, R>()))
+    //         Err(PacketSendError::Disconnected(action)) => {
+    //             Err(SendRecvError::ActorDied(action.get_params_req::<P, R>()))
     //         }
     //     }
     // }
@@ -330,12 +335,13 @@ where
 
 /// A message that can be sent. This will not return a [Reply].
 #[derive(Debug)]
+#[must_use]
 pub struct Msg<'a, A, P>
 where
     A: Actor,
 {
-    packet: Packet<A>,
-    sender: &'a PacketSender<A>,
+    action: Action<A>,
+    sender: &'a ActionSender<A>,
     p: PhantomData<P>,
 }
 
@@ -344,9 +350,9 @@ where
     A: Actor,
 {
     /// Create a new message.
-    pub(crate) fn new(sender: &'a PacketSender<A>, packet: Packet<A>) -> Self {
+    pub(crate) fn new(sender: &'a ActionSender<A>, action: Action<A>) -> Self {
         Self {
-            packet,
+            action,
             sender,
             p: PhantomData,
         }
@@ -362,12 +368,12 @@ where
         P: 'static,
         A::Inbox: IsUnbounded,
     {
-        match self.sender.try_send_packet(self.packet) {
+        match self.sender.try_send(self.action) {
             Ok(()) => Ok(()),
-            Err(PacketTrySendError::Disconnected(packet)) => {
-                Err(ActorDied(packet.get_params_msg::<P>()))
+            Err(ActionTrySendError::Disconnected(action)) => {
+                Err(ActorDied(action.get_params::<P>().unwrap()))
             }
-            Err(PacketTrySendError::Full(_)) => unreachable!("should be unbounded"),
+            Err(ActionTrySendError::Full(_)) => unreachable!("should be unbounded"),
         }
     }
 
@@ -378,14 +384,14 @@ where
         P: 'static,
         A::Inbox: IsBounded,
     {
-        match self.sender.try_send_packet(self.packet) {
+        match self.sender.try_send(self.action) {
             Ok(()) => Ok(()),
             Err(e) => match e {
-                PacketTrySendError::Disconnected(packet) => {
-                    Err(TrySendError::ActorDied(packet.get_params_msg()))
+                ActionTrySendError::Disconnected(action) => {
+                    Err(TrySendError::ActorDied(action.get_params().unwrap()))
                 }
-                PacketTrySendError::Full(packet) => {
-                    Err(TrySendError::NoSpace(packet.get_params_msg()))
+                ActionTrySendError::Full(action) => {
+                    Err(TrySendError::NoSpace(action.get_params().unwrap()))
                 }
             },
         }
@@ -402,9 +408,9 @@ where
         P: 'static,
         A::Inbox: IsBounded,
     {
-        match self.sender.send_packet_async(self.packet).await {
+        match self.sender.send_async(self.action).await {
             Ok(()) => Ok(()),
-            Err(PacketSendError::Disconnected(packet)) => Err(ActorDied(packet.get_params_msg())),
+            Err(ActionSendError::Disconnected(action)) => Err(ActorDied(action.get_params().unwrap())),
         }
     }
 
@@ -413,10 +419,11 @@ where
     //     P: 'static,
     //     A::Inbox: IsBounded,
     // {
-    //     match self.sender.send_packet_blocking(self.packet) {
+    //     match self.sender.send_action_blocking(self.action) {
     //         Ok(()) => Ok(()),
-    //         Err(PacketSendError::Disconnected(packet)) => Err(ActorDied(packet.get_params_msg())),
+    //         Err(PacketSendError::Disconnected(action)) => Err(ActorDied(action.get_params())),
     //     }
     // }
 }
 
+impl<A: Actor> Unpin for ActionReceiver<A> {}
