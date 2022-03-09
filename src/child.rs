@@ -145,7 +145,7 @@ impl<A: Actor> Future for Child<A> {
             .poll_unpin(cx)
             .map(|res| match res {
                 Ok(some) => match some {
-                    InternalExitReason::InitFailed => ProcessExit::InitFailed,
+                    InternalExitReason::InitFailed(e) => ProcessExit::InitFailed(e),
                     InternalExitReason::Handled(returns) => ProcessExit::Handled(returns),
                 },
                 Err(e) => match e.is_panic() {
@@ -197,7 +197,7 @@ pub enum ProcessExit<A: Actor> {
     /// The actor has handled it's exit in a proper manner
     Handled(A::ExitWith),
     /// The initialisation of this actor has failed
-    InitFailed,
+    InitFailed(A::InitError),
     /// The actor has panicked. Inside is the panic information.
     Panic(Box<dyn Any + Send>),
     /// The process has been hard-aborted

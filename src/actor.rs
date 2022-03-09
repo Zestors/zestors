@@ -1,9 +1,9 @@
-use std::{fmt::Debug, time::Duration};
+use std::{fmt::Debug, time::Duration, pin::Pin};
 
 use futures::{
     future::{self, Fuse},
     stream::{self, Next, PollNext},
-    FutureExt, StreamExt,
+    FutureExt, Stream, StreamExt, Future,
 };
 
 use crate::{
@@ -11,9 +11,9 @@ use crate::{
     action::Action,
     address::Address,
     child::Child,
+    context::{BasicCtx, StreamItem},
     flows::{EventFlow, InitFlow, MsgFlow},
     inbox::{channel, ActionReceiver, Capacity, Unbounded},
-    state::{ActorState, State, StreamItem},
     AnyhowError,
 };
 
@@ -69,7 +69,7 @@ use crate::{
 ///     // or: let (process, address) = MyActor{}.spawn();
 /// }
 ///
-pub trait Actor: Send + Sync + 'static + Debug {
+pub trait Actor: Send + 'static + Debug + Sized {
     /// The value that can be used to initialise this actor. This value is then passed on to
     /// [Actor::init], which initialises the actor and returns a `Self`.
     ///
@@ -77,7 +77,9 @@ pub trait Actor: Send + Sync + 'static + Debug {
     ///
     /// The default value for this is `Self`, which means that first `Self` has to be created,
     /// and then the actor can be spawned with this value.
-    type Init: Send;
+    type Init: Send = Self;
+
+    type InitError: Send = ();
 
     /// The error type that can be used to stop this [Actor]. [Flow], [ReqFlow] or [InitFlow] can
     /// all propagate this error by applying `?` in a function with these return types.
@@ -104,19 +106,19 @@ pub trait Actor: Send + Sync + 'static + Debug {
     ///
     /// For 99% of applications, the default state of [State] should work perfectly fine. The state
     /// can be used to schedule futures, or get the [Actor::Address] of your own actor.
-    type State: ActorState<Self> = State<Self>;
+    type Ctx: Stream<Item = StreamItem<Self>> + Unpin + Send;
 
-    /// Whether the inbox should be [Bounded] or [Unbounded]. If setting this to [Bounded],
-    /// don't forget to set [Actor::INBOX_CAPACITY] as well.
-    ///
-    /// The default value for this is [Unbounded].
-    type Inbox: Capacity<Self::Inbox> = Unbounded;
+    // /// Whether the inbox should be [Bounded] or [Unbounded]. If setting this to [Bounded],
+    // /// don't forget to set [Actor::INBOX_CAPACITY] as well.
+    // ///
+    // /// The default value for this is [Unbounded].
+    // type Inbox: Capacity<Self::Inbox> = Unbounded;
 
-    /// If the [Actor::Inbox] is [Bounded], this will be the inbox capacity. If [Unbounded], this
-    /// value does not do anything.
-    ///
-    /// The default for this value is `0`.
-    const INBOX_CAPACITY: usize = 0;
+    // /// If the [Actor::Inbox] is [Bounded], this will be the inbox capacity. If [Unbounded], this
+    // /// value does not do anything.
+    // ///
+    // /// The default for this value is `0`.
+    // const INBOX_CAPACITY: usize = 0;
 
     /// This value determines how long this [Actor] should have before it is shut down if it's
     /// [Process] is dropped. When the associated [Process] is dropped, it will have
@@ -134,15 +136,11 @@ pub trait Actor: Send + Sync + 'static + Debug {
     /// can cancel initialisation and return an error.
     ///
     /// Cancelation does **not** call [Actor::handle_exit], but directly exits the process instead.
-    fn init(init: Self::Init, state: &mut Self::State) -> InitFlow<Self>
-    where
-        Self: Sized;
+    fn init(init: Self::Init, state: Address<Self>) -> Pin<Box<dyn Future<Output = InitFlow<Self>> + Send>>;
 
     /// Whenever this actor exits for any [ExitReason] (excluding `panics` or `hard-aborts`),
     /// this function is called with the reason.
-    fn handle_exit(self, state: Self::State, reason: ExitReason<Self>) -> Self::ExitWith
-    where
-        Self: Sized;
+    fn exit(self, reason: ExitReason<Self>) -> Self::ExitWith;
 
     /// Whenever the actor is detatched, and the handle is subsequently dropped,
     /// this function is called to inform the actor. This means the the actor is not part of a
@@ -150,12 +148,11 @@ pub trait Actor: Send + Sync + 'static + Debug {
     /// useful to log a message here if this should never happen. (Or `MsgFlow::Exit`)
     ///
     /// By default, the actor just resumes execution as if nothing happened.
-    fn handle_isolated(&mut self, state: &mut Self::State) -> MsgFlow<Self>
-    where
-        Self: Sized,
-    {
+    fn isolated(&mut self) -> MsgFlow<Self> {
         MsgFlow::Ok
     }
+
+    fn ctx(&mut self) -> &mut Self::Ctx;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -168,33 +165,19 @@ pub trait Actor: Send + Sync + 'static + Debug {
 /// ```
 pub fn spawn<A: Actor>(init: A::Init) -> (Child<A>, Address<A>) {
     // Get the capacity for the channel.
-    let capacity = <A::Inbox as Capacity<A::Inbox>>::capacity(A::INBOX_CAPACITY);
+    // let capacity = <A::Inbox as Capacity<A::Inbox>>::capacity(A::INBOX_CAPACITY);
     // Create the sender and receiver.
-    let (sender, receiver) = channel(capacity);
+    let (sender, receiver) = channel(None);
     // Create the raw address from this sender.
-    let raw_address = Address::new(sender);
+    let address = Address::new(sender);
     // create the abort sender
     let (abort_sender, abort_receiver) = AbortSender::new();
-    // create the state
-    let state = A::State::starting(raw_address.clone().into());
     // spawn the task
-    let handle = tokio::task::spawn(event_loop(init, state, receiver, abort_receiver));
+    let handle = tokio::task::spawn(event_loop(init, receiver, address.clone(), abort_receiver));
     // wrap handle in a new process
-    let process = Child::new(handle, raw_address.clone().into(), abort_sender, true);
+    let process = Child::new(handle, address.clone().into(), abort_sender, true);
     // return the process and the address
-    (process, raw_address.into())
-}
-
-pub trait Spawn: Actor<Init = Self> + Sized {
-    /// Spawn an actor for which [Actor::Init] == `Self`. See [spawn] documentation for more
-    /// information
-    fn spawn(self) -> (Child<Self>, Address<Self>);
-}
-
-impl<A: Actor<Init = Self>> Spawn for A {
-    fn spawn(self) -> (Child<Self>, Address<A>) {
-        spawn::<A>(self)
-    }
+    (process, address.into())
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -220,10 +203,10 @@ pub enum ExitReason<A: Actor + ?Sized> {
 //  event_loop
 //--------------------------------------------------------------------------------------------------
 
-async fn event_loop<A: Actor<State = S>, S: ActorState<A>>(
+async fn event_loop<A: Actor>(
     init: A::Init,
-    mut state: S,
     mut receiver: ActionReceiver<A>,
+    address: Address<A>,
     abort_receiver: AbortReceiver,
 ) -> InternalExitReason<A> {
     //-------------------------------------
@@ -232,39 +215,41 @@ async fn event_loop<A: Actor<State = S>, S: ActorState<A>>(
     let mut optional_abort_receiver = Some(abort_receiver);
     let mut optional_before = None;
     let mut optional_after = None;
-    let mut actor = match <A as Actor>::init(init, &mut state) {
+    let mut actor = match <A as Actor>::init(init, address).await {
         InitFlow::Init(actor) => actor,
         InitFlow::InitAndBefore(actor, action) => {
             optional_before = Some(action);
             actor
         }
-        InitFlow::Exit => return InternalExitReason::InitFailed,
+        InitFlow::Error(e) => return InternalExitReason::InitFailed(e),
+        InitFlow::InitAndAfter(actor, action) => {
+            optional_after = Some(action);
+            actor
+        },
     };
 
     loop {
         //-------------------------------------
         // Select the next event
         //-------------------------------------
-        let next_event = select(&mut optional_abort_receiver, &mut state, &mut receiver).await;
+        let next_event = select(&mut optional_abort_receiver, &mut receiver, actor.ctx()).await;
 
         //-------------------------------------------------
         //  Handle a possible before
         //-------------------------------------------------
         if let Some(action) = optional_before.take() {
-            match action.handle(&mut actor, &mut state).await {
+            match action.handle(&mut actor).await {
                 EventFlow::Ok => (),
                 EventFlow::Before(_) => (), // ignore before from before
                 EventFlow::ErrorExit(e) => {
-                    return InternalExitReason::Handled(<A as Actor>::handle_exit(
+                    return InternalExitReason::Handled(<A as Actor>::exit(
                         actor,
-                        state,
                         ExitReason::Error(e),
                     ))
                 }
                 EventFlow::NormalExit(n) => {
-                    return InternalExitReason::Handled(<A as Actor>::handle_exit(
+                    return InternalExitReason::Handled(<A as Actor>::exit(
                         actor,
-                        state,
                         ExitReason::Normal(n),
                     ))
                 }
@@ -276,18 +261,14 @@ async fn event_loop<A: Actor<State = S>, S: ActorState<A>>(
         //  Handle the next event
         //-------------------------------------------------
         let flow = match next_event {
-            NextEvent::StreamItem(StreamItem::Action(action)) => {
-                action.handle(&mut actor, &mut state).await
-            }
-            NextEvent::StreamItem(StreamItem::Flow(flow)) => flow.into_internal(),
+            NextEvent::StreamItem(item) => item.handle(&mut actor).await,
             NextEvent::SoftAbort => {
-                return InternalExitReason::Handled(<A as Actor>::handle_exit(
+                return InternalExitReason::Handled(<A as Actor>::exit(
                     actor,
-                    state,
                     ExitReason::SoftAbort,
                 ))
             }
-            NextEvent::Isolated => actor.handle_isolated(&mut state).into_internal(),
+            NextEvent::Isolated => actor.isolated().into_event_flow(),
         };
 
         //-------------------------------------------------
@@ -298,16 +279,11 @@ async fn event_loop<A: Actor<State = S>, S: ActorState<A>>(
             EventFlow::After(action) => optional_after = Some(action),
             EventFlow::Before(action) => optional_before = Some(action),
             EventFlow::ErrorExit(e) => {
-                return InternalExitReason::Handled(<A as Actor>::handle_exit(
-                    actor,
-                    state,
-                    ExitReason::Error(e),
-                ))
+                return InternalExitReason::Handled(<A as Actor>::exit(actor, ExitReason::Error(e)))
             }
             EventFlow::NormalExit(n) => {
-                return InternalExitReason::Handled(<A as Actor>::handle_exit(
+                return InternalExitReason::Handled(<A as Actor>::exit(
                     actor,
-                    state,
                     ExitReason::Normal(n),
                 ))
             }
@@ -317,20 +293,18 @@ async fn event_loop<A: Actor<State = S>, S: ActorState<A>>(
         //  Handle a possible after
         //------------------------------------------------------------------------------------------------
         if let Some(action) = optional_after.take() {
-            match action.handle(&mut actor, &mut state).await {
+            match action.handle(&mut actor).await {
                 EventFlow::Ok => (),
                 EventFlow::Before(_) => (), // ignore before from before
                 EventFlow::ErrorExit(e) => {
-                    return InternalExitReason::Handled(<A as Actor>::handle_exit(
+                    return InternalExitReason::Handled(<A as Actor>::exit(
                         actor,
-                        state,
                         ExitReason::Error(e),
                     ))
                 }
                 EventFlow::NormalExit(n) => {
-                    return InternalExitReason::Handled(<A as Actor>::handle_exit(
+                    return InternalExitReason::Handled(<A as Actor>::exit(
                         actor,
-                        state,
                         ExitReason::Normal(n),
                     ))
                 }
@@ -345,11 +319,11 @@ async fn event_loop<A: Actor<State = S>, S: ActorState<A>>(
 //--------------------------------------------------------------------------------------------------
 
 // return the next event which should be handled by this actor.
-async fn select<A: Actor<State = S>, S: ActorState<A>>(
+async fn select<A: Actor>(
     optional_abort_receiver: &mut Option<AbortReceiver>,
-    state: &mut S,
     receiver: &mut ActionReceiver<A>,
-) -> NextEvent<A, S> {
+    ctx: &mut A::Ctx,
+) -> NextEvent<A> {
     if let Some(abort_receiver) = optional_abort_receiver {
         tokio::select! {
             biased;
@@ -367,7 +341,7 @@ async fn select<A: Actor<State = S>, S: ActorState<A>>(
                     }
                 }
             }
-            item = state.next() => {
+            item = ctx.next() => {
                 match item {
                     Some(item) => {
                         NextEvent::StreamItem(item)
@@ -388,14 +362,14 @@ async fn select<A: Actor<State = S>, S: ActorState<A>>(
             }
         }
     } else {
-        select_without_abort(state, receiver).await
+        select_without_abort(ctx, receiver).await
     }
 }
 
-async fn select_without_state<A: Actor<State = S>, S: ActorState<A>>(
+async fn select_without_state<A: Actor>(
     receiver: &mut ActionReceiver<A>,
     abort_receiver: &mut AbortReceiver,
-) -> NextEvent<A, S> {
+) -> NextEvent<A> {
     tokio::select! {
         biased;
 
@@ -415,12 +389,12 @@ async fn select_without_state<A: Actor<State = S>, S: ActorState<A>>(
     }
 }
 
-async fn select_without_abort<A: Actor<State = S>, S: ActorState<A>>(
-    state: &mut S,
+async fn select_without_abort<A: Actor>(
+    ctx: &mut A::Ctx,
     receiver: &mut ActionReceiver<A>,
-) -> NextEvent<A, S> {
+) -> NextEvent<A> {
     tokio::select! {
-        item = state.next() => {
+        item = ctx.next() => {
             match item {
                 Some(item) => {
                     NextEvent::StreamItem(item)
@@ -436,60 +410,12 @@ async fn select_without_abort<A: Actor<State = S>, S: ActorState<A>>(
     }
 }
 
-// return the next event which should be handled by this actor.
-async fn next_event_old<A: Actor<State = S>, S: ActorState<A>>(
-    optional_abort_receiver: &mut Option<AbortReceiver>,
-    state: S,
-    receiver: ActionReceiver<A>,
-) -> (S, ActionReceiver<A>, NextEvent<A, S>) {
-    // let mut combined_stream = stream::select_with_strategy(
-    //     state.map(|scheduled| CombinedStreamOutput::Scheduled(scheduled)),
-    //     receiver.map(|packet| CombinedStreamOutput::ActionMsg(packet)),
-    //     left_first_strat,
-    // );
-
-    // let next_val = match optional_abort_receiver.take() {
-    //     // There is still an abort receiver
-    //     Some(abort_receiver) => {
-    //         match future::select(abort_receiver, combined_stream.next()).await {
-    //             future::Either::Right((next_val, abort_receiver)) => {
-    //                 optional_abort_receiver.replace(abort_receiver);
-    //                 NextEvent::Stream(next_val.expect("Addresses should never all be dropped"))
-    //             }
-    //             future::Either::Left((to_abort, next)) => match to_abort {
-    //                 // Process has been aborted
-    //                 ToAbort::Abort => {
-    //                     drop(next);
-    //                     NextEvent::SoftAbort
-    //                 }
-    //                 // Process has been detached
-    //                 ToAbort::Detatch => NextEvent::Stream(
-    //                     next.await.expect("Addresses should never all be dropped"),
-    //                 ),
-    //             },
-    //         }
-    //     }
-    //     // Abort receiver has already been consumed
-    //     None => NextEvent::Stream(
-    //         combined_stream
-    //             .next()
-    //             .await
-    //             .expect("Addresses should never all be dropped"),
-    //     ),
-    // };
-
-    // // Destroy the combined stream again
-    // let (state, receiver) = combined_stream.into_inner();
-    // (state.into_inner(), receiver.into_inner(), next_val)
-    todo!()
-}
-
 //--------------------------------------------------------------------------------------------------
 //  Helper types
 //--------------------------------------------------------------------------------------------------
 
 /// The next event that should be handled by the actor.
-enum NextEvent<A: Actor<State = S>, S: ActorState<A>> {
+enum NextEvent<A: Actor> {
     StreamItem(StreamItem<A>),
     Isolated,
     SoftAbort,
@@ -509,14 +435,14 @@ enum CombinedStreamOutput<A: Actor> {
 /// An internal exitreason, which is then converted into the actual exit reason upon awaiting a
 /// process.
 pub(crate) enum InternalExitReason<A: Actor> {
-    InitFailed,
+    InitFailed(A::InitError),
     Handled(A::ExitWith),
 }
 
 impl<A: Actor> std::fmt::Debug for InternalExitReason<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InitFailed => write!(f, "InitFailed"),
+            Self::InitFailed(e) => write!(f, "InitFailed"),
             Self::Handled(arg0) => f.debug_tuple("Handled").finish(),
         }
     }

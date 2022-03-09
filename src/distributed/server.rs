@@ -1,4 +1,4 @@
-use crate::distributed::ws_message::WsMsg;
+use std::any::Any;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -9,6 +9,7 @@ use super::challenge;
 use super::challenge::ChallengeError;
 use super::cluster::AddNodeError;
 use super::local_node::LocalNode;
+use super::msg;
 use super::ws_stream::WsRecvError;
 use super::ws_stream::WsSendError;
 use super::ws_stream::WsStream;
@@ -70,19 +71,20 @@ impl Server {
     fn incoming_node(local_node: LocalNode, stream: TcpStream, addr: SocketAddr) {
         tokio::task::spawn(async move {
             // Attempt ws handshake as the server
-            let stream = WsStream::handshake_as_server(MaybeTlsStream::Plain(stream))
-                .await
-                .unwrap();
+            // let stream = WsStream::handshake_as_server(MaybeTlsStream::Plain(stream))
+            //     .await
+            //     .unwrap();
 
-            // Do challenge as the server
-            let (node_id, stream) = match challenge::as_server(&local_node, stream).await {
-                Ok(stream) => stream,
-                Err(_e) => return,
-            };
+            // // Do challenge as the server
+            // let (node_id, stream) = match challenge::as_server(&local_node, stream).await {
+            //     Ok(stream) => stream,
+            //     Err(_e) => return,
+            // };
 
-            let _ = local_node
-                .get_cluster()
-                .spawn_node(&local_node, node_id, stream);
+            // let _ = local_node
+            //     .cluster()
+            //     .spawn_node(&local_node, node_id, stream);
+            todo!()
         });
     }
 }
@@ -110,17 +112,17 @@ pub(crate) enum NodeExit {
 pub(crate) enum NodeMsg {}
 
 #[derive(Debug)]
-pub enum NodeSetupError {
+pub enum NodeConnectError {
     /// Could not set up a tcp-connection to the address.
     Io(std::io::Error),
     /// The websocket handshake failed.
     HandShakeFailed(tungstenite::Error),
     /// The protocols did not match up.
-    Protocol(WsMsg, &'static str),
+    Protocol(Box<dyn Any>, &'static str),
     /// The challenge failed.
     ChallengeFailed(ChallengeError),
     /// There was a problem receiving a message through the ws.
-    WsRecv(WsRecvError),
+    WsRecv(Box<dyn std::fmt::Debug>),
     /// There was a problem sending a message through the ws.
     WsSend(WsSendError),
 
@@ -129,31 +131,31 @@ pub enum NodeSetupError {
     NodeIdIsLocalNode,
 }
 
-impl From<WsRecvError> for NodeSetupError {
+impl From<WsRecvError> for NodeConnectError {
     fn from(e: WsRecvError) -> Self {
-        Self::WsRecv(e)
+        Self::WsRecv(Box::new(e))
     }
 }
 
-impl From<WsSendError> for NodeSetupError {
+impl From<WsSendError> for NodeConnectError {
     fn from(e: WsSendError) -> Self {
         Self::WsSend(e)
     }
 }
 
-impl From<ChallengeError> for NodeSetupError {
+impl From<ChallengeError> for NodeConnectError {
     fn from(e: ChallengeError) -> Self {
         Self::ChallengeFailed(e)
     }
 }
 
-impl From<std::io::Error> for NodeSetupError {
+impl From<std::io::Error> for NodeConnectError {
     fn from(e: std::io::Error) -> Self {
         Self::Io(e)
     }
 }
 
-impl From<AddNodeError> for NodeSetupError {
+impl From<AddNodeError> for NodeConnectError {
     fn from(e: AddNodeError) -> Self {
         match e {
             AddNodeError::NodeIdAlreadyRegistered => Self::NodeIdAlreadyRegistered,

@@ -1,26 +1,16 @@
-use std::any::Any;
-use std::convert::Infallible;
-use std::marker::PhantomData;
 use std::pin::Pin;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use async_channel::Sender;
 use futures::Future;
 use uuid::Uuid;
-use zestors::actor::{self, Spawn};
-use zestors::address::{Address, Call};
-use zestors::child::{Child, ProcessExit};
+use zestors::actor::{self};
+use zestors::address::{Address};
+use zestors::context::{BasicCtx, NoCtx};
 use zestors::flows::{InitFlow, ReqFlow};
-use zestors::inbox::IsUnbounded;
 use zestors::messaging::Req;
-use zestors::state::State;
 use zestors::{
     actor::Actor,
-    address::{self, Addressable},
-    distributed::{
-        local_node::{self, LocalNode},
-        node,
-    },
+    distributed::local_node::{self, LocalNode},
     flows::MsgFlow,
     messaging::Msg,
 };
@@ -29,8 +19,6 @@ use zestors::{
 pub async fn main() {
     let token1 = Uuid::new_v4();
     let token2 = Uuid::new_v4();
-
-    let time = Instant::now();
 
     let local_node_1 = LocalNode::initialize(token1, 1, "127.0.0.1:1234".parse().unwrap())
         .await
@@ -59,211 +47,37 @@ pub async fn main() {
         .await
         .unwrap();
 
-    println!("{:?}", local_node_1.get_node(2));
-    println!("{:?}", local_node_1.get_node(3));
-    println!("{:?}", local_node_2.get_node(1));
-    println!("{:?}", local_node_2.get_node(3)); 
-    println!("{:?}", local_node_3.get_node(1));
-    println!("{:?}", local_node_3.get_node(2));
+    main1(local_node_1).await;
+    main2(local_node_2).await;
+    main3(local_node_3).await;
 }
 
-#[derive(Debug)]
-struct C2(i64);
+async fn main1(local_node: LocalNode) {
+    let node2 = local_node.cluster().get_node(2).unwrap();
+    let node3 = local_node.cluster().get_node(3).unwrap();
 
-impl Actor for C2 {
-    type Init = i64;
-    type ExitError = zestors::AnyhowError;
-    type ExitNormal = ();
-    type ExitWith = Self;
-    type State = zestors::state::State<Self>;
-    type Inbox = zestors::inbox::Unbounded;
-    const INBOX_CAPACITY: usize = 0;
-    const ABORT_TIMER: std::time::Duration = std::time::Duration::from_secs(5);
+    let (child, address) = actor::spawn::<MyActor>(MyActor);
+    let pid = local_node
+        .register(&address, Some("hi".to_string()))
+        .unwrap();
 
-    fn init(init: Self::Init, state: &mut Self::State) -> zestors::flows::InitFlow<Self> {
-        InitFlow::Init(Self(init))
-    }
-
-    fn handle_exit(self, state: Self::State, reason: zestors::actor::ExitReason<Self>) -> Self {
-        self
-    }
+    println!("{:?}\n\n{:?}\n\n{:?}", pid.id(), child, address)
 }
 
-#[derive(Debug)]
-struct Calculator(i64);
-
-impl Actor for Calculator {
-    type Init = i64;
-    type ExitError = zestors::AnyhowError;
-    type ExitNormal = ();
-    type ExitWith = Self;
-    type State = zestors::state::State<Self>;
-    type Inbox = zestors::inbox::Unbounded;
-    const INBOX_CAPACITY: usize = 0;
-    const ABORT_TIMER: std::time::Duration = std::time::Duration::from_secs(5);
-
-    fn init(init: Self::Init, state: &mut Self::State) -> zestors::flows::InitFlow<Self> {
-        InitFlow::Init(Self(init))
-    }
-
-    fn handle_exit(self, state: Self::State, reason: zestors::actor::ExitReason<Self>) -> Self {
-        self
-    }
+async fn main2(local_node: LocalNode) {
+    let node1 = local_node.cluster().get_node(1).unwrap();
+    let node3 = local_node.cluster().get_node(3).unwrap();
 }
 
-pub trait Supervises<A: Actor> {
-    fn supervise(&self, process: Child<A>) -> Msg<A, Child<A>>;
-    fn spawn_and_supervise(&self, init: A::Init) -> Req<A, <A as Actor>::Init, Address<A>>;
+async fn main3(local_node: LocalNode) {
+    let node1 = local_node.cluster().get_node(1).unwrap();
+    let node2 = local_node.cluster().get_node(2).unwrap();
 }
-
-impl Supervises<Calculator> for Address<Calculator> {
-    fn supervise(&self, address: Child<Calculator>) -> Msg<'_, Calculator, Child<Calculator>> {
-        self.msg(
-            |_, state, address| {
-                state.schedule_and_then(address, Calculator::supervise_calculator);
-
-                MsgFlow::Ok
-            },
-            address,
-        )
-    }
-
-    fn spawn_and_supervise(
-        &self,
-        init: <Calculator as Actor>::Init,
-    ) -> Req<Calculator, <Calculator as Actor>::Init, Address<Calculator>> {
-        self.req(
-            |_, state, init| {
-                let (pid, address) = actor::spawn::<Calculator>(init);
-
-                state.schedule_and_then(pid, Calculator::supervise_calculator);
-
-                ReqFlow::Reply(address)
-            },
-            init,
-        )
-    }
-}
-
-impl Supervises<C2> for Address<Calculator> {
-    fn supervise(&self, address: Child<C2>) -> Msg<'_, C2, Child<C2>> {
-        todo!()
-    }
-
-    fn spawn_and_supervise(
-        &self,
-        init: <C2 as Actor>::Init,
-    ) -> Req<C2, <C2 as Actor>::Init, Address<C2>> {
-        todo!()
-    }
-}
-
-pub trait SomeTrait: Actor {
-    fn something(&mut self, state: &mut Self::State, p: ()) -> MsgFlow<Self>
-    where
-        Self: Sized;
-}
-
-impl SomeTrait for Calculator {
-    fn something(&mut self, state: &mut Self::State, p: ()) -> MsgFlow<Self> {
-        MsgFlow::Ok
-    }
-}
-
-impl Calculator {
-    fn spawn_sub(
-        &mut self,
-        state: &mut State<Self>,
-        init: i64,
-    ) -> ReqFlow<Self, Address<Calculator>> {
-        let (pid, address) = actor::spawn::<Calculator>(init);
-
-        state.schedule_and_then(pid, Calculator::supervise_calculator);
-
-        ReqFlow::Reply(address)
-    }
-
-    fn msg2(&mut self, _: &mut State<Self>, params: (u32, u32)) -> MsgFlow<Self> {
-        MsgFlow::Ok
-    }
-
-    async fn msg2_async(&mut self, _: &mut State<Self>, params: (u32, u32)) -> MsgFlow<Self> {
-        // Box::pin(async move {
-        println!("Hi!");
-        MsgFlow::Ok
-        // })
-    }
-
-    fn supervise(
-        &mut self,
-        state: &mut State<Self>,
-        process: Child<Calculator>,
-    ) -> ReqFlow<Self, ()> {
-        state.schedule_and_then(process, Calculator::supervise_calculator);
-
-        ReqFlow::Reply(())
-    }
-
-    fn supervise_calculator(
-        &mut self,
-        state: &mut State<Self>,
-        exit: ProcessExit<Calculator>,
-    ) -> MsgFlow<Self> {
-        match exit {
-            ProcessExit::Handled(calculator) => {
-                // Just restart the calculator
-                let (pid, _) = actor::spawn::<Calculator>(calculator.0);
-                state.schedule_and_then(pid, Calculator::supervise_calculator)
-            }
-            ProcessExit::InitFailed | ProcessExit::Panic(_) | ProcessExit::HardAbort => {
-                // Create a new calculator and spawn it
-                let (pid, _) = actor::spawn::<Calculator>(0);
-                state.schedule_and_then(pid, Calculator::supervise_calculator)
-            }
-        }
-        MsgFlow::Ok
-    }
-}
-
-pub trait HandlesTrait {
-    fn test() -> Box<Self>
-    where
-        Self: Sized;
-}
-
-pub struct Handles<M: ?Sized> {
-    m: PhantomData<M>,
-}
-
-struct DynAddressInner;
 
 type BoxFut<T> = Pin<Box<dyn Future<Output = T>>>;
 
-struct DynAddress<T: ?Sized> {
-    t: PhantomData<T>,
-    handle_pointer: usize,
-    address: DynAddressInner,
-}
-
-struct DynSomeTrait;
-
-// fn testing(
-//     boxed: DynAddress<DynSomeTrait>,
-//     boxed2: Box<
-//         dyn Actor<
-//             Init = (),
-//             ExitError = (),
-//             ExitNormal = (),
-//             ExitWith = (),
-//             State = (),
-//             Inbox = (),
-//         >,
-//     >,
-// ) {
-// }
-
 trait CallRemote<'a, A: Actor, M, P, F, R: 'a> {
-    fn call_rem(&'a self, function: fn(&mut A, &mut A::State, M) -> F, params: P) -> R;
+    fn call_rem(&'a self, function: fn(&mut A, &mut A::Ctx, M) -> F, params: P) -> R;
 }
 
 mod call_pid {
@@ -275,7 +89,7 @@ mod call_pid {
     {
         fn call_rem(
             &self,
-            function: fn(&mut A, &mut <A as Actor>::State, M1) -> MsgFlow<A>,
+            function: fn(&mut A, &mut <A as Actor>::Ctx, M1) -> MsgFlow<A>,
             params: &M1,
         ) -> Msg<'a, A, M1> {
             todo!()
@@ -288,7 +102,7 @@ mod call_pid {
     {
         fn call_rem(
             &self,
-            function: fn(&mut A, &mut <A as Actor>::State, M1) -> BoxFut<MsgFlow<A>>,
+            function: fn(&mut A, &mut <A as Actor>::Ctx, M1) -> BoxFut<MsgFlow<A>>,
             params: &M1,
         ) -> Msg<'a, A, M1> {
             todo!()
@@ -303,7 +117,7 @@ mod call_pid {
     {
         fn call_rem(
             &self,
-            function: fn(&mut A, &mut <A as Actor>::State, (M1, M2)) -> MsgFlow<A>,
+            function: fn(&mut A, &mut <A as Actor>::Ctx, (M1, M2)) -> MsgFlow<A>,
             params: (&M1, &M2),
         ) -> Msg<'a, A, (M1, M2)> {
             todo!()
@@ -319,7 +133,7 @@ mod call_pid {
     {
         fn call_rem(
             &self,
-            function: fn(&mut A, &mut <A as Actor>::State, (M1, M2)) -> BoxFut<MsgFlow<A>>,
+            function: fn(&mut A, &mut <A as Actor>::Ctx, (M1, M2)) -> BoxFut<MsgFlow<A>>,
             params: (&M1, &M2),
         ) -> Msg<'a, A, (M1, M2)> {
             todo!()
@@ -334,7 +148,7 @@ mod call_pid {
     {
         fn call_rem(
             &self,
-            function: fn(&mut A, &mut <A as Actor>::State, M1) -> ReqFlow<A, R>,
+            function: fn(&mut A, &mut <A as Actor>::Ctx, M1) -> ReqFlow<A, R>,
             params: &M1,
         ) -> Req<'a, A, M1, R> {
             todo!()
@@ -349,7 +163,7 @@ mod call_pid {
     {
         fn call_rem(
             &self,
-            function: fn(&mut A, &mut <A as Actor>::State, M1) -> BoxFut<ReqFlow<A, R>>,
+            function: fn(&mut A, &mut <A as Actor>::Ctx, M1) -> BoxFut<ReqFlow<A, R>>,
             params: &M1,
         ) -> Req<'a, A, M1, R> {
             todo!()
@@ -366,7 +180,7 @@ mod call_pid {
     {
         fn call_rem(
             &self,
-            function: fn(&mut A, &mut <A as Actor>::State, (M1, M2)) -> ReqFlow<A, R>,
+            function: fn(&mut A, &mut <A as Actor>::Ctx, (M1, M2)) -> ReqFlow<A, R>,
             params: (&M1, &M2),
         ) -> Req<'a, A, (M1, M2), R> {
             todo!()
@@ -383,7 +197,7 @@ mod call_pid {
     {
         fn call_rem(
             &self,
-            function: fn(&mut A, &mut <A as Actor>::State, (M1, M2)) -> BoxFut<ReqFlow<A, R>>,
+            function: fn(&mut A, &mut <A as Actor>::Ctx, (M1, M2)) -> BoxFut<ReqFlow<A, R>>,
             params: (&M1, &M2),
         ) -> Req<'a, A, (M1, M2), R> {
             todo!()
@@ -391,72 +205,43 @@ mod call_pid {
     }
 }
 
-async fn main2() {
-    let (child, address1) = actor::spawn::<Calculator>(0);
-    let (child2, address2) = actor::spawn::<Calculator>(10);
+#[derive(Debug)]
+struct MyActor;
 
-    let address = address1
-        .call(Calculator::spawn_sub, 10)
-        .send_recv()
-        .await
-        .unwrap();
+impl Actor for MyActor {
+    type Init = Self;
+    type ExitError = zestors::AnyhowError;
+    type ExitNormal = ();
+    type ExitWith = actor::ExitReason<Self>;
+    type Ctx = BasicCtx<Self>;
+    const ABORT_TIMER: Duration = Duration::from_secs(5);
 
-    let reply = address1.call(Calculator::supervise, child).send().unwrap();
-
-    // let exit = pid2.await;
-
-    // let res = address1.msg_ref(Calculator::supervise_calculator, &exit);
-
-    let res = address1.call_rem(Calculator::msg2, (&10, &10));
-    let res = address1.call_rem(Calculator::msg2, &(10, 10));
-    // let res = address1.call_rem(Calculator::msg2_async, (&10, &10));
-    // let res = address1.call_rem(Calculator::msg2_async, (&10, &10));
-    let res = address1.call_rem(Calculator::spawn_sub, &10);
-
-    let res = address1.call(Calculator::msg2, (10, 10));
-    let res = address1.call(Calculator::msg2_async, (10, 10));
-    let res = address1.call(Calculator::spawn_sub, 10);
-
-    let res = child2.call(Calculator::msg2, (10, 10));
-    let res = child2.call(Calculator::msg2_async, (10, 10));
-    let res = child2.call(Calculator::spawn_sub, 10);
-
-    // let res = <Address<Calculator> as Supervises<Calculator>>::spawn_and_supervise(&address1, 10)
-    //     .send_recv()
-    //     .await;
-
-    // let addr = match res {
-    //     Ok(addr) => addr,
-    //     Err(e) => match e {
-    //         SendRecvError::ActorDied(msg) => todo!(),
-    //         SendRecvError::ActorDiedAfterSending => todo!(),
-    //     },
-    // };
-}
-
-pub trait Message {
-    type Params;
-    type Flow;
-}
-
-struct DynamicAddress1<M: Message> {
-    sender: Sender<Box<dyn Any>>,
-    p: PhantomData<M>,
-    ptr: usize,
-}
-
-impl<M: Message> DynamicAddress1<M> {
-    pub fn new<A: Actor>(address: Address<A>) -> Self
-    where
-        A: SomeTrait,
-    {
-        let (sender, _) = async_channel::bounded(10);
-        Self {
-            sender,
-            p: PhantomData,
-            ptr: <A as SomeTrait>::something as usize,
-        }
+    fn init(
+        init: Self::Init,
+        address: Address<Self>,
+    ) -> Pin<Box<dyn Future<Output = InitFlow<Self>> + Send>> {
+        Box::pin(async { InitFlow::Init(init) })
     }
 
-    pub fn send(&self, params: M::Params) {}
+    fn exit(self, reason: actor::ExitReason<Self>) -> Self::ExitWith {
+        reason
+    }
+
+    fn ctx(&mut self) -> &mut Self::Ctx {
+        todo!()
+    }
+}
+
+impl MyActor {
+    pub async fn my_message(
+        &mut self,
+        _: &mut BasicCtx<Self>,
+        params: (u32, u32),
+    ) -> MsgFlow<Self> {
+        MsgFlow::Ok
+    }
+
+    pub async fn say_hello(&mut self, _: &mut BasicCtx<Self>, params: u32) -> MsgFlow<Self> {
+        MsgFlow::Ok
+    }
 }

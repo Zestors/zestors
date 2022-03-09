@@ -1,13 +1,12 @@
 use std::{
     any::Any,
-    collections::HashMap,
     lazy::SyncOnceCell,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{Arc, RwLock},
 };
 
 use crate::{
-    actor::{Actor, Spawn},
+    actor::{Actor},
     address::Address,
     child::Child,
 };
@@ -17,18 +16,16 @@ use tokio::{
 };
 use tokio_native_tls::{
     native_tls::{self, TlsAcceptorBuilder},
-    TlsAcceptor,
 };
 use tokio_tungstenite::{tungstenite, MaybeTlsStream};
 use uuid::Uuid;
 
 use super::{
-    challenge,
     cluster::Cluster,
-    node::Node,
-    server::{NodeExit, NodeSetupError, Server, ServerExit, ServerMsg},
-    ws_stream::WsStream,
-    BuildId, Token, NodeId,
+    pid::{NodeLocation, Pid},
+    registry::{Registry, RegistrationError},
+    server::{NodeConnectError, NodeExit, Server, ServerExit, ServerMsg},
+    BuildId, NodeId, ProcessId, Token, node::NodeActor,
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -53,14 +50,21 @@ pub fn get() -> &'static LocalNode {
     LOCAL_NODE.get().unwrap()
 }
 
+pub fn cluster() -> &'static Cluster {
+    get().cluster()
+}
+
 //--------------------------------------------------------------------------------------------------
 //  LocalNode
 //--------------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
-pub struct LocalNode(Arc<LocalNodeCore>);
+pub struct LocalNode(Arc<SharedLocalNode>);
 
 impl LocalNode {
+    /// Initialize the local node with a token that should be identical between all nodes in the 
+    /// cluster, a node_id that should be unique between all nodes in the cluster, and an address
+    /// to start listening on for incoming node connections.
     pub async fn initialize(
         token: Token,
         node_id: NodeId,
@@ -72,7 +76,7 @@ impl LocalNode {
             .map_err(|e| InitializationError::SocketAddressNotAvailable(e))?;
 
         // Create the local node.
-        let local_node = Self::new(token, node_id, addr);
+        let local_node = LocalNode::new(token, node_id, addr);
 
         // Spawn the task that will be listening
         let (sender, handle) = Server::new(listener, local_node.clone()).spawn();
@@ -83,9 +87,47 @@ impl LocalNode {
         Ok(local_node)
     }
 
-    pub fn get_node(&self, node_id: NodeId) -> Option<Node> {
-        self.0.cluster.get_node(node_id)
+    /// Attempt to connect directly to another node. This will establish an unencrypted TCP
+    /// connection, which is subsequently upgraded to a Websocket connection.
+    /// 
+    /// After this connection, the nodes will challenge each other, to ensure that both have
+    /// the same `Token` and `BuildId`.
+    /// 
+    /// If succesful, these nodes are now connected in the cluster, and can send messages 
+    /// back and forth using `Pids`.
+    pub async fn connect(&self, addr: SocketAddr) -> Result<(), NodeConnectError> {
+        // // Setup tcp stream
+        // let stream = TcpStream::connect(addr).await?;
+
+        // // upgrade to ws
+        // let stream = WsStream::handshake_as_client(MaybeTlsStream::Plain(stream)).await?;
+
+        // // challenge as client
+        // let (node_id, stream) = challenge::as_client(self, stream).await?;
+
+        // let node = self.0.cluster.spawn_node(self, node_id, stream)?;
+
+        // Ok(node)
+
+        todo!()
     }
+
+    /// Register a process that is running on this binary to the `LocalNode`. If successful,
+    /// this will return a `Pid`, with a globally unique UUID, which can be sent to other processes
+    /// in order to send messages between different nodes.
+    pub fn register<A: Actor>(
+        &self,
+        address: &Address<A>,
+        name: Option<String>,
+    ) -> Result<Pid<A>, RegistrationError> {
+        let pid = self.0.registry.register(address, name, self.clone())?;
+        Ok(pid)
+    }
+
+    pub fn registry(&self) -> &Registry {
+        &self.0.registry
+    }
+
 
     pub fn build_id(&self) -> BuildId {
         self.0.build_id
@@ -99,32 +141,15 @@ impl LocalNode {
         self.0.node_id
     }
 
-    /// Attempt to connect directly to another node. This first challenges, and if successful
-    /// creates a connection to this node.
-    pub async fn connect(&self, addr: SocketAddr) -> Result<Node, NodeSetupError> {
-        // Setup tcp stream
-        let stream = TcpStream::connect(addr).await?;
-
-        // upgrade to ws
-        let stream = WsStream::handshake_as_client(MaybeTlsStream::Plain(stream)).await?;
-
-        // challenge as client
-        let (node_id, stream) = challenge::as_client(self, stream).await?;
-
-        let node = self.0.cluster.spawn_node(self, node_id, stream)?;
-
-        Ok(node)
-    }
-
-    pub(crate) fn get_cluster(&self) -> &Cluster {
+    pub fn cluster(&self) -> &Cluster {
         &self.0.cluster
     }
 
-
     fn new(token: Token, node_id: NodeId, addr: SocketAddr) -> Self {
-        Self(Arc::new(LocalNodeCore {
+        Self(Arc::new(SharedLocalNode {
             token,
             addr,
+            registry: Registry::new(),
             // Get build_id from binary.
             build_id: build_id::get(),
             node_id,
@@ -143,7 +168,7 @@ impl LocalNode {
 /// This is the local node, which can connect to other nodes that run the same binary. A node can be
 /// initialized with a unique name (`String`), an addr
 #[derive(Debug)]
-pub(crate) struct LocalNodeCore {
+pub(crate) struct SharedLocalNode {
     /// The token used to verify that a Node has permission to connect to the cluster.
     token: Uuid,
     /// The address that this node is listening on.
@@ -152,13 +177,17 @@ pub(crate) struct LocalNodeCore {
     build_id: BuildId,
     /// The name of this node, which can be used to find it from another node.
     node_id: NodeId,
-
+    /// The registry, with all registered processes
+    registry: Registry,
+    /// The cluster, with all connected nodes
     cluster: Cluster,
     // The  join_handle of the server task
     server: SyncOnceCell<(async_channel::Sender<ServerMsg>, JoinHandle<ServerExit>)>,
 }
 
-impl LocalNodeCore {
+unsafe impl Send for LocalNode {}
+
+impl SharedLocalNode {
     /// Panics if already set!!
     fn set_server_handle(
         &self,
@@ -204,11 +233,6 @@ unsafe impl<A: Actor> Sync for Child<A> {}
 //--------------------------------------------------------------------------------------------------
 //  Errors
 //--------------------------------------------------------------------------------------------------
-
-#[derive(Debug)]
-pub enum RegistrationError {
-    AlreadyRegistered,
-}
 
 #[derive(Debug)]
 pub enum UnRegistrationError {

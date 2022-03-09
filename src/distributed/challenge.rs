@@ -1,5 +1,6 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, ops::{Deref, DerefMut}};
 
+use futures::{FutureExt, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use sha2::{digest::Digest, Sha256};
 use tokio::net::TcpStream;
@@ -8,9 +9,9 @@ use uuid::Uuid;
 // use sha2::Digest;
 use super::{
     local_node::{self, LocalNode},
-    server::NodeSetupError,
-    ws_message::WsMsg,
-    ws_stream::WsStream,
+    msg,
+    server::NodeConnectError,
+    ws_stream::{WsRecvError, WsStream},
     NodeId,
 };
 
@@ -74,13 +75,28 @@ impl ChallengeReply {
 #[derive(Debug)]
 pub(crate) struct VerifiedStream(WsStream);
 
-impl VerifiedStream {
-    pub(crate) fn ws_stream(&mut self) -> &mut WsStream {
+impl Deref for VerifiedStream {
+    type Target = WsStream;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for VerifiedStream {
+    fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
+}
 
-    pub(crate) fn peer_addr(&self) -> Result<SocketAddr, std::io::Error> {
-        self.0.peer_addr()
+impl Stream for VerifiedStream {
+    type Item = Result<msg::Msg, WsRecvError>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.poll_next_unpin(cx)
     }
 }
 
@@ -106,49 +122,72 @@ impl Challenge {
 pub(crate) async fn as_client(
     local_node: &LocalNode,
     mut stream: WsStream,
-) -> Result<(NodeId, VerifiedStream), NodeSetupError> {
+) -> Result<(NodeId, VerifiedStream), NodeConnectError> {
     // Wait for a challenge to be sent
-    match stream.recv_next().await {
-        Ok(WsMsg::Challenge(challenge)) => {
+    match stream.recv_challenge().await {
+        Ok(msg::Challenge::Init(challenge)) => {
             // Send back a reply
             let response = ChallengeReply::new(&local_node, &challenge);
-            stream.send(WsMsg::ChallengeReply(response)).await?;
+            stream
+                .send_challenge(msg::Challenge::Reply(response))
+                .await?;
         }
-        Ok(msg) => return Err(NodeSetupError::Protocol(msg, "expected Challenge")),
+        Ok(msg) => {
+            return Err(NodeConnectError::Protocol(
+                Box::new(msg::Msg::Challenge(msg)),
+                "expected Challenge",
+            ))
+        }
         Err(e) => return Err(e.into()),
     }
 
     // Wait for the challenge result
-    match stream.recv_next().await {
-        Ok(WsMsg::ChallengeResult(result)) => {
+    match stream.recv_challenge().await {
+        Ok(msg::Challenge::Result(result)) => {
             if let Err(e) = result {
                 return Err(e.into());
             };
         }
-        Ok(msg) => return Err(NodeSetupError::Protocol(msg, "expected ChallengeResult")),
+        Ok(msg) => {
+            return Err(NodeConnectError::Protocol(
+                Box::new(msg::Msg::Challenge(msg)),
+                "expected ChallengeResult",
+            ))
+        }
         Err(e) => return Err(e.into()),
     }
 
     // Create and send a new challenge
     let challenge = Challenge::new();
-    stream.send(WsMsg::Challenge(challenge)).await?;
+    stream
+        .send_challenge(msg::Challenge::Init(challenge))
+        .await?;
 
     // Receive the challenge reply
-    match stream.recv_next().await {
-        Ok(WsMsg::ChallengeReply(reply)) => {
+    match stream.recv_challenge().await {
+        Ok(msg::Challenge::Reply(reply)) => {
             match reply.test(&challenge, &local_node) {
                 Err(e) => {
                     // Send back a failure result
-                    stream.send(WsMsg::ChallengeResult(Err(e.clone()))).await?;
+                    stream
+                        .send_challenge(msg::Challenge::Result(Err(e.clone())))
+                        .await?;
                     return Err(e.into());
                 }
                 Ok(_) => {
                     // Send back a success result
-                    stream.send(WsMsg::ChallengeResult(Ok(()))).await?;
+                    stream
+                        .send_challenge(msg::Challenge::Result(Ok(())))
+                        .await?;
                 }
             }
         }
-        Ok(msg) => return Err(NodeSetupError::Protocol(msg, "expected ChallengeReply")),
+        Ok(msg) => {
+            return Err(NodeConnectError::Protocol(
+                Box::new(msg::Msg::Challenge(msg)),
+                "expected ChallengeReply",
+            ))
+        }
         Err(e) => return Err(e.into()),
     }
 
@@ -166,49 +205,65 @@ pub(crate) async fn as_client(
 pub(crate) async fn as_server(
     local_node: &LocalNode,
     mut stream: WsStream,
-) -> Result<(NodeId, VerifiedStream), NodeSetupError> {
+) -> Result<(NodeId, VerifiedStream), NodeConnectError> {
     // Create and send a new challenge
     let challenge = Challenge::new();
-    stream.send(WsMsg::Challenge(challenge)).await?;
+    stream.send_challenge(msg::Challenge::Init(challenge)).await?;
 
     // Receive the challenge reply
-    match stream.recv_next().await {
-        Ok(WsMsg::ChallengeReply(reply)) => {
+    match stream.recv_challenge().await {
+        Ok(msg::Challenge::Reply(reply)) => {
             match reply.test(&challenge, &local_node) {
                 Err(e) => {
                     // Send back a failure result
-                    stream.send(WsMsg::ChallengeResult(Err(e.clone()))).await?;
+                    stream.send_challenge(msg::Challenge::Result(Err(e.clone())))
+                        .await?;
                     return Err(e.into());
                 }
                 Ok(_) => {
                     // Send back a success result
-                    stream.send(WsMsg::ChallengeResult(Ok(()))).await?;
+                    stream.send_challenge(msg::Challenge::Result(Ok(()))).await?;
                 }
             }
         }
-        Ok(msg) => return Err(NodeSetupError::Protocol(msg, "expected ChallengeReply")),
+        Ok(msg) => {
+            return Err(NodeConnectError::Protocol(
+                Box::new(msg::Msg::Challenge(msg)),
+                "expected ChallengeReply",
+            ))
+        }
         Err(e) => return Err(e.into()),
     }
 
     // Wait for a challenge to be sent
-    match stream.recv_next().await {
-        Ok(WsMsg::Challenge(challenge)) => {
+    match stream.recv_challenge().await {
+        Ok(msg::Challenge::Init(challenge)) => {
             // Send back a reply
             let response = ChallengeReply::new(&local_node, &challenge);
-            stream.send(WsMsg::ChallengeReply(response)).await?;
+            stream.send_challenge(msg::Challenge::Reply(response)).await?;
         }
-        Ok(msg) => return Err(NodeSetupError::Protocol(msg, "expected Challenge")),
+        Ok(msg) => {
+            return Err(NodeConnectError::Protocol(
+                Box::new(msg::Msg::Challenge(msg)),
+                "expected Challenge",
+            ))
+        }
         Err(e) => return Err(e.into()),
     }
 
     // Wait for the challenge result
-    match stream.recv_next().await {
-        Ok(WsMsg::ChallengeResult(result)) => {
+    match stream.recv_challenge().await {
+        Ok(msg::Challenge::Result(result)) => {
             if let Err(e) = result {
                 return Err(e.into());
             };
         }
-        Ok(msg) => return Err(NodeSetupError::Protocol(msg, "expected ChallengeResult")),
+        Ok(msg) => {
+            return Err(NodeConnectError::Protocol(
+                Box::new(msg::Msg::Challenge(msg)),
+                "expected ChallengeResult",
+            ))
+        }
         Err(e) => return Err(e.into()),
     }
 
@@ -219,11 +274,18 @@ pub(crate) async fn as_server(
     Ok((node_id, VerifiedStream(stream)))
 }
 
-async fn exchange_node_ids(local_node: &LocalNode, stream: &mut WsStream) -> Result<NodeId, NodeSetupError> {
-    stream.send(WsMsg::NodeId(local_node.node_id())).await?;
-    
-    match stream.recv_next().await? {
-        WsMsg::NodeId(node_id) => Ok(node_id),
-        msg => Err(NodeSetupError::Protocol(msg, "expected NodeId"))
+async fn exchange_node_ids(
+    local_node: &LocalNode,
+    stream: &mut WsStream,
+) -> Result<NodeId, NodeConnectError> {
+    stream.send_challenge(msg::Challenge::ExchangeIds(local_node.node_id()))
+        .await?;
+
+    match stream.recv_challenge().await? {
+        msg::Challenge::ExchangeIds(node_id) => Ok(node_id),
+        msg => Err(NodeConnectError::Protocol(
+            Box::new(msg::Msg::Challenge(msg)),
+            "expected NodeId",
+        )),
     }
 }

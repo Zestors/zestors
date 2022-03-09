@@ -3,11 +3,13 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use super::{challenge::VerifiedStream, local_node::LocalNode, node::Node, NodeId};
+use crate::{actor::Actor, address::Address};
+
+use super::{challenge::VerifiedStream, local_node::LocalNode,  NodeId, ProcessId, pid::{Pid, NodeLocation}, node::NodeActor};
 
 #[derive(Debug)]
-pub(crate) struct Cluster {
-    nodes: RwLock<HashMap<NodeId, Node>>,
+pub struct Cluster {
+    nodes: RwLock<HashMap<NodeId, Address<NodeActor>>>,
 }
 
 impl Cluster {
@@ -17,46 +19,46 @@ impl Cluster {
         }
     }
 
-    pub(crate) fn get_node(&self, id: NodeId) -> Option<Node> {
-        self.nodes.read().unwrap().get(&id).map(|node| node.clone())
+    pub fn process_by_id<A: Actor>(&self, id: ProcessId) -> Option<Pid<A>> {
+
+
+        todo!()
     }
 
-    pub(crate) fn spawn_node(
-        &self,
-        local_node: &LocalNode,
-        node_id: NodeId,
-        stream: VerifiedStream,
-    ) -> Result<Node, AddNodeError> {
-        let addr = stream.peer_addr()?;
-
-        // If the node to be added has the same id as this node, reject
-        if local_node.node_id() == node_id {
-            return Err(AddNodeError::NodeIdIsLocalNode);
-        }
-
-        // Get wlock
-        let mut nodes = self.nodes.write().unwrap();
-
-        // If the node is already registered, reject
-        if nodes.contains_key(&node_id) {
-            return Err(AddNodeError::NodeIdAlreadyRegistered);
-        }
-
-        // Spawn the node
-        let node = Node::spawn(node_id, addr, stream, local_node.clone());
-
-        // insert it into the nodes
-        nodes.insert(node_id, node.clone());
-
-        drop(nodes);
-
-        Ok(node)
+    pub fn get_node(&self, id: NodeId) -> Option<()> {
+        // self.nodes.read().unwrap().get(&id).map(|node| node.clone())
+        todo!()
     }
 
-    pub(crate) fn remove_node(&self, node_id: &NodeId) -> Option<Node> {
+    pub(crate) fn remove_node(&self, node_id: NodeId) -> Option<Address<NodeActor>> {
         self.nodes.write().unwrap().remove(&node_id)
     }
 }
+
+//------------------------------------------------------------------------------------------------
+//  FindProcess
+//------------------------------------------------------------------------------------------------
+
+pub struct FindProcessRequest<A: Actor> {
+    receiver: oneshot::Receiver<Option<Pid<A>>>
+}
+
+impl<A: Actor> FindProcessRequest<A> {
+    pub fn new() -> (oneshot::Sender<Option<Pid<A>>>, Self) {
+        let (sender, receiver) = oneshot::channel();
+        let req = Self {
+            receiver
+        };
+
+        (sender, req)
+    }
+}
+
+
+
+//------------------------------------------------------------------------------------------------
+//  AddNodeError
+//------------------------------------------------------------------------------------------------
 
 #[derive(Debug)]
 pub(crate) enum AddNodeError {

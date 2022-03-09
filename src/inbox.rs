@@ -70,7 +70,7 @@ pub struct Bounded;
 
 /// A sender of [Packet]s
 #[derive(Debug)]
-pub(crate) struct ActionSender<A: ?Sized + Actor> {
+pub(crate) struct ActionSender<A: ?Sized> {
     sender: async_channel::Sender<Action<A>>,
 }
 

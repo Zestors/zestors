@@ -1,67 +1,102 @@
 use futures::Future;
-use std::{intrinsics::transmute, marker::PhantomData, pin::Pin};
+use std::{
+    any::Any,
+    fmt::Debug,
+    marker::PhantomData,
+    sync::{Arc, Mutex},
+};
 
 use crate::{
-    action::{Action, AsyncMsgFn, AsyncReqFn, MsgFn, ReqFn},
+    action::{
+        Action, AsyncMsgFnType, AsyncReqFn2Type, AsyncReqFnType, MsgFnType, ReqFn2Type, ReqFnType,
+    },
     actor::Actor,
+    distributed::pid::Pid,
+    errors::ActorDied,
     flows::{EventFlow, MsgFlow, ReqFlow},
+    function::{MsgFn, ReqFn},
     inbox::ActionSender,
-    messaging::{InternalRequest, Msg, Req},
+    messaging::{Msg, Reply, Req, Request},
 };
 
 //--------------------------------------------------------------------------------------------------
 //  Address definition
 //--------------------------------------------------------------------------------------------------
 
-pub struct Address<A: ?Sized + Actor> {
+pub struct Address<A: ?Sized> {
     a: PhantomData<A>,
     sender: ActionSender<A>,
+    pid: Arc<Mutex<Option<Pid<A>>>>,
 }
 
-impl<'a, 'b, A: Actor> Address<A> {
+unsafe impl<A> Sync for Address<A> {}
+
+impl<A: Actor> Address<A> {
     pub(crate) fn new(sender: ActionSender<A>) -> Self {
         Self {
             sender,
             a: PhantomData,
+            pid: Arc::new(Mutex::new(None)),
         }
     }
 
-    fn new_msg<P>(&self, function: MsgFn<A, P>, params: P) -> Msg<A, P>
+    pub fn is_registered(&self) -> Option<Pid<A>> {
+        match &*self.pid.lock().unwrap() {
+            Some(pid) => Some(pid.clone()),
+            None => None,
+        }
+    }
+
+    pub(crate) fn replace_pid(&self, pid: Pid<A>) -> Option<Pid<A>> {
+        self.pid.lock().unwrap().replace(pid)
+    }
+
+    pub(crate) fn remove_pid(&self) -> Option<Pid<A>> {
+        self.pid.lock().unwrap().take()
+    }
+
+    pub fn msg<'a, P>(&'a self, function: MsgFn<A, P>, params: P) -> Msg<'a, A, P>
     where
         P: Send + 'static,
     {
-        let action = Action::new_sync(params, function);
-        Msg::new(&self.sender, action)
+        Msg::new(&self.sender, Action::new(function, params))
     }
 
-    fn new_async_msg<F, P>(&self, function: AsyncMsgFn<A, P, F>, params: P) -> Msg<A, P>
-    where
-        P: Send + 'static,
-        F: Future<Output = MsgFlow<A>> + Send + 'static,
-    {
-        let action = Action::new_async(params, function);
-        Msg::new(&self.sender, action)
-    }
-
-    fn new_req<P, R>(&self, function: ReqFn<A, P, R>, params: P) -> Req<A, P, R>
+    pub fn req<P, R>(&self, function: ReqFn<A, P, R>, params: P) -> Req<A, P, R>
     where
         P: Send + 'static,
         R: Send + 'static,
     {
-        let (request, reply) = InternalRequest::new();
-        let action = Action::new_sync_req(params, request, function);
-        Req::new(&self.sender, action, reply)
+        let (request, reply) = Request::new();
+        Req::new(
+            &self.sender,
+            Action::new_req(function, params, request),
+            reply,
+        )
+    }
+}
+
+//------------------------------------------------------------------------------------------------
+//  AnyAddress
+//------------------------------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub struct AnyAddress(Box<dyn Any + Send + Sync>);
+
+impl AnyAddress {
+    pub fn new<A: Actor>(address: Address<A>) -> Self {
+        Self(Box::new(address))
     }
 
-    fn new_async_req<F, P, R>(&self, function: AsyncReqFn<A, P, F>, params: P) -> Req<A, P, R>
-    where
-        P: Send + 'static,
-        R: Send + 'static,
-        F: Future<Output = ReqFlow<A, R>> + Send + 'static,
-    {
-        let (request, reply) = InternalRequest::new();
-        let action = Action::new_async_req(params, request, function);
-        Req::new(&self.sender, action, reply)
+    pub fn downcast<A: 'static + Actor>(self) -> Result<Address<A>, Self> {
+        match self.0.downcast() {
+            Ok(pid) => Ok(*pid),
+            Err(boxed) => Err(Self(boxed)),
+        }
+    }
+
+    pub fn downcast_ref<A: Actor>(&self) -> Option<&Address<A>> {
+        self.0.downcast_ref()
     }
 }
 
@@ -80,102 +115,9 @@ impl<'a, 'b, A: Actor> Address<A> {
 pub trait Addressable<A: Actor> {
     fn address(&self) -> &Address<A>;
 
-    /// See documentation for [Address::msg]
-    fn msg<P>(&self, function: MsgFn<A, P>, params: P) -> Msg<A, P>
-    where
-        P: Send + 'static,
-    {
-        self.address().new_msg(function, params)
-    }
-
-    /// See documentation for [Address::msg_async]
-    fn msg_async<P, F>(&self, function: AsyncMsgFn<A, P, F>, params: P) -> Msg<A, P>
-    where
-        P: Send + 'static,
-        F: Future<Output = MsgFlow<A>> + Send + 'static,
-    {
-        self.address().new_async_msg(function, params)
-    }
-
-    /// See documentation for [Address::req]
-    fn req<P, R>(&self, function: ReqFn<A, P, R>, params: P) -> Req<A, P, R>
-    where
-        R: Send + 'static,
-        P: Send + 'static,
-    {
-        self.address().new_req(function, params)
-    }
-
-    /// See documentation for [Address::req_async]
-    fn req_async<P, R, F>(&self, function: AsyncReqFn<A, P, F>, params: P) -> Req<A, P, R>
-    where
-        P: Send + 'static,
-        R: Send + 'static,
-        F: Future<Output = ReqFlow<A, R>> + Send + 'static,
-    {
-        self.address().new_async_req(function, params)
-    }
-
     /// Whether this process is still alive.
     fn is_alive(&self) -> bool {
         self.address().sender.is_alive()
-    }
-}
-
-//--------------------------------------------------------------------------------------------------
-//  Call
-//--------------------------------------------------------------------------------------------------
-
-pub struct AsyncMsg;
-pub struct SyncMsg;
-pub struct AsyncReq;
-pub struct SyncReq;
-
-pub trait Call<'a, 'b, A: Actor, P, F: 'b, R: 'a, S> {
-    fn call(&'a self, function: fn(&'b mut A, &'b mut A::State, P) -> F, params: P) -> R;
-}
-
-impl<'a, 'b, A: Actor, P, T> Call<'a, 'b, A, P, MsgFlow<A>, Msg<'a, A, P>, SyncMsg> for T
-where
-    T: Addressable<A>,
-    P: Send + 'static,
-{
-    fn call(&'a self, function: MsgFn<A, P>, params: P) -> Msg<'a, A, P> {
-        self.msg(function, params)
-    }
-}
-
-impl<'a, 'b, A: Actor, P, F, T> Call<'a, 'b, A, P, F, Msg<'a, A, P>, AsyncMsg> for T
-where
-    T: Addressable<A>,
-    P: 'static + Send,
-    F: Future<Output = MsgFlow<A>> + 'static + Send,
-{
-    fn call(&'a self, function: AsyncMsgFn<A, P, F>, params: P) -> Msg<'a, A, P> {
-        self.msg_async(function, params)
-    }
-}
-
-impl<'a, 'b, A: Actor, P, R, T> Call<'a, 'b, A, P, ReqFlow<A, R>, Req<'a, A, P, R>, SyncReq> for T
-where
-    T: Addressable<A>,
-    P: 'static + Send,
-    R: 'static + Send,
-{
-    fn call(&'a self, function: ReqFn<A, P, R>, params: P) -> Req<'a, A, P, R> {
-        self.req(function, params)
-    }
-}
-
-impl<'a, 'b, A: Actor, P, F, R, T> Call<'a, 'b, A, P, F, Req<'a, A, P, R>, AsyncReq> for T
-where
-    T: Addressable<A>,
-    P: 'static + Send,
-    R: 'static + Send,
-    F: Future<Output = ReqFlow<A, R>> + 'static + Send,
-{
-    fn call(&'a self, function: AsyncReqFn<A, P, F>, params: P) -> Req<'a, A, P, R> {
-        self.req_async(function, params)
     }
 }
 
@@ -194,15 +136,54 @@ impl<A: Actor> Clone for Address<A> {
         Self {
             a: PhantomData,
             sender: self.sender.clone(),
+            pid: self.pid.clone(),
         }
     }
 }
 
-impl<A: Actor> std::fmt::Debug for Address<A> {
+impl<A: Debug> std::fmt::Debug for Address<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Address")
-            .field("sender", &"PacketSender")
-            .finish()
+        f.debug_struct("Address").field("pid", &self.pid).finish()
+    }
+}
+
+//------------------------------------------------------------------------------------------------
+//  Sendable
+//------------------------------------------------------------------------------------------------
+
+pub trait Callable<'a, A, F, P, R, X: 'a, Y> {
+    fn call(&'a self, function: F, params: P) -> X;
+    fn send(&'a self, function: F, params: P) -> Y;
+}
+
+impl<'a, A: Actor, P, T>
+    Callable<'a, A, MsgFn<A, P>, P, (), Msg<'a, A, P>, Result<(), ActorDied<P>>> for T
+where
+    P: Send + 'static,
+    T: Addressable<A>,
+{
+    fn call(&'a self, function: MsgFn<A, P>, params: P) -> Msg<'a, A, P> {
+        self.address().msg(function, params)
+    }
+
+    fn send(&'a self, function: MsgFn<A, P>, params: P) -> Result<(), ActorDied<P>> {
+        self.call(function, params).send()
+    }
+}
+
+impl<'a, A: Actor, P, R, T>
+    Callable<'a, A, ReqFn<A, P, R>, P, R, Req<'a, A, P, R>, Result<Reply<R>, ActorDied<P>>> for T
+where
+    P: Send + 'static,
+    R: Send + 'static,
+    T: Addressable<A>,
+{
+    fn call(&'a self, function: ReqFn<A, P, R>, params: P) -> Req<'a, A, P, R> {
+        self.address().req(function, params)
+    }
+
+    fn send(&'a self, function: ReqFn<A, P, R>, params: P) -> Result<Reply<R>, ActorDied<P>> {
+        self.call(function, params).send()
     }
 }
 
@@ -211,178 +192,117 @@ impl<A: Actor> std::fmt::Debug for Address<A> {
 //--------------------------------------------------------------------------------------------------
 
 mod test {
-    use super::*;
-    use crate::actor::ExitReason;
-    use crate::flows::{InitFlow};
-    use crate::state::State;
+    use std::pin::Pin;
 
-    // fn add_numbers(address: &Address<MyActor>, num1: u32, num2: u32) {
-    //     let req = req!(address, |_, _, num1, num2| {
-    //         ReqFlow::Reply(num1 + num2)
-    //     });
-    // }
+    use futures::Future;
+
+    use crate::{
+        actor::{self, Actor, ExitReason},
+        context::BasicCtx,
+        flows::{InitFlow, MsgFlow, ReqFlow},
+        messaging::Request,
+        Fn,
+    };
+
+    use super::{Address, Callable};
 
     #[tokio::test]
-    async fn all_functions_dont_segfault_test() -> anyhow::Result<()> {
-        let (child, address) = crate::actor::spawn::<MyActor>(MyActor);
-
-        let res1 = address.new_msg(MyActor::test_a, 10).send()?;
-
-        Address::new_msg(&&&&&address, |_, _, _| MsgFlow::Ok, 10)
-            .send()
+    pub async fn main() {
+        let (child, address) = actor::spawn::<MyActor>(());
+        let res1 = address.send(Fn!(MyActor::test_a), 10).unwrap();
+        let res2 = address.send(Fn!(MyActor::test_b), 10).unwrap();
+        let res3 = address
+            .send(Fn!(MyActor::test_c), 10)
+            .unwrap()
+            .await
+            .unwrap();
+        let res4 = address
+            .send(Fn!(MyActor::test_d), 10)
+            .unwrap()
+            .await
+            .unwrap();
+        let res5 = address
+            .send(Fn!(MyActor::test_e), 10)
+            .unwrap()
+            .await
+            .unwrap();
+        let res6 = address
+            .send(Fn!(MyActor::test_f), 10)
+            .unwrap()
+            .await
             .unwrap();
 
-        let _val: u32 = 10;
-
-        child.msg(|_, _, _| MsgFlow::Ok, 10).send().unwrap();
-
-        // let res = msg!(address, |_a, _b, val| {
-        //     Flow::Ok
-        // });
-
-        // let res = msg!(&address, |a, _| {
-        //     Flow::Ok
-        // });
-
-        // let res = msg!(&address, |_, b| {
-        //     Flow::Ok
-        // });
-
-        // let res = msg!(&address, |a, b| {
-        //     Flow::Ok
-        // });
-
-        // let res = req!(&address, |actor, state, val| async {
-        //     ReqFlow::Reply(10)
-        // });
-
-        let res2 = address.msg_async(MyActor::test_b, 10).send()?;
-
-        let res3 = address
-            .req(MyActor::test_c, 10)
-            .send()?
-            .async_recv()
-            .await?;
-        let res4 = address
-            .req_async(MyActor::test_d, 10)
-            .send()?
-            .async_recv()
-            .await?;
-
-        // let res5 = address.new_msg_nostate(MyActor::test_e, 10).send()?;
-        // let res6 = address.new_msg_async_nostate(MyActor::test_f, 10).send()?;
-
-        // let res7 = address
-        //     .new_req_nostate(MyActor::test_g, 10)
-        //     .send()?
-        //     .async_recv()
-        //     .await?;
-        // let res8 = address
-        //     .new_req_async_nostate(MyActor::test_h, 10)
-        //     .send()?
-        //     .async_recv()
-        //     .await?;
-
-        assert_eq!(res1, ());
-        assert_eq!(res2, ());
-        // assert_eq!(res5, ());
-        // assert_eq!(res6, ());
-
-        assert_eq!(res3, "ok");
-        assert_eq!(res4, "ok");
-        // assert_eq!(res7, "ok");
-        // assert_eq!(res8, "ok");
-
-        // let fun = |_, _, _: u32| {
-        //     Flow::Ok
-        // };
-
-        // let res = child.send(fun!(|_, _, _: u32| {
-        //     Flow::Ok
-        // }), 10)?;
-
-        // let res1 = address.call(MyActor::test_a, 10).send()?;
-        // let res1 = address.call(|actor, state, amount| {
-        //     // actor.
-        //     Flow::Ok
-        // }, 10).send()?;
-        // // let res1 = child.send(func!(MyActor::test_a2), ("hi", 10)).await?;
-
-        // let res2 = address.call(MyActor::test_b, 10).send()?;
-        // let res3 = address.call(MyActor::test_c, 10).send()?.await?;
-        // let res4 = address.call(MyActor::test_d, 10).send()?.await?;
-
-        assert_eq!(res1, ());
-        assert_eq!(res2, ());
-        // assert_eq!(res5, ());
-        // assert_eq!(res6, ());
-
-        assert_eq!(res3, "ok");
-        assert_eq!(res4, "ok");
-        // assert_eq!(res7, "ok");
-        // assert_eq!(res8, "ok");
-
-        Ok(())
+        println!(
+            "{:?}, {:?}, {:?}, {:?}, {:?}, {:?}",
+            res1, res2, res3, res4, res5, res6
+        );
     }
 
     #[derive(Debug)]
-    pub struct MyActor;
+    pub struct MyActor {
+        ctx: BasicCtx<Self>,
+    }
 
     #[allow(dead_code, unused_variables)]
     impl MyActor {
-        fn test_e(&mut self, c: u32) -> MsgFlow<Self> {
+        fn test_a(&mut self, c: u32) -> MsgFlow<Self> {
+            println!("test_a: {}", c);
             MsgFlow::Ok
         }
 
-        fn test_a(&mut self, state: &mut State<Self>, c: u32) -> MsgFlow<Self> {
+        async fn test_b(&mut self, c: u32) -> MsgFlow<Self> {
+            println!("test_b: {}", c);
             MsgFlow::Ok
         }
 
-        fn test_a2(&mut self, s: &str, c: u32) -> MsgFlow<Self> {
-            MsgFlow::Ok
-        }
-
-        async fn test_f<'r>(&'r mut self, c: u32) -> MsgFlow<Self> {
-            MsgFlow::Ok
-        }
-
-        async fn test_b(&mut self, state: &mut State<Self>, c: u32) -> MsgFlow<Self> {
-            MsgFlow::Ok
-        }
-
-        fn test_g(&mut self, c: u32) -> ReqFlow<Self, &'static str> {
+        fn test_c(&mut self, c: u32) -> ReqFlow<Self, &'static str> {
+            println!("test_c: {}", c);
             ReqFlow::Reply("ok")
         }
 
-        fn test_c(&mut self, state: &mut State<Self>, c: u32) -> ReqFlow<Self, &'static str> {
+        async fn test_d(&mut self, c: u32) -> ReqFlow<Self, &'static str> {
+            println!("test_d: {}", c);
             ReqFlow::Reply("ok")
         }
 
-        async fn test_h(&mut self, c: u32) -> ReqFlow<Self, &'static str> {
-            ReqFlow::Reply("ok")
+        fn test_e(&mut self, c: u32, request: Request<&'static str>) -> MsgFlow<Self> {
+            println!("test_e: {}", c);
+            request.reply("ok");
+            MsgFlow::Ok
         }
 
-        async fn test_d(
-            &mut self,
-            state: &mut <Self as Actor>::State,
-            c: u32,
-        ) -> ReqFlow<Self, &'static str> {
-            ReqFlow::Reply("ok")
+        async fn test_f(&mut self, c: u32, request: Request<&'static str>) -> MsgFlow<Self> {
+            println!("test_f: {}", c);
+            request.reply("ok");
+            MsgFlow::Ok
         }
     }
 
     #[allow(dead_code, unused_variables)]
     impl Actor for MyActor {
-        type Init = MyActor;
+        type Init = ();
 
         type ExitWith = u32;
 
-        fn handle_exit(self, state: Self::State, exit: ExitReason<Self>) -> u32 {
+        fn exit(self, exit: ExitReason<Self>) -> u32 {
             0
         }
 
-        fn init(init: Self::Init, state: &mut Self::State) -> InitFlow<Self> {
-            InitFlow::Init(init)
+        fn init(
+            init: Self::Init,
+            address: Address<Self>,
+        ) -> Pin<Box<dyn Future<Output = InitFlow<Self>> + Send>> {
+            Box::pin(async {
+                InitFlow::Init(Self {
+                    ctx: BasicCtx::new(address),
+                })
+            })
+        }
+
+        type Ctx = BasicCtx<Self>;
+
+        fn ctx(&mut self) -> &mut Self::Ctx {
+            &mut self.ctx
         }
     }
 }

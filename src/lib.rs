@@ -1,7 +1,9 @@
 #![feature(try_trait_v2)]
 #![feature(associated_type_defaults)]
 #![feature(once_cell)]
-#![feature(negative_impls)]
+#![feature(core_intrinsics)]
+#![feature(ptr_metadata)]
+
 //! ## Zestors
 //! A simple, fast and flexible actor framework for building robust distributed applications,
 //! heavily insipired by Erlang.
@@ -177,13 +179,21 @@ pub mod errors;
 pub mod flows;
 pub mod inbox;
 pub mod messaging;
-// pub mod packet;
 pub mod child;
-pub mod state;
+pub mod context;
 pub mod distributed;
+pub mod function;
+pub mod handle;
 
 pub mod derive {
     pub use zestors_codegen::{Address, Addressable};
 }
 
 pub use anyhow::Error as AnyhowError;
+use serde::{Serialize, Deserialize};
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) enum Either<A, B> {
+    A(A),
+    B(B)
+}

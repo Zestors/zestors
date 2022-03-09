@@ -12,15 +12,15 @@ use crate::{action::Action, actor::Actor};
 /// The flow for handling a `Req`. Similarly to how a lot of functions return a `Result<T, E>`,
 /// when using `Zestors`, `Actor` functions instead return `ReqFlow<Self, R>` or `MsgFlow<Self>`.
 ///
-/// A `ReqFlow` indicates that a [Reply] will be sent back to the caller. The first generic of 
+/// A `ReqFlow` indicates that a [Reply] will be sent back to the caller. The first generic of
 /// `ReqFlow` should always be `Self`, and the second parameter can be return type of this [Req].
 ///
 /// **Errors for `ReqFlow` can be propagated in 2 ways:**
 /// 1) By applying `.into_reply()`. This propagates the error directly to the return type of
-///     the request. If for example your full type is `ReqFlow<Self, std::io::Error>`, then 
+///     the request. If for example your full type is `ReqFlow<Self, std::io::Error>`, then
 ///     applying the `.into_reply()?`-operator propagates `std::io`-errors directly to the caller.
-/// 2) By applying `?` operator directly. This propagates the error directly into an 
-///     `ExitWithError(E)`, which can subsequently be handled by the `handle_exit()` callback. 
+/// 2) By applying `?` operator directly. This propagates the error directly into an
+///     `ExitWithError(E)`, which can subsequently be handled by the `handle_exit()` callback.
 ///     Errors that can be propagated here must implement `Into<Self::ExitError>`.
 #[derive(Debug)]
 pub enum ReqFlow<A: Actor + ?Sized, R> {
@@ -28,7 +28,7 @@ pub enum ReqFlow<A: Actor + ?Sized, R> {
     Reply(R),
     /// Send back a reply to the caller. Right after sending this reply, execute this `Action`.
     ReplyAndAfter(R, Action<A>),
-    /// Send back a reply to the caller. 
+    /// Send back a reply to the caller.
     /// Right before handling the next message, execute this `Action`.
     ReplyAndBefore(R, Action<A>),
     /// Send back a reply to the caller, and then exit with an error.
@@ -39,6 +39,8 @@ pub enum ReqFlow<A: Actor + ?Sized, R> {
     ReplyAndNormalExit(R, A::ExitNormal),
     /// Dont send a reply to the caller, and then exit normally.
     NormalExit(A::ExitNormal),
+    // Schedule a future to be run. When this future completes, then
+    // ReplyLater(Action<A>)
 }
 
 /// The flow for handling a `Msg` or an `Action`. Similarly to how a lot of functions return a
@@ -75,27 +77,29 @@ pub enum InitFlow<A: Actor> {
     Init(A),
     /// Initialisation ok, and right before handling the next message, execute this 'Action`.
     InitAndBefore(A, Action<A>),
-    /// Exit with an error. This error is directly returned to the `Process`, without calling 
+
+    InitAndAfter(A, Action<A>),
+    /// Exit with an error. This error is directly returned to the `Process`, without calling
     /// `handle_exit()`.
-    Exit,
+    Error(A::InitError),
 }
 
-// /// The flow for handling an actor exiting. This can either continue the exit, or resume the actor 
-// /// with a new state. Errors can not be propagated, but must be handled here and turned into either 
+// /// The flow for handling an actor exiting. This can either continue the exit, or resume the actor
+// /// with a new state. Errors can not be propagated, but must be handled here and turned into either
 // /// an `A::Exit`, or a resume.
 // pub enum ExitFlow<A: Actor> {
 //     /// Continue this exit, with exit value `Actor::Exit`.
 //     ContinueExit(A::ExitWith),
 //     /// Resume execution of this actor.
 //     Resume(A),
-//     /// Resume execution of this actor. 
+//     /// Resume execution of this actor.
 //     /// Right before handling the next message, execute this 'Action`.
 //     ResumeAndBefore(A, Action<A>),
 // }
 
 /// This is an internally used flow. ReqFlows and Flows are converted into this one,
 /// so that the actor can easily handle them
-pub(crate) enum EventFlow<A: Actor + ?Sized> {
+pub enum EventFlow<A: Actor + ?Sized> {
     Ok,
     After(Action<A>),
     Before(Action<A>),
@@ -126,7 +130,7 @@ impl<A: Actor, R> ReqFlow<A, R> {
 }
 
 impl<A: Actor> MsgFlow<A> {
-    pub(crate) fn into_internal(self) -> EventFlow<A> {
+    pub(crate) fn into_event_flow(self) -> EventFlow<A> {
         match self {
             MsgFlow::Ok => EventFlow::Ok,
             MsgFlow::Before(handler) => EventFlow::Before(handler),
@@ -230,20 +234,14 @@ where
     }
 }
 
-impl<A: Actor, E> FromResidual<Result<Infallible, E>> for InitFlow<A> {
+impl<A: Actor, E> FromResidual<Result<Infallible, E>> for InitFlow<A>
+where
+    E: Into<A::InitError>,
+{
     fn from_residual(residual: Result<Infallible, E>) -> Self {
         match residual {
             Ok(_inf) => unreachable!(),
-            Err(_) => InitFlow::Exit,
-        }
-    }
-}
-
-impl<A: Actor> FromResidual<Option<Infallible>> for InitFlow<A> {
-    fn from_residual(residual: Option<Infallible>) -> Self {
-        match residual {
-            Some(_inf) => unreachable!(),
-            None => InitFlow::Exit,
+            Err(e) => InitFlow::Error(e.into()),
         }
     }
 }
