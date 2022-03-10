@@ -1,11 +1,11 @@
-use crate::actor::Actor;
+use crate::actor::{Actor, ProcessId};
 
 use super::{
     challenge,
     pid::AnyPid,
     registry::{Registry, RegistryGetError},
     remote_action::RemoteAction,
-    NodeId, ProcessId,
+    NodeId, 
 };
 use serde::{Deserialize, Serialize};
 
@@ -79,7 +79,8 @@ impl CheckForProcessFn {
         registry: &Registry,
         process_id: ProcessId,
     ) -> Result<(), RegistryGetError> {
-        registry.pid_by_id::<A>(process_id).map(|_| ())
+        // registry.pid_by_id::<A>(process_id).map(|_| ())
+        todo!()
     }
 }
 

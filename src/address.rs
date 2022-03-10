@@ -10,9 +10,9 @@ use crate::{
     action::{
         Action, AsyncMsgFnType, AsyncReqFn2Type, AsyncReqFnType, MsgFnType, ReqFn2Type, ReqFnType,
     },
-    actor::Actor,
-    distributed::pid::Pid,
-    errors::ActorDied,
+    actor::{Actor, ProcessId},
+    distributed::pid::ProcessRef,
+    errors::DidntArrive,
     flows::{EventFlow, MsgFlow, ReqFlow},
     function::{MsgFn, ReqFn},
     inbox::ActionSender,
@@ -26,33 +26,22 @@ use crate::{
 pub struct Address<A: ?Sized> {
     a: PhantomData<A>,
     sender: ActionSender<A>,
-    pid: Arc<Mutex<Option<Pid<A>>>>,
+    process_id: ProcessId,
 }
 
 unsafe impl<A> Sync for Address<A> {}
 
 impl<A: Actor> Address<A> {
-    pub(crate) fn new(sender: ActionSender<A>) -> Self {
+    pub(crate) fn new(sender: ActionSender<A>, process_id: ProcessId) -> Self {
         Self {
             sender,
             a: PhantomData,
-            pid: Arc::new(Mutex::new(None)),
+            process_id,
         }
     }
 
-    pub fn is_registered(&self) -> Option<Pid<A>> {
-        match &*self.pid.lock().unwrap() {
-            Some(pid) => Some(pid.clone()),
-            None => None,
-        }
-    }
-
-    pub(crate) fn replace_pid(&self, pid: Pid<A>) -> Option<Pid<A>> {
-        self.pid.lock().unwrap().replace(pid)
-    }
-
-    pub(crate) fn remove_pid(&self) -> Option<Pid<A>> {
-        self.pid.lock().unwrap().take()
+    pub fn process_id(&self) -> ProcessId {
+        self.process_id
     }
 
     pub fn msg<'a, P>(&'a self, function: MsgFn<A, P>, params: P) -> Msg<'a, A, P>
@@ -119,6 +108,10 @@ pub trait Addressable<A: Actor> {
     fn is_alive(&self) -> bool {
         self.address().sender.is_alive()
     }
+
+    fn process_id(&self) -> ProcessId {
+        self.address().process_id()
+    }
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -136,14 +129,17 @@ impl<A: Actor> Clone for Address<A> {
         Self {
             a: PhantomData,
             sender: self.sender.clone(),
-            pid: self.pid.clone(),
+            process_id: self.process_id.clone(),
         }
     }
 }
 
-impl<A: Debug> std::fmt::Debug for Address<A> {
+impl<A: Actor> std::fmt::Debug for Address<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Address").field("pid", &self.pid).finish()
+        f.debug_struct("Address")
+            .field("name", &<A as Actor>::debug())
+            .field("id", &self.process_id)
+            .finish()
     }
 }
 
@@ -157,7 +153,7 @@ pub trait Callable<'a, A, F, P, R, X: 'a, Y> {
 }
 
 impl<'a, A: Actor, P, T>
-    Callable<'a, A, MsgFn<A, P>, P, (), Msg<'a, A, P>, Result<(), ActorDied<P>>> for T
+    Callable<'a, A, MsgFn<A, P>, P, (), Msg<'a, A, P>, Result<(), DidntArrive<P>>> for T
 where
     P: Send + 'static,
     T: Addressable<A>,
@@ -166,13 +162,13 @@ where
         self.address().msg(function, params)
     }
 
-    fn send(&'a self, function: MsgFn<A, P>, params: P) -> Result<(), ActorDied<P>> {
+    fn send(&'a self, function: MsgFn<A, P>, params: P) -> Result<(), DidntArrive<P>> {
         self.call(function, params).send()
     }
 }
 
 impl<'a, A: Actor, P, R, T>
-    Callable<'a, A, ReqFn<A, P, R>, P, R, Req<'a, A, P, R>, Result<Reply<R>, ActorDied<P>>> for T
+    Callable<'a, A, ReqFn<A, P, R>, P, R, Req<'a, A, P, R>, Result<Reply<R>, DidntArrive<P>>> for T
 where
     P: Send + 'static,
     R: Send + 'static,
@@ -182,7 +178,7 @@ where
         self.address().req(function, params)
     }
 
-    fn send(&'a self, function: ReqFn<A, P, R>, params: P) -> Result<Reply<R>, ActorDied<P>> {
+    fn send(&'a self, function: ReqFn<A, P, R>, params: P) -> Result<Reply<R>, DidntArrive<P>> {
         self.call(function, params).send()
     }
 }
@@ -194,6 +190,7 @@ where
 mod test {
     use std::pin::Pin;
 
+    use async_trait::async_trait;
     use futures::Future;
 
     use crate::{
@@ -208,29 +205,13 @@ mod test {
 
     #[tokio::test]
     pub async fn main() {
-        let (child, address) = actor::spawn::<MyActor>(());
-        let res1 = address.send(Fn!(MyActor::test_a), 10).unwrap();
-        let res2 = address.send(Fn!(MyActor::test_b), 10).unwrap();
-        let res3 = address
-            .send(Fn!(MyActor::test_c), 10)
-            .unwrap()
-            .await
-            .unwrap();
-        let res4 = address
-            .send(Fn!(MyActor::test_d), 10)
-            .unwrap()
-            .await
-            .unwrap();
-        let res5 = address
-            .send(Fn!(MyActor::test_e), 10)
-            .unwrap()
-            .await
-            .unwrap();
-        let res6 = address
-            .send(Fn!(MyActor::test_f), 10)
-            .unwrap()
-            .await
-            .unwrap();
+        let child = actor::spawn::<MyActor>(());
+        let res1 = child.send(Fn!(MyActor::test_a), 10).unwrap();
+        let res2 = child.send(Fn!(MyActor::test_b), 10).unwrap();
+        let res3 = child.send(Fn!(MyActor::test_c), 10).unwrap().await.unwrap();
+        let res4 = child.send(Fn!(MyActor::test_d), 10).unwrap().await.unwrap();
+        let res5 = child.send(Fn!(MyActor::test_e), 10).unwrap().await.unwrap();
+        let res6 = child.send(Fn!(MyActor::test_f), 10).unwrap().await.unwrap();
 
         println!(
             "{:?}, {:?}, {:?}, {:?}, {:?}, {:?}",
@@ -279,23 +260,19 @@ mod test {
     }
 
     #[allow(dead_code, unused_variables)]
+    #[async_trait]
     impl Actor for MyActor {
         type Init = ();
 
         type ExitWith = u32;
 
-        fn exit(self, exit: ExitReason<Self>) -> u32 {
+        async fn exit(self, exit: ExitReason<Self>) -> u32 {
             0
         }
 
-        fn init(
-            init: Self::Init,
-            address: Address<Self>,
-        ) -> Pin<Box<dyn Future<Output = InitFlow<Self>> + Send>> {
-            Box::pin(async {
-                InitFlow::Init(Self {
-                    ctx: BasicCtx::new(address),
-                })
+        async fn init(init: Self::Init, address: Address<Self>) -> InitFlow<Self> {
+            InitFlow::Init(Self {
+                ctx: BasicCtx::new(address),
             })
         }
 

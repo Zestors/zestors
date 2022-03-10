@@ -51,8 +51,8 @@ impl<A: Actor> Child<A> {
         }
     }
 
-    pub fn address(&self) -> &Address<A> {
-        &self.address
+    pub fn clone_address(&self) -> Address<A> {
+        self.address.clone()
     }
 
     pub fn get_uuid(&self) -> Option<Uuid> {

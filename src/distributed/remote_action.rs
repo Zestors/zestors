@@ -1,8 +1,8 @@
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{action::MsgFnType, actor::Actor, address::Addressable, inbox::Unbounded, Fn, function::MsgFn};
+use crate::{action::MsgFnType, actor::{Actor, ProcessId}, address::Addressable, inbox::Unbounded, Fn, function::MsgFn};
 
-use super::{registry::Registry, ProcessId};
+use super::{registry::Registry};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RemoteAction {
@@ -19,12 +19,12 @@ impl RemoteAction {
         function: usize,
         params: Vec<u8>,
     ) {
-        if let Ok(address) = registry.address_by_id::<A>(process_id) {
-            let params: P = bincode::deserialize(&params).unwrap();
-            let function: MsgFnType<A, P> = unsafe { std::mem::transmute(function) };
-            let _ = address.msg(MsgFn::new_sync(function), params).send();
-        }
-        
+        // if let Ok(address) = registry.address_by_id::<A>(process_id) {
+        //     let params: P = bincode::deserialize(&params).unwrap();
+        //     let function: MsgFnType<A, P> = unsafe { std::mem::transmute(function) };
+        //     let _ = address.msg(MsgFn::new_sync(function), params).send();
+        // }
+        todo!()
     }
 
     pub fn new_msg<'a, A: Actor, P: Send + 'static + Serialize + DeserializeOwned>(

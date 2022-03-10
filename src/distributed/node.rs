@@ -1,6 +1,6 @@
 use std::{
-    any::TypeId,
     collections::{HashMap, HashSet},
+    net::SocketAddr,
     pin::Pin,
 };
 
@@ -10,34 +10,34 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::MaybeTlsStream;
 
 use crate::{
-    Fn,
     action::{Action, AsyncMsgFnType},
-    actor::{Actor, ExitReason},
-    address::{Address, Addressable},
+    actor::{self, Actor, ExitReason, ProcessId},
+    address::{Address, Addressable, Callable},
+    child::{Child, ProcessExit},
     context::{BasicCtx, NoCtx, StreamItem},
-    distributed::{
-        msg::{ActorTypeId, CheckForProcessFn},
-        registry::Registry,
-    },
+    distributed::msg::{ActorTypeId, CheckForProcessFn},
+    errors::DidntArrive,
     flows::{InitFlow, MsgFlow, ReqFlow},
-    messaging::Request,
+    messaging::{Reply, Request},
+    Fn,
 };
 
 use super::{
     challenge::{self, VerifiedStream},
-    cluster::AddNodeError,
     local_node::LocalNode,
     msg::{self, Id, NextId},
-    pid::{AnyPid, Pid},
+    pid::{AnyPid, ProcessRef},
     registry::RegistryGetError,
     remote_action::RemoteAction,
+    server::NodeConnectError,
     ws_stream::{WsRecvError, WsStream},
-    NodeId, ProcessId,
+    NodeId,
 };
 
 #[derive(Clone, Debug)]
-pub(crate) struct Node {
+pub struct Node {
     address: Address<NodeActor>,
+    node_id: NodeId,
 }
 
 //------------------------------------------------------------------------------------------------
@@ -49,7 +49,7 @@ pub(crate) struct NodeActor {
     /// Reference to the local node
     local_node: LocalNode,
     /// The id of this node
-    node_id: NodeId,
+    node: Node,
     /// The stream, which can be used to communicate with this node
     ws: VerifiedStream,
     /// Outstanding find_process requests for processes on this node
@@ -58,8 +58,6 @@ pub(crate) struct NodeActor {
     outstanding_messages: HashMap<Id, Request<()>>,
     /// The id that will be used for sending the next message
     next_id: NextId,
-
-    address: Address<Self>,
 }
 
 //------------------------------------------------------------------------------------------------
@@ -83,54 +81,67 @@ impl Stream for NodeActor {
 //  Actor
 //------------------------------------------------------------------------------------------------
 
+pub enum NodeInit {
+    Server(LocalNode, TcpStream, SocketAddr),
+    Client(LocalNode, SocketAddr),
+}
+
+#[async_trait::async_trait]
 impl Actor for NodeActor {
-    type Init = (LocalNode, TcpStream);
+    type Init = NodeInit;
     type Ctx = Self;
-    type InitError = AddNodeError;
+    type InitError = NodeConnectError;
 
-    fn init(
-        (local_node, stream): Self::Init,
-        address: Address<Self>,
-    ) -> Pin<Box<dyn Future<Output = InitFlow<Self>> + Send>> {
-        Box::pin(async {
-            let stream = WsStream::handshake_as_server(MaybeTlsStream::Plain(stream))
-                .await
-                .unwrap();
+    async fn init(init: Self::Init, address: Address<Self>) -> InitFlow<Self> {
+        let (local_node, ws, _addr, node_id) = match init {
+            NodeInit::Server(local_node, stream, addr) => {
+                let stream = WsStream::handshake_as_server(MaybeTlsStream::Plain(stream))
+                    .await
+                    .unwrap();
 
-            // Do challenge as the server
-            let (node_id, ws) = match challenge::as_server(&local_node, stream).await {
-                Ok(stream) => stream,
-                Err(_e) => return InitFlow::Error(todo!()),
-            };
+                let (node_id, ws) = challenge::as_server(&local_node, stream).await?;
 
-            let addr = ws.peer_addr();
-
-            // // If the node to be added has the same id as this node, reject
-            if local_node.node_id() == node_id {
-                return InitFlow::Error(AddNodeError::NodeIdIsLocalNode);
+                (local_node, ws, addr, node_id)
             }
 
-            InitFlow::Init(
-                Self {
-                    node_id,
-                    local_node,
-                    ws,
-                    outstanding_find_processes: HashMap::new(),
-                    outstanding_messages: HashMap::new(),
-                    next_id: NextId::new(),
-                    address,
-                }
-            )
+            NodeInit::Client(local_node, addr) => {
+                let stream = TcpStream::connect(addr).await?;
+
+                let stream = WsStream::handshake_as_client(MaybeTlsStream::Plain(stream))
+                    .await
+                    .unwrap();
+
+                let (node_id, ws) = challenge::as_client(&local_node, stream).await?;
+                (local_node, ws, addr, node_id)
+            }
+        };
+
+        let node = Node { address, node_id };
+
+        local_node
+            .cluster()
+            .add_node(local_node.node_id(), node.clone())?;
+
+        InitFlow::Init(Self {
+            local_node,
+            ws,
+            outstanding_find_processes: HashMap::new(),
+            outstanding_messages: HashMap::new(),
+            next_id: NextId::new(),
+            node,
         })
     }
 
-    fn exit(self, reason: ExitReason<Self>) -> Self::ExitWith {
-        // self.local_node.cluster().remove_node(self.node_id).unwrap();
+    async fn exit(self, reason: ExitReason<Self>) -> Self::ExitWith {
         reason
     }
 
     fn ctx(&mut self) -> &mut Self::Ctx {
         self
+    }
+
+    fn debug() -> &'static str {
+        "Node"
     }
 }
 
@@ -138,9 +149,76 @@ impl Actor for NodeActor {
 //  Impl
 //------------------------------------------------------------------------------------------------
 
-impl NodeActor {
-    fn spawn_as_server(local_node: LocalNode, stream: TcpStream) {}
+impl Node {
+    pub fn find_process<A: Actor>(
+        &self,
+        id: ProcessId,
+    ) -> Result<Reply<Result<ProcessRef<A>, ()>>, ()> {
+        todo!()
+    }
 
+    pub fn node_id(&self) -> NodeId {
+        self.node_id
+    }
+
+    pub fn find_process_by_name<A: Actor>(
+        &self,
+        name: &'static str,
+    ) -> Result<Reply<Result<ProcessRef<A>, ()>>, ()> {
+        todo!()
+    }
+
+    pub(crate) fn send_action(
+        &self,
+        action: RemoteAction,
+    ) -> Result<(), DidntArrive<RemoteAction>> {
+        self.address.send(Fn!(NodeActor::send_action), action)
+    }
+
+    async fn get_node(address: &Address<NodeActor>) -> Result<Node, ()> {
+        match address.send(Fn!(NodeActor::get_node), ()) {
+            Ok(reply) => match reply.await {
+                Ok(node) => Ok(node),
+                Err(_) => Err(()),
+            },
+            Err(_) => Err(()),
+        }
+    }
+
+    pub(crate) async fn spawn_as_client(
+        local_node: LocalNode,
+        addr: SocketAddr,
+    ) -> Result<Self, NodeConnectError> {
+        let mut child = actor::spawn::<NodeActor>(NodeInit::Client(local_node, addr));
+        // todo: don't detatch, but instead handle this properly somewhere
+        child.detach();
+
+        match Self::get_node(child.address()).await {
+            Ok(node) => Ok(node),
+            Err(_) => match child.await {
+                ProcessExit::InitFailed(e) => Err(e),
+                ProcessExit::Handled(e) => {
+                    panic!("{:?}", e)
+                }
+                ProcessExit::Panic(e) => panic!("{:?}", e),
+                ProcessExit::HardAbort => panic!("hard abort"),
+            },
+        }
+    }
+
+    pub(crate) fn spawn_as_server(
+        local_node: LocalNode,
+        stream: TcpStream,
+        addr: SocketAddr,
+    ) -> Child<NodeActor> {
+        let mut child = actor::spawn::<NodeActor>(NodeInit::Server(local_node, stream, addr));
+        // todo: don't detatch, but instead handle this properly somewhere
+        child.detach();
+        child
+    }
+}
+
+impl NodeActor {
     async fn ws_message(&mut self, msg_result: Result<msg::Msg, WsRecvError>) -> MsgFlow<Self> {
         match msg_result {
             Ok(msg) => match msg {
@@ -169,6 +247,10 @@ impl NodeActor {
         }
 
         MsgFlow::Ok
+    }
+
+    fn get_node(&mut self, _: ()) -> ReqFlow<Self, Node> {
+        ReqFlow::Reply(self.node.clone())
     }
 
     pub(crate) async fn send_action(&mut self, action: RemoteAction) -> MsgFlow<Self> {

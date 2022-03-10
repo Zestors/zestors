@@ -1,11 +1,17 @@
+use std::env::{self, Args};
+use std::fmt;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::time::Duration;
 
-use futures::Future;
+use futures::{Future, stream, StreamExt, join};
+use tokio::process::Command;
 use uuid::Uuid;
 use zestors::actor::{self};
-use zestors::address::{Address};
+use zestors::address::{Address, Addressable};
 use zestors::context::{BasicCtx, NoCtx};
+use zestors::distributed::NodeId;
+use zestors::distributed::node::Node;
 use zestors::flows::{InitFlow, ReqFlow};
 use zestors::messaging::Req;
 use zestors::{
@@ -17,62 +23,119 @@ use zestors::{
 
 #[tokio::main]
 pub async fn main() {
-    let token1 = Uuid::new_v4();
-    let token2 = Uuid::new_v4();
+    let args: Vec<String> = env::args().collect();
+    if args.len() == 1 {
+        let token1 = Uuid::new_v4();
+        let token2 = Uuid::new_v4();
 
-    let local_node_1 = LocalNode::initialize(token1, 1, "127.0.0.1:1234".parse().unwrap())
-        .await
-        .unwrap();
+        let task1 = tokio::task::spawn(async move {
+            let mut child1 = Command::new("cargo")
+                .arg("run")
+                .arg(token1.to_string())
+                .arg("1")
+                .spawn()
+                .unwrap();
 
-    let local_node_2 = LocalNode::initialize(token1, 2, "127.0.0.1:1235".parse().unwrap())
-        .await
-        .unwrap();
+            child1.wait().await
+        });
 
-    let local_node_3 = LocalNode::initialize(token1, 3, "127.0.0.1:1236".parse().unwrap())
-        .await
-        .unwrap();
+        let task2 = tokio::task::spawn(async move {
+            let mut child2 = Command::new("cargo")
+                .arg("run")
+                .arg(token1.to_string())
+                .arg("2")
+                .spawn()
+                .unwrap();
+            child2.wait().await
+        });
 
-    local_node_1
-        .connect("127.0.0.1:1235".parse().unwrap())
-        .await
-        .unwrap();
+        let task3 = tokio::task::spawn(async move {
+            let mut child3 = Command::new("cargo")
+                .arg("run")
+                .arg(token1.to_string())
+                .arg("3")
+                .spawn()
+                .unwrap();
+            child3.wait().await
+        });
 
-    local_node_2
-        .connect("127.0.0.1:1236".parse().unwrap())
-        .await
-        .unwrap();
+        let res = join!(task1, task2, task3);
 
-    local_node_3
-        .connect("127.0.0.1:1234".parse().unwrap())
-        .await
-        .unwrap();
+    } else if args.len() == 3 {
+        let token = Uuid::from_str(args.get(1).unwrap()).unwrap();
+        let id = NodeId::from_str(args.get(2).unwrap()).unwrap();
+        let socket_addr = format!("127.0.0.1:123{}", id).parse().unwrap();
 
-    main1(local_node_1).await;
-    main2(local_node_2).await;
-    main3(local_node_3).await;
+        local_node::initialize(token, id, socket_addr)
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        match id {
+            1 => main1().await,
+            2 => main2().await,
+            3 => main3().await,
+            _ => panic!()
+        }
+
+        tokio::time::sleep(Duration::from_millis(1_000)).await;
+
+    } else {
+        panic!()
+    }
 }
 
-async fn main1(local_node: LocalNode) {
-    let node2 = local_node.cluster().get_node(2).unwrap();
-    let node3 = local_node.cluster().get_node(3).unwrap();
+async fn main1() {
+    let local_node = local_node::get();
+    let registry = local_node.registry();
+    let cluster = local_node.cluster();
+    let node2 = local_node.connect("127.0.0.1:1232".parse().unwrap()).await.unwrap();
+    // let node3 = local_node.connect("127.0.0.1:1233".parse().unwrap()).await.unwrap();
 
-    let (child, address) = actor::spawn::<MyActor>(MyActor);
-    let pid = local_node
-        .register(&address, Some("hi".to_string()))
-        .unwrap();
 
-    println!("{:?}\n\n{:?}\n\n{:?}", pid.id(), child, address)
 }
 
-async fn main2(local_node: LocalNode) {
-    let node1 = local_node.cluster().get_node(1).unwrap();
-    let node3 = local_node.cluster().get_node(3).unwrap();
+async fn main2() {
+    let local_node = local_node::get();
+    let registry = local_node.registry();
+    // let node1 = local_node.connect("127.0.0.1:1231".parse().unwrap()).await.unwrap();
+    let node3 = local_node.connect("127.0.0.1:1233".parse().unwrap()).await.unwrap();
 }
 
-async fn main3(local_node: LocalNode) {
-    let node1 = local_node.cluster().get_node(1).unwrap();
-    let node2 = local_node.cluster().get_node(2).unwrap();
+async fn main3() {
+    let local_node = local_node::get();
+    let registry = local_node.registry();
+    let node1 = local_node.connect("127.0.0.1:1231".parse().unwrap()).await.unwrap();
+    // let node2 = local_node.connect("127.0.0.1:1232".parse().unwrap()).await.unwrap();
 }
+
+async fn actual_main() {
+
+    let nodes: Vec<Node> = stream::iter(1..4).filter_map(|id| async move {
+        if local_node::get().node_id() != id {
+            let socket_addr = format!("127.0.0.1:123{}", id).parse().unwrap();
+            Some(local_node::get().connect(socket_addr).await.unwrap())
+        } else {
+            None
+        }
+    }).collect().await;
+
+    println!("Connected nodes: {:?}", nodes);
+
+    for node in nodes {
+        match node.find_process_by_name::<MyActor>("my_actor") {
+            Ok(reply) => match reply.await {
+                Ok(process) => println!("found process! {:?}", process),
+                Err(_) => println!("process not found...")
+            },
+            Err(_) => println!("node disconnected..."),
+        }
+    }
+
+    tokio::time::sleep(Duration::from_millis(200)).await;
+}
+
 
 type BoxFut<T> = Pin<Box<dyn Future<Output = T>>>;
 
@@ -208,6 +271,7 @@ mod call_pid {
 #[derive(Debug)]
 struct MyActor;
 
+#[async_trait::async_trait]
 impl Actor for MyActor {
     type Init = Self;
     type ExitError = zestors::AnyhowError;
@@ -216,14 +280,11 @@ impl Actor for MyActor {
     type Ctx = BasicCtx<Self>;
     const ABORT_TIMER: Duration = Duration::from_secs(5);
 
-    fn init(
-        init: Self::Init,
-        address: Address<Self>,
-    ) -> Pin<Box<dyn Future<Output = InitFlow<Self>> + Send>> {
-        Box::pin(async { InitFlow::Init(init) })
+    async fn init(init: Self::Init, address: Address<Self>) -> InitFlow<Self> {
+        InitFlow::Init(init)
     }
 
-    fn exit(self, reason: actor::ExitReason<Self>) -> Self::ExitWith {
+    async fn exit(self, reason: actor::ExitReason<Self>) -> Self::ExitWith {
         reason
     }
 

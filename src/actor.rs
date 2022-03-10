@@ -1,10 +1,11 @@
-use std::{fmt::Debug, time::Duration, pin::Pin};
+use std::{fmt::Debug, pin::Pin, sync::atomic::{AtomicU32, Ordering}, time::Duration};
 
 use futures::{
     future::{self, Fuse},
     stream::{self, Next, PollNext},
-    FutureExt, Stream, StreamExt, Future,
+    Future, FutureExt, Stream, StreamExt,
 };
+use serde::{Serialize, Deserialize};
 
 use crate::{
     abort::{AbortAction, AbortReceiver, AbortSender},
@@ -16,6 +17,8 @@ use crate::{
     inbox::{channel, ActionReceiver, Capacity, Unbounded},
     AnyhowError,
 };
+
+static NEXT_PROCESS_ID: NextProcessId = NextProcessId::new();
 
 //--------------------------------------------------------------------------------------------------
 //  Actor trait
@@ -69,6 +72,7 @@ use crate::{
 ///     // or: let (process, address) = MyActor{}.spawn();
 /// }
 ///
+#[async_trait::async_trait]
 pub trait Actor: Send + 'static + Debug + Sized {
     /// The value that can be used to initialise this actor. This value is then passed on to
     /// [Actor::init], which initialises the actor and returns a `Self`.
@@ -136,11 +140,11 @@ pub trait Actor: Send + 'static + Debug + Sized {
     /// can cancel initialisation and return an error.
     ///
     /// Cancelation does **not** call [Actor::handle_exit], but directly exits the process instead.
-    fn init(init: Self::Init, state: Address<Self>) -> Pin<Box<dyn Future<Output = InitFlow<Self>> + Send>>;
+    async fn init(init: Self::Init, state: Address<Self>) -> InitFlow<Self>;
 
     /// Whenever this actor exits for any [ExitReason] (excluding `panics` or `hard-aborts`),
     /// this function is called with the reason.
-    fn exit(self, reason: ExitReason<Self>) -> Self::ExitWith;
+    async fn exit(self, reason: ExitReason<Self>) -> Self::ExitWith;
 
     /// Whenever the actor is detatched, and the handle is subsequently dropped,
     /// this function is called to inform the actor. This means the the actor is not part of a
@@ -148,12 +152,39 @@ pub trait Actor: Send + 'static + Debug + Sized {
     /// useful to log a message here if this should never happen. (Or `MsgFlow::Exit`)
     ///
     /// By default, the actor just resumes execution as if nothing happened.
-    fn isolated(&mut self) -> MsgFlow<Self> {
+    async fn isolated(&mut self) -> MsgFlow<Self> {
+        MsgFlow::Ok
+    }
+
+    async fn addresses_dropped(&mut self) -> MsgFlow<Self> {
         MsgFlow::Ok
     }
 
     fn ctx(&mut self) -> &mut Self::Ctx;
+
+    fn debug() -> &'static str {
+        ""
+    }
 }
+
+//------------------------------------------------------------------------------------------------
+//  ProcessId
+//------------------------------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub struct NextProcessId(AtomicU32);
+
+impl NextProcessId {
+    const fn new() -> Self {
+        Self(AtomicU32::new(0))
+    }
+
+    fn next(&self) -> ProcessId {
+        self.0.fetch_add(1, Ordering::SeqCst)
+    }
+}
+
+pub type ProcessId = u32;
 
 //--------------------------------------------------------------------------------------------------
 //  Spawn
@@ -163,21 +194,23 @@ pub trait Actor: Send + 'static + Debug + Sized {
 /// ```ignore
 /// spawn::<MyActor>(init);
 /// ```
-pub fn spawn<A: Actor>(init: A::Init) -> (Child<A>, Address<A>) {
+pub fn spawn<A: Actor>(init: A::Init) -> Child<A> {
+    // Aquire a new process id
+    let process_id = NEXT_PROCESS_ID.next();
     // Get the capacity for the channel.
     // let capacity = <A::Inbox as Capacity<A::Inbox>>::capacity(A::INBOX_CAPACITY);
     // Create the sender and receiver.
     let (sender, receiver) = channel(None);
     // Create the raw address from this sender.
-    let address = Address::new(sender);
+    let address = Address::new(sender, process_id);
     // create the abort sender
     let (abort_sender, abort_receiver) = AbortSender::new();
     // spawn the task
     let handle = tokio::task::spawn(event_loop(init, receiver, address.clone(), abort_receiver));
     // wrap handle in a new process
-    let process = Child::new(handle, address.clone().into(), abort_sender, true);
+    let process = Child::new(handle, address, abort_sender, true);
     // return the process and the address
-    (process, address.into())
+    process
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -225,7 +258,7 @@ async fn event_loop<A: Actor>(
         InitFlow::InitAndAfter(actor, action) => {
             optional_after = Some(action);
             actor
-        },
+        }
     };
 
     loop {
@@ -242,16 +275,14 @@ async fn event_loop<A: Actor>(
                 EventFlow::Ok => (),
                 EventFlow::Before(_) => (), // ignore before from before
                 EventFlow::ErrorExit(e) => {
-                    return InternalExitReason::Handled(<A as Actor>::exit(
-                        actor,
-                        ExitReason::Error(e),
-                    ))
+                    return InternalExitReason::Handled(
+                        <A as Actor>::exit(actor, ExitReason::Error(e)).await,
+                    )
                 }
                 EventFlow::NormalExit(n) => {
-                    return InternalExitReason::Handled(<A as Actor>::exit(
-                        actor,
-                        ExitReason::Normal(n),
-                    ))
+                    return InternalExitReason::Handled(
+                        <A as Actor>::exit(actor, ExitReason::Normal(n)).await,
+                    )
                 }
                 EventFlow::After(_) => unreachable!(),
             };
@@ -263,12 +294,11 @@ async fn event_loop<A: Actor>(
         let flow = match next_event {
             NextEvent::StreamItem(item) => item.handle(&mut actor).await,
             NextEvent::SoftAbort => {
-                return InternalExitReason::Handled(<A as Actor>::exit(
-                    actor,
-                    ExitReason::SoftAbort,
-                ))
+                return InternalExitReason::Handled(
+                    <A as Actor>::exit(actor, ExitReason::SoftAbort).await,
+                )
             }
-            NextEvent::Isolated => actor.isolated().into_event_flow(),
+            NextEvent::Isolated => actor.isolated().await.into_event_flow(),
         };
 
         //-------------------------------------------------
@@ -279,13 +309,14 @@ async fn event_loop<A: Actor>(
             EventFlow::After(action) => optional_after = Some(action),
             EventFlow::Before(action) => optional_before = Some(action),
             EventFlow::ErrorExit(e) => {
-                return InternalExitReason::Handled(<A as Actor>::exit(actor, ExitReason::Error(e)))
+                return InternalExitReason::Handled(
+                    <A as Actor>::exit(actor, ExitReason::Error(e)).await,
+                )
             }
             EventFlow::NormalExit(n) => {
-                return InternalExitReason::Handled(<A as Actor>::exit(
-                    actor,
-                    ExitReason::Normal(n),
-                ))
+                return InternalExitReason::Handled(
+                    <A as Actor>::exit(actor, ExitReason::Normal(n)).await,
+                )
             }
         }
 
@@ -297,16 +328,14 @@ async fn event_loop<A: Actor>(
                 EventFlow::Ok => (),
                 EventFlow::Before(_) => (), // ignore before from before
                 EventFlow::ErrorExit(e) => {
-                    return InternalExitReason::Handled(<A as Actor>::exit(
-                        actor,
-                        ExitReason::Error(e),
-                    ))
+                    return InternalExitReason::Handled(
+                        <A as Actor>::exit(actor, ExitReason::Error(e)).await,
+                    )
                 }
                 EventFlow::NormalExit(n) => {
-                    return InternalExitReason::Handled(<A as Actor>::exit(
-                        actor,
-                        ExitReason::Normal(n),
-                    ))
+                    return InternalExitReason::Handled(
+                        <A as Actor>::exit(actor, ExitReason::Normal(n)).await,
+                    )
                 }
                 EventFlow::After(_) => unreachable!(),
             };

@@ -2,18 +2,17 @@ use std::{collections::HashMap, sync::RwLock};
 
 use serde::{Serialize, Deserialize};
 
-use crate::{actor::Actor, address::{Address, AnyAddress}};
+use crate::{actor::{Actor, ProcessId}, address::{Address, AnyAddress}};
 
 use super::{
     local_node::LocalNode,
-    pid::{AnyPid, NodeLocation, Pid},
-    ProcessId,
+    pid::{AnyPid, NodeLocation, ProcessRef},
 };
 
 #[derive(Debug)]
 pub struct Registry {
-    by_id: RwLock<HashMap<ProcessId, (AnyAddress, AnyPid)>>,
-    by_name: RwLock<HashMap<String, (AnyAddress, AnyPid)>>,
+    by_id: RwLock<HashMap<ProcessId, AnyAddress>>,
+    by_name: RwLock<HashMap<String, AnyAddress>>,
 }
 
 impl Registry {
@@ -31,94 +30,38 @@ impl Registry {
         address: &Address<A>,
         name: Option<String>,
         local_node: LocalNode,
-    ) -> Result<Pid<A>, RegistrationError> {
-        // Check if this address is already registered first
-        if let Some(_) = address.is_registered() {
-            return Err(RegistrationError::AlreadyRegistered);
-        }
-
-        // Generate a new temparary pid
-        let pid = Pid::new(NodeLocation::Local(local_node));
-        let process_id = pid.id();
-
+    ) -> Result<(), RegistrationError> {
         // Aquire locks: first id, then name
         let mut by_id = self.by_id.write().unwrap();
         let mut by_name = self.by_name.write().unwrap();
-        assert!(!by_id.contains_key(&process_id));
 
-        // Check if name is already registered
+        if by_id.contains_key(&address.process_id()) {
+            return Err(RegistrationError::AlreadyRegistered)
+        };
+
         if let Some(name) = &name {
             if by_name.contains_key(name) {
-                return Err(RegistrationError::NameTaken);
-            }
-        }
+                return Err(RegistrationError::NameTaken)
+            };
+        };
 
         // Add the pid and name into the registry
         if let Some(name) = name {
-            let old_name = by_name.insert(name, (AnyAddress::new(address.clone()), AnyPid::new(pid.clone())));
+            let old_name = by_name.insert(name, AnyAddress::new(address.clone()));
             assert!(old_name.is_none())
         }
-        let old_id = by_id.insert(process_id, (AnyAddress::new(address.clone()), AnyPid::new(pid.clone())));
+        let old_id = by_id.insert(address.process_id(), AnyAddress::new(address.clone()));
         assert!(old_id.is_none());
 
-        // We can now drop the locks again
-        drop(by_id);
-        drop(by_name);
-
-        // And insert the pid into the address
-        let old_pid = address.replace_pid(pid.clone());
-        assert!(old_pid.is_none());
-
-        // Finally return the pid that was created
-        Ok(pid)
+        Ok(())
     }
 
-    pub(crate) fn pid_by_id<A: Actor>(
-        &self,
-        process_id: ProcessId,
-    ) -> Result<Pid<A>, RegistryGetError> {
-        match self.by_id.read().unwrap().get(&process_id) {
-            Some(any) => match any.1.downcast_ref::<A>() {
-                Some(pid) => Ok(pid.clone()),
-                None => Err(RegistryGetError::DownCastingFailed),
-            },
-            None => Err(RegistryGetError::IdNotRegistered),
-        }
-    }
-
-    pub(crate) fn pid_by_name<A: Actor>(&self, name: &str) -> Result<Pid<A>, RegistryGetError> {
-        match self.by_name.read().unwrap().get(name) {
-            Some(any) => match any.1.downcast_ref::<A>() {
-                Some(pid) => Ok(pid.clone()),
-                None => Err(RegistryGetError::DownCastingFailed),
-            },
-            None => Err(RegistryGetError::IdNotRegistered),
-        }
-    }
-
-    // pub(crate) fn any_pid_by_id(
-    //     &self,
-    //     process_id: ProcessId,
-    // ) -> Result<AnyPid, RegistryGetError> {
-    //     match self.by_id.read().unwrap().get(&process_id) {
-    //         Some(any) => Ok(any.1.clone()),
-    //         None => Err(RegistryGetError::IdNotRegistered),
-    //     }
-    // }
-
-    // pub(crate) fn any_pid_by_name(&self, name: &str) -> Result<AnyPid, RegistryGetError> {
-    //     match self.by_name.read().unwrap().get(name) {
-    //         Some(any) => Ok(any.1.clone()),
-    //         None => Err(RegistryGetError::IdNotRegistered),
-    //     }
-    // }
-
-    pub(crate) fn address_by_id<A: Actor>(
+    pub fn find_by_id<A: Actor>(
         &self,
         process_id: ProcessId,
     ) -> Result<Address<A>, RegistryGetError> {
         match self.by_id.read().unwrap().get(&process_id) {
-            Some(any) => match any.0.downcast_ref::<A>() {
+            Some(any_address) => match any_address.downcast_ref::<A>() {
                 Some(address) => Ok(address.clone()),
                 None => Err(RegistryGetError::DownCastingFailed),
             },
@@ -126,14 +69,22 @@ impl Registry {
         }
     }
 
-    pub(crate) fn address_by_name<A: Actor>(&self, name: &str) -> Result<Address<A>, RegistryGetError> {
+    pub fn find_by_name<A: Actor>(&self, name: &str) -> Result<Address<A>, RegistryGetError> {
         match self.by_name.read().unwrap().get(name) {
-            Some(any) => match any.0.downcast_ref::<A>() {
+            Some(any_address) => match any_address.downcast_ref::<A>() {
                 Some(address) => Ok(address.clone()),
                 None => Err(RegistryGetError::DownCastingFailed),
             },
             None => Err(RegistryGetError::IdNotRegistered),
         }
+    }
+
+    pub fn id_is_registered(&self, process_id: ProcessId) -> bool {
+        self.by_id.read().unwrap().contains_key(&process_id)
+    }
+
+    pub fn name_is_registered(&self, name: &str) -> bool {
+        self.by_name.read().unwrap().contains_key(name)
     }
 }
 

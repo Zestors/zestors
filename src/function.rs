@@ -13,6 +13,10 @@ use futures::{Future, FutureExt};
 use serde::{Deserialize, Serialize};
 use std::{any::Any, marker::PhantomData, mem::transmute, pin::Pin};
 
+//------------------------------------------------------------------------------------------------
+//  HandlerPtr
+//------------------------------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 enum HandlerPtr {
     Sync(usize),
@@ -92,7 +96,7 @@ impl<A, P> From<MsgFn<A, P>> for AnyFn<A> {
 }
 
 //------------------------------------------------------------------------------------------------
-//  ReqFn
+//  HandlerParams
 //------------------------------------------------------------------------------------------------
 
 #[derive(Debug)]
@@ -122,6 +126,10 @@ impl HandlerParams {
     }
 }
 
+//------------------------------------------------------------------------------------------------
+//  ReqFn
+//------------------------------------------------------------------------------------------------
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ReqFn<A: ?Sized, P: ?Sized, R: ?Sized> {
     a: PhantomData<A>,
@@ -132,29 +140,29 @@ pub struct ReqFn<A: ?Sized, P: ?Sized, R: ?Sized> {
 }
 
 impl<A: Actor, P: Send + 'static, R: Send + 'static> ReqFn<A, P, R> {
-    // pub(crate) async fn call(&self, actor: &mut A, params: P, request: Request<R>) -> EventFlow<A> {
-    //     unsafe {
-    //         self.call_unchecked(actor, HandlerParams::new_req(params, request))
-    //             .await
-    //     }
-    // }
+    pub(crate) async unsafe fn call(&self, actor: &mut A, params: P, request: Request<R>) -> EventFlow<A> {
+        unsafe {
+            self.call_unchecked(actor, HandlerParams::new_req(params, request))
+                .await
+        }
+    }
 
-    // pub(crate) async unsafe fn call_unchecked(
-    //     &self,
-    //     actor: &mut A,
-    //     params: HandlerParams,
-    // ) -> EventFlow<A> {
-    //     match self.handler {
-    //         HandlerPtr::Async(handler) => {
-    //             let handler: AsyncHandlerFnType<A> = unsafe { transmute(handler) };
-    //             handler(actor, params.0, self.function).await
-    //         }
-    //         HandlerPtr::Sync(handler) => {
-    //             let handler: HandlerFnType<A> = unsafe { transmute(handler) };
-    //             handler(actor, params.0, self.function)
-    //         }
-    //     }
-    // }
+    pub(crate) async unsafe fn call_unchecked(
+        &self,
+        actor: &mut A,
+        params: HandlerParams,
+    ) -> EventFlow<A> {
+        match self.handler {
+            HandlerPtr::Async(handler) => {
+                let handler: AsyncHandlerFnType<A> = unsafe { transmute(handler) };
+                handler(actor, params, self.function).await
+            }
+            HandlerPtr::Sync(handler) => {
+                let handler: HandlerFnType<A> = unsafe { transmute(handler) };
+                handler(actor, params, self.function)
+            }
+        }
+    }
 
     pub fn new_sync(function: ReqFnType<A, P, R>) -> Self {
         Self {
@@ -273,28 +281,28 @@ pub struct MsgFn<A: ?Sized, P: ?Sized> {
 }
 
 impl<A: Actor, P: Send + 'static> MsgFn<A, P> {
-    // pub(crate) async fn call(&self, actor: &mut A, params: P) -> EventFlow<A> {
-    //     unsafe { self.call_unchecked(actor, MsgFnParams::new(params)).await }
-    // }
+    pub(crate) async unsafe fn call(&self, actor: &mut A, params: P) -> EventFlow<A> {
+        unsafe { self.call_unchecked(actor, HandlerParams::new_msg(params)).await }
+    }
 
-    // pub(crate) async unsafe fn call_unchecked(
-    //     &self,
-    //     actor: &mut A,
-    //     params: MsgFnParams,
-    // ) -> EventFlow<A> {
-    //     match self.handler {
-    //         HandlerPtr::Async(handler) => {
-    //             let handler: AsyncHandlerFnType<A> = unsafe { transmute(handler) };
-    //             handler(actor, params.0, self.function).await
-    //         }
-    //         HandlerPtr::Sync(handler) => {
-    //             let handler: HandlerFnType<A> = unsafe { transmute(handler) };
-    //             handler(actor, params.0, self.function)
-    //         }
-    //     }
-    // }
+    pub(crate) async unsafe fn call_unchecked(
+        &self,
+        actor: &mut A,
+        params: HandlerParams,
+    ) -> EventFlow<A> {
+        match self.handler {
+            HandlerPtr::Async(handler) => {
+                let handler: AsyncHandlerFnType<A> = unsafe { transmute(handler) };
+                handler(actor, params, self.function).await
+            }
+            HandlerPtr::Sync(handler) => {
+                let handler: HandlerFnType<A> = unsafe { transmute(handler) };
+                handler(actor, params, self.function)
+            }
+        }
+    }
 
-    pub(crate) fn new_sync(ptr: MsgFnType<A, P>) -> Self {
+    pub fn new_sync(ptr: MsgFnType<A, P>) -> Self {
         Self {
             a: PhantomData,
             p: PhantomData,
@@ -308,7 +316,7 @@ impl<A: Actor, P: Send + 'static> MsgFn<A, P> {
         function(actor, params.downcast_msg().unwrap()).into_event_flow()
     }
 
-    pub(crate) fn new_async<F>(ptr: AsyncMsgFnType<A, P, F>) -> Self
+    pub fn new_async<F>(ptr: AsyncMsgFnType<A, P, F>) -> Self
     where
         F: Future<Output = MsgFlow<A>> + Send + 'static,
     {
@@ -333,6 +341,10 @@ impl<A: Actor, P: Send + 'static> MsgFn<A, P> {
         Box::pin(function(actor, params.downcast_msg().unwrap()).map(|f| f.into_event_flow()))
     }
 }
+
+//------------------------------------------------------------------------------------------------
+//  Implementations
+//------------------------------------------------------------------------------------------------
 
 impl<A> Clone for AnyFn<A> {
     fn clone(&self) -> Self {
@@ -461,20 +473,11 @@ where
     }
 }
 
+//------------------------------------------------------------------------------------------------
+//  MsgHelperTrait
+//------------------------------------------------------------------------------------------------
+
 pub trait MsgHelperTrait {}
 pub trait ReqHelperTrait {}
 impl<A: Actor, T: Future<Output = MsgFlow<A>>> MsgHelperTrait for T {}
 impl<A: Actor, R, T: Future<Output = ReqFlow<A, R>>> ReqHelperTrait for T {}
-
-//------------------------------------------------------------------------------------------------
-//  Testing
-//------------------------------------------------------------------------------------------------
-
-fn test() {
-    let ptr = Fn!(NodeActor::test1);
-    let ptr = Fn!(NodeActor::test2);
-    let ptr = Fn!(NodeActor::test3);
-    let ptr = Fn!(NodeActor::test4);
-    let ptr = Fn!(NodeActor::test5);
-    let ptr = Fn!(NodeActor::test6);
-}

@@ -2,7 +2,7 @@ use crate::{
     action::Action,
     actor::Actor,
     errors::{
-        ActorDied, ActorDiedAfterSending, SendRecvError, TryRecvError, TrySendError,
+        DidntArrive, ActorDiedAfterSending, SendRecvError, TryRecvError, TrySendError,
         TrySendRecvError,
     },
     inbox::{
@@ -138,7 +138,7 @@ where
     /// `send` method, which works for both synchronous and asynchronous contexts.
     ///
     /// This method can only fail if the [Actor] has died before the message could be sent.
-    pub fn send(self) -> Result<Reply<R>, ActorDied<P>>
+    pub fn send(self) -> Result<Reply<R>, DidntArrive<P>>
     where
         P: Send + 'static,
         R: Send + 'static,
@@ -146,7 +146,7 @@ where
         match self.sender.try_send(self.action) {
             Ok(()) => Ok(self.reply),
             Err(ActionTrySendError::Disconnected(action)) => {
-                Err(ActorDied(action.downcast_req::<P, R>().unwrap()))
+                Err(DidntArrive(action.downcast_req::<P, R>().unwrap()))
             }
             Err(ActionTrySendError::Full(_)) => unreachable!("should be unbounded"),
         }
@@ -370,14 +370,14 @@ where
     /// `send` method, which works for both synchronous and asynchronous contexts.
     ///
     /// This method can only fail if the [Actor] has died before the message could be sent.
-    pub fn send(self) -> Result<(), ActorDied<P>>
+    pub fn send(self) -> Result<(), DidntArrive<P>>
     where
         P: Send + 'static,
     {
         match self.sender.try_send(self.action) {
             Ok(()) => Ok(()),
             Err(ActionTrySendError::Disconnected(action)) => {
-                Err(ActorDied(action.downcast::<P>().unwrap()))
+                Err(DidntArrive(action.downcast::<P>().unwrap()))
             }
             Err(ActionTrySendError::Full(_)) => unreachable!("should be unbounded"),
         }

@@ -2,7 +2,10 @@
 ///
 /// Sending failed because the [Actor] died before the [Msg] or [Req] could be sent.
 #[derive(Debug)]
-pub struct ActorDied<T>(pub T);
+pub struct DidntArrive<T>(pub T);
+
+#[derive(Debug)]
+pub struct NoReply<T>(pub T);
 
 /// Error returned when sending a [Msg] or [Req] to an [Actor] and then
 /// trying to wait for the [Reply].
@@ -55,12 +58,12 @@ pub enum TryRecvError {
 //-------------------------------------
 
 // ActorDied
-impl<T: std::fmt::Debug> std::fmt::Display for ActorDied<T> {
+impl<T: std::fmt::Debug> std::fmt::Display for DidntArrive<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ActorDied")
     }
 }
-impl<T: std::fmt::Debug> std::error::Error for ActorDied<T> {
+impl<T: std::fmt::Debug> std::error::Error for DidntArrive<T> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         None
     }

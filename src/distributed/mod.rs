@@ -12,7 +12,6 @@ pub mod node;
 pub mod remote_action;
 
 
-pub type NodeId = u64;
+pub type NodeId = u32;
 pub type Token = Uuid;
 pub type BuildId = Uuid;
-pub type ProcessId = Uuid;

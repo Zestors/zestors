@@ -5,6 +5,8 @@ use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio_tungstenite::MaybeTlsStream;
 
+use crate::distributed::node::Node;
+
 use super::challenge;
 use super::challenge::ChallengeError;
 use super::cluster::AddNodeError;
@@ -47,7 +49,7 @@ impl Server {
                     res = self.listener.accept() => {
                         match res {
                             Ok((stream, addr)) => {
-                                Self::incoming_node(self.local_node.clone(), stream, addr)
+                                Node::spawn_as_server(self.local_node.clone(), stream, addr);
                             },
                             Err(e) => break ServerExit::Io(e),
                         }
@@ -66,26 +68,6 @@ impl Server {
         });
 
         (sender, handle)
-    }
-
-    fn incoming_node(local_node: LocalNode, stream: TcpStream, addr: SocketAddr) {
-        tokio::task::spawn(async move {
-            // Attempt ws handshake as the server
-            // let stream = WsStream::handshake_as_server(MaybeTlsStream::Plain(stream))
-            //     .await
-            //     .unwrap();
-
-            // // Do challenge as the server
-            // let (node_id, stream) = match challenge::as_server(&local_node, stream).await {
-            //     Ok(stream) => stream,
-            //     Err(_e) => return,
-            // };
-
-            // let _ = local_node
-            //     .cluster()
-            //     .spawn_node(&local_node, node_id, stream);
-            todo!()
-        });
     }
 }
 
@@ -118,11 +100,11 @@ pub enum NodeConnectError {
     /// The websocket handshake failed.
     HandShakeFailed(tungstenite::Error),
     /// The protocols did not match up.
-    Protocol(Box<dyn Any>, &'static str),
+    Protocol(Box<dyn Any + Send>, &'static str),
     /// The challenge failed.
     ChallengeFailed(ChallengeError),
     /// There was a problem receiving a message through the ws.
-    WsRecv(Box<dyn std::fmt::Debug>),
+    WsRecv(Box<dyn std::fmt::Debug + Send>),
     /// There was a problem sending a message through the ws.
     WsSend(WsSendError),
 
@@ -159,8 +141,7 @@ impl From<AddNodeError> for NodeConnectError {
     fn from(e: AddNodeError) -> Self {
         match e {
             AddNodeError::NodeIdAlreadyRegistered => Self::NodeIdAlreadyRegistered,
-            AddNodeError::NodeIdIsLocalNode => Self::NodeIdIsLocalNode,
-            AddNodeError::Io(e) => Self::Io(e),
+            AddNodeError::NodeIdIsLocalNode => Self::NodeIdIsLocalNode
         }
     }
 }

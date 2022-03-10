@@ -33,7 +33,6 @@ tokio-native-tls = "0.3"
 sha2 = "0.10"
 chrono = { version = "0.4.19", features = ["serde"] }
 
-
 # async-raft = "0.6.1"
 # raft = "0.6"
 # memstore = "0.2"

@@ -8,7 +8,7 @@ use std::{
 use crate::{
     actor::{Actor},
     address::Address,
-    child::Child,
+    child::Child, distributed::node::NodeInit,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -22,10 +22,10 @@ use uuid::Uuid;
 
 use super::{
     cluster::Cluster,
-    pid::{NodeLocation, Pid},
+    pid::{NodeLocation, ProcessRef},
     registry::{Registry, RegistrationError},
     server::{NodeConnectError, NodeExit, Server, ServerExit, ServerMsg},
-    BuildId, NodeId, ProcessId, Token, node::NodeActor,
+    BuildId, NodeId, Token, node::{NodeActor, Node},
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -65,7 +65,7 @@ impl LocalNode {
     /// Initialize the local node with a token that should be identical between all nodes in the 
     /// cluster, a node_id that should be unique between all nodes in the cluster, and an address
     /// to start listening on for incoming node connections.
-    pub async fn initialize(
+    async fn initialize(
         token: Token,
         node_id: NodeId,
         addr: SocketAddr,
@@ -95,33 +95,8 @@ impl LocalNode {
     /// 
     /// If succesful, these nodes are now connected in the cluster, and can send messages 
     /// back and forth using `Pids`.
-    pub async fn connect(&self, addr: SocketAddr) -> Result<(), NodeConnectError> {
-        // // Setup tcp stream
-        // let stream = TcpStream::connect(addr).await?;
-
-        // // upgrade to ws
-        // let stream = WsStream::handshake_as_client(MaybeTlsStream::Plain(stream)).await?;
-
-        // // challenge as client
-        // let (node_id, stream) = challenge::as_client(self, stream).await?;
-
-        // let node = self.0.cluster.spawn_node(self, node_id, stream)?;
-
-        // Ok(node)
-
-        todo!()
-    }
-
-    /// Register a process that is running on this binary to the `LocalNode`. If successful,
-    /// this will return a `Pid`, with a globally unique UUID, which can be sent to other processes
-    /// in order to send messages between different nodes.
-    pub fn register<A: Actor>(
-        &self,
-        address: &Address<A>,
-        name: Option<String>,
-    ) -> Result<Pid<A>, RegistrationError> {
-        let pid = self.0.registry.register(address, name, self.clone())?;
-        Ok(pid)
+    pub async fn connect(&self, addr: SocketAddr) -> Result<Node, NodeConnectError> {
+        Node::spawn_as_client(self.clone(), addr).await
     }
 
     pub fn registry(&self) -> &Registry {

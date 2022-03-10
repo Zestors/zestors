@@ -1,26 +1,36 @@
-use std::{any::Any, marker::PhantomData, sync::Arc, ptr::DynMetadata};
+use std::{any::Any, marker::PhantomData, ptr::DynMetadata, sync::Arc};
 
-use crate::{actor::Actor, address::{Address, Addressable}, action::MsgFnType, Fn};
-use serde::{Serialize, de::DeserializeOwned};
+use crate::{
+    action::MsgFnType,
+    actor::{Actor, ProcessId},
+    address::{Address, Addressable},
+    Fn,
+};
+use serde::{de::DeserializeOwned, Serialize};
 use uuid::Uuid;
 
-use super::{local_node::LocalNode, node::NodeActor, ProcessId, msg::ActorTypeId, remote_action::RemoteAction};
+use super::{
+    local_node::LocalNode,
+    msg::ActorTypeId,
+    node::{Node, NodeActor},
+    remote_action::RemoteAction,
+};
 
 //------------------------------------------------------------------------------------------------
 //  Pid
 //------------------------------------------------------------------------------------------------
 
 #[derive(Debug)]
-pub struct Pid<A: ?Sized> {
+pub struct ProcessRef<A: ?Sized> {
     a: PhantomData<A>,
     id: ProcessId,
-    node: NodeLocation,
+    node: Node,
 }
 
-impl<A: Actor> Pid<A> {
-    pub(crate) fn new(node: NodeLocation) -> Self {
+impl<A: Actor> ProcessRef<A> {
+    pub(crate) fn new(node: Node, id: ProcessId) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id,
             node,
             a: PhantomData,
         }
@@ -30,18 +40,16 @@ impl<A: Actor> Pid<A> {
         self.id
     }
 
-    pub fn msg<P: Serialize + DeserializeOwned + Send + 'static>(&self, function: MsgFnType<A, P>, params: &P) {
-        let action = RemoteAction::new_msg(function, params, self.id);
-        match &self.node {
-            NodeLocation::Local(_) => todo!(),
-            NodeLocation::Remote(node) => {
-                node.msg(Fn!(NodeActor::send_action), action).send();
-            },
-        }
+    pub fn msg<P: Serialize + DeserializeOwned + Send + 'static>(
+        &self,
+        function: MsgFnType<A, P>,
+        params: &P,
+    ) {
+        self.node.send_action(RemoteAction::new_msg(function, params, self.id));
     }
 }
 
-impl<A> Clone for Pid<A> {
+impl<A> Clone for ProcessRef<A> {
     fn clone(&self) -> Self {
         Self {
             a: self.a.clone(),
@@ -54,7 +62,7 @@ impl<A> Clone for Pid<A> {
 #[derive(Debug, Clone)]
 pub(crate) enum NodeLocation {
     Local(LocalNode),
-    Remote(Address<NodeActor>),
+    Remote(Node),
 }
 
 //------------------------------------------------------------------------------------------------
@@ -65,28 +73,28 @@ pub(crate) enum NodeLocation {
 pub struct AnyPid(Box<dyn Any + Send + Sync>);
 
 impl AnyPid {
-    pub(crate) fn new<A: 'static>(pid: Pid<A>) -> Self {
+    pub(crate) fn new<A: 'static>(pid: ProcessRef<A>) -> Self {
         Self(Box::new(pid))
     }
 
-    pub fn downcast<A: 'static>(self) -> Result<Pid<A>, Self> {
+    pub fn downcast<A: 'static>(self) -> Result<ProcessRef<A>, Self> {
         match self.0.downcast() {
             Ok(pid) => Ok(*pid),
             Err(boxed) => Err(Self(boxed)),
         }
     }
 
-    pub fn downcast_ref<A: Actor>(&self) -> Option<&Pid<A>> {
+    pub fn downcast_ref<A: Actor>(&self) -> Option<&ProcessRef<A>> {
         self.0.downcast_ref()
     }
 
     // pub(crate) fn actor_type_id(&self) -> ActorTypeId {
     //     let boxed = *self.0;
 
-    //     let metadata = DynMetadata::from(boxed);   
+    //     let metadata = DynMetadata::from(boxed);
     //     let type_id = boxed.type_id();
     // }
 }
 
-unsafe impl<A> Send for Pid<A> {}
-unsafe impl<A> Sync for Pid<A> {}
+unsafe impl<A> Send for ProcessRef<A> {}
+unsafe impl<A> Sync for ProcessRef<A> {}

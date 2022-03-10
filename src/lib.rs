@@ -3,7 +3,6 @@
 #![feature(once_cell)]
 #![feature(core_intrinsics)]
 #![feature(ptr_metadata)]
-
 //! ## Zestors
 //! A simple, fast and flexible actor framework for building robust distributed applications,
 //! heavily insipired by Erlang.
