@@ -2,12 +2,10 @@ use crate::{
     actor::Actor,
     flows::{EventFlow, MsgFlow, ReqFlow},
     function::{AnyFn, HandlerParams, MsgFn, ReqFn},
-    messaging::{Reply, Request},
+    messaging::Request,
 };
-use futures::{Future, FutureExt};
-use std::{
-    any::Any, fmt::Debug, intrinsics::transmute, marker::PhantomData, pin::Pin, process::Output,
-};
+use futures::Future;
+use std::{fmt::Debug, marker::PhantomData, pin::Pin};
 
 //--------------------------------------------------------------------------------------------------
 //  helper types
@@ -37,13 +35,14 @@ pub(crate) type AsyncHandlerFnType<A> =
     ) -> Pin<Box<dyn Future<Output = EventFlow<A>> + Send + 'static>>;
 
 //------------------------------------------------------------------------------------------------
-//  Action2
+//  Action
 //------------------------------------------------------------------------------------------------
 
 #[derive(Debug)]
 pub struct Action<A: ?Sized> {
-    function: AnyFn<A>,
+    function: AnyFn,
     params: HandlerParams,
+    a: PhantomData<A>,
 }
 
 impl<A: Actor> Action<A> {
@@ -51,10 +50,11 @@ impl<A: Actor> Action<A> {
         Self {
             function: function.into(),
             params: HandlerParams::new_msg(params),
+            a: PhantomData,
         }
     }
 
-    pub(crate) fn new_req<P: Send + 'static, R: Send + 'static>(
+    pub fn new_req<P: Send + 'static, R: Send + 'static>(
         function: ReqFn<A, P, R>,
         params: P,
         request: Request<R>,
@@ -62,19 +62,19 @@ impl<A: Actor> Action<A> {
         Self {
             function: function.into(),
             params: HandlerParams::new_req(params, request),
+            a: PhantomData,
         }
     }
 
-    pub async fn handle(self, actor: &mut A) -> EventFlow<A> {
-        unsafe { self.function.call(actor, self.params).await }
-    }
-
-    pub(crate) fn downcast_req<P: Send + 'static, R: Send + 'static>(self) -> Result<P, Self> {
+    pub fn downcast_req<P: Send + 'static, R: Send + 'static>(
+        self,
+    ) -> Result<(P, Request<R>), Self> {
         match self.params.downcast_req::<P, R>() {
-            Ok((params, _request)) => Ok(params),
+            Ok((params, request)) => Ok((params, request)),
             Err(boxed) => Err(Self {
                 function: self.function,
-                params: unsafe { HandlerParams::new_raw(boxed) }
+                params: unsafe { HandlerParams::new_raw(boxed) },
+                a: PhantomData,
             }),
         }
     }
@@ -84,8 +84,33 @@ impl<A: Actor> Action<A> {
             Ok(params) => Ok(params),
             Err(boxed) => Err(Self {
                 function: self.function,
-                params: unsafe { HandlerParams::new_raw(boxed) }
+                params: unsafe { HandlerParams::new_raw(boxed) },
+                a: PhantomData,
             }),
+        }
+    }
+
+    pub async fn handle(self, actor: &mut A) -> EventFlow<A> {
+        unsafe { self.function.call(actor, self.params).await }
+    }
+
+    pub(crate) unsafe fn new_raw_msg<P: Send + 'static>(function: AnyFn, params: P) -> Self {
+        Self {
+            function,
+            params: HandlerParams::new_msg(params),
+            a: PhantomData,
+        }
+    }
+
+    pub(crate) unsafe fn new_raw_req<P: Send + 'static, R: Send + 'static>(
+        function: AnyFn,
+        params: P,
+        request: Request<R>,
+    ) -> Self {
+        Self {
+            function,
+            params: HandlerParams::new_req(params, request),
+            a: PhantomData,
         }
     }
 }

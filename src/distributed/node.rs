@@ -1,10 +1,12 @@
 use std::{
+    any::Any,
     collections::{HashMap, HashSet},
     net::SocketAddr,
     pin::Pin,
 };
 
-use futures::{Future, Stream, StreamExt};
+use derive_more::DebugCustom;
+use futures::{Future, FutureExt, Stream, StreamExt};
 use indexmap::{IndexMap, IndexSet};
 use tokio::net::TcpStream;
 use tokio_tungstenite::MaybeTlsStream;
@@ -13,20 +15,21 @@ use crate::{
     action::{Action, AsyncMsgFnType},
     actor::{self, Actor, ExitReason, ProcessId},
     address::{Address, Addressable, Callable},
+    call,
     child::{Child, ProcessExit},
-    context::{BasicCtx, NoCtx, StreamItem},
-    distributed::msg::{ActorTypeId, CheckForProcessFn},
-    errors::DidntArrive,
+    context::{BasicContext, NoCtx, StreamItem},
+    distributed::msg::{ActorTypeId, FindProcessByIdFn, FindProcessByNameFn},
+    errors::{DidntArrive, ProcessRefRequestError, ReqRecvError},
     flows::{InitFlow, MsgFlow, ReqFlow},
     messaging::{Reply, Request},
-    Fn,
+    Either, Fn,
 };
 
 use super::{
     challenge::{self, VerifiedStream},
     local_node::LocalNode,
     msg::{self, Id, NextId},
-    pid::{AnyPid, ProcessRef},
+    pid::{AnyProcessRef, ProcessRef},
     registry::RegistryGetError,
     remote_action::RemoteAction,
     server::NodeConnectError,
@@ -34,10 +37,95 @@ use super::{
     NodeId,
 };
 
-#[derive(Clone, Debug)]
+//------------------------------------------------------------------------------------------------
+//  Node
+//------------------------------------------------------------------------------------------------
+
+#[derive(Clone, DebugCustom)]
+#[debug(fmt = "Node({})", "node_id")]
 pub struct Node {
     address: Address<NodeActor>,
     node_id: NodeId,
+}
+
+//------------------------------------------------------------------------------------------------
+//  Node impl
+//------------------------------------------------------------------------------------------------
+
+unsafe impl Send for Node {}
+
+impl Node {
+    pub fn find_process_by_id<A: Actor>(
+        &self,
+        id: ProcessId,
+    ) -> Result<Reply<Result<ProcessRef<A>, ()>>, ()> {
+        todo!()
+    }
+
+    pub fn node_id(&self) -> NodeId {
+        self.node_id
+    }
+
+    pub fn find_process_by_name_request<A: Actor>(
+        &self,
+        name: String,
+    ) -> Result<ProcessRefReply<A>, DidntArrive<String>> {
+        self.address
+            .call(Fn!(NodeActor::find_process_by_name::<A>), name)
+            .map(|reply| ProcessRefReply(reply))
+    }
+
+    pub async fn find_process_by_name<A: Actor>(
+        &self,
+        name: String,
+    ) -> Result<ProcessRef<A>, ProcessRefRequestError> {
+        match self
+            .address
+            .req_recv(Fn!(NodeActor::find_process_by_name::<A>), name)
+            .await
+        {
+            Ok(reply) => Ok(reply?),
+            Err(e) => Err(ProcessRefRequestError::NodeDisconnected)
+        }
+    }
+
+    pub(crate) fn send_action(
+        &self,
+        action: RemoteAction,
+    ) -> Result<(), DidntArrive<RemoteAction>> {
+        self.address.call(Fn!(NodeActor::send_action), action)
+    }
+
+    async fn get_node(address: &Address<NodeActor>) -> Result<Node, ReqRecvError<()>> {
+        address.req_recv(Fn!(NodeActor::get_node), ()).await
+    }
+
+    pub(crate) async fn spawn_as_client(
+        local_node: LocalNode,
+        addr: SocketAddr,
+    ) -> Result<(Self, Child<NodeActor>), NodeConnectError> {
+        let child = actor::spawn::<NodeActor>(NodeInit::Client(local_node, addr));
+        match Self::get_node(child.address()).await {
+            Ok(node) => Ok((node, child)),
+            Err(_) => match child.await {
+                ProcessExit::InitFailed(e) => Err(e),
+                ProcessExit::Handled(e) => {
+                    panic!("{:?}", e)
+                }
+                ProcessExit::Panic(e) => panic!("{:?}", e),
+                ProcessExit::HardAbort => panic!("hard abort"),
+            },
+        }
+    }
+
+    pub(crate) fn spawn_as_server(
+        local_node: LocalNode,
+        stream: TcpStream,
+        addr: SocketAddr,
+    ) -> Child<NodeActor> {
+        let mut child = actor::spawn::<NodeActor>(NodeInit::Server(local_node, stream, addr));
+        child
+    }
 }
 
 //------------------------------------------------------------------------------------------------
@@ -53,15 +141,13 @@ pub(crate) struct NodeActor {
     /// The stream, which can be used to communicate with this node
     ws: VerifiedStream,
     /// Outstanding find_process requests for processes on this node
-    outstanding_find_processes: HashMap<Id, Request<Result<(), RegistryGetError>>>,
-    /// Outstanding messages for processes on this node
-    outstanding_messages: HashMap<Id, Request<()>>,
+    requests: HashMap<Id, NodeRequest>,
     /// The id that will be used for sending the next message
     next_id: NextId,
 }
 
 //------------------------------------------------------------------------------------------------
-//  Stream
+//  Stream for NodeActor
 //------------------------------------------------------------------------------------------------
 
 impl Stream for NodeActor {
@@ -71,25 +157,94 @@ impl Stream for NodeActor {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        self.ws.poll_next_unpin(cx).map(|val| {
-            val.map(|val| StreamItem::Action(Action::new(Fn!(NodeActor::ws_message), val)))
-        })
+        self.ws
+            .poll_next_unpin(cx)
+            .map(|val| val.map(|val| StreamItem::Action(Action::new(Fn!(NodeActor::ws_msg), val))))
     }
 }
 
 //------------------------------------------------------------------------------------------------
-//  Actor
+//  Actor for NodeActor
 //------------------------------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub enum NodeInit {
     Server(LocalNode, TcpStream, SocketAddr),
     Client(LocalNode, SocketAddr),
 }
 
+#[derive(Debug)]
+enum NodeRequest {
+    FindProcess(ProcessRefRequest),
+    Message(Request<()>),
+}
+
+#[derive(Debug)]
+struct ProcessRefRequest {
+    request: Box<dyn Any + Send>,
+    reply_fn: usize,
+}
+
+#[derive(derive_more::Deref)]
+pub struct ProcessRefReply<A>(Reply<Result<ProcessRef<A>, RegistryGetError>>);
+
+impl<A> Future for ProcessRefReply<A> {
+    type Output = Result<ProcessRef<A>, ProcessRefRequestError>;
+
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        self.0.poll_unpin(cx).map(|res| match res {
+            Ok(res) => match res {
+                Ok(reply) => Ok(reply),
+                Err(e) => Err(e.into()),
+            },
+            Err(e) => Err(ProcessRefRequestError::NodeDisconnected),
+        })
+    }
+}
+
+impl ProcessRefRequest {
+    pub fn new<A: Actor>(request: Request<Result<ProcessRef<A>, RegistryGetError>>) -> Self {
+        Self {
+            request: Box::new(request),
+            reply_fn: Self::reply_fn::<A> as usize,
+        }
+    }
+
+    pub fn reply(self, node: Node, id: ProcessId) {
+        let reply_fn: fn(Self, Either<(Node, ProcessId), RegistryGetError>) =
+            unsafe { std::mem::transmute(self.reply_fn) };
+        reply_fn(self, Either::A((node, id)));
+    }
+
+    pub fn reply_err(self, err: RegistryGetError) {
+        let reply_fn: fn(Self, Either<(Node, ProcessId), RegistryGetError>) =
+            unsafe { std::mem::transmute(self.reply_fn) };
+        reply_fn(self, Either::B(err));
+    }
+
+    fn reply_fn<A: Actor>(self, vals: Either<(Node, ProcessId), RegistryGetError>) {
+        let request: Request<Result<ProcessRef<A>, RegistryGetError>> =
+            *self.request.downcast().unwrap();
+
+        match vals {
+            Either::A((node, process_id)) => {
+                let process_ref = unsafe { ProcessRef::<A>::new(node, process_id) };
+                let _ = request.reply(Ok(process_ref));
+            }
+            Either::B(e) => {
+                let _ = request.reply(Err(e));
+            }
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl Actor for NodeActor {
     type Init = NodeInit;
-    type Ctx = Self;
+    type Context = Self;
     type InitError = NodeConnectError;
 
     async fn init(init: Self::Init, address: Address<Self>) -> InitFlow<Self> {
@@ -125,18 +280,19 @@ impl Actor for NodeActor {
         InitFlow::Init(Self {
             local_node,
             ws,
-            outstanding_find_processes: HashMap::new(),
-            outstanding_messages: HashMap::new(),
+            requests: HashMap::new(),
             next_id: NextId::new(),
             node,
         })
     }
 
     async fn exit(self, reason: ExitReason<Self>) -> Self::ExitWith {
+        let res = self.local_node.cluster().remove_node(self.node.node_id());
+        assert!(res.is_some());
         reason
     }
 
-    fn ctx(&mut self) -> &mut Self::Ctx {
+    fn ctx(&mut self) -> &mut Self::Context {
         self
     }
 
@@ -146,114 +302,105 @@ impl Actor for NodeActor {
 }
 
 //------------------------------------------------------------------------------------------------
-//  Impl
+//  Handling ws messages
 //------------------------------------------------------------------------------------------------
 
-impl Node {
-    pub fn find_process<A: Actor>(
-        &self,
-        id: ProcessId,
-    ) -> Result<Reply<Result<ProcessRef<A>, ()>>, ()> {
-        todo!()
-    }
-
-    pub fn node_id(&self) -> NodeId {
-        self.node_id
-    }
-
-    pub fn find_process_by_name<A: Actor>(
-        &self,
-        name: &'static str,
-    ) -> Result<Reply<Result<ProcessRef<A>, ()>>, ()> {
-        todo!()
-    }
-
-    pub(crate) fn send_action(
-        &self,
-        action: RemoteAction,
-    ) -> Result<(), DidntArrive<RemoteAction>> {
-        self.address.send(Fn!(NodeActor::send_action), action)
-    }
-
-    async fn get_node(address: &Address<NodeActor>) -> Result<Node, ()> {
-        match address.send(Fn!(NodeActor::get_node), ()) {
-            Ok(reply) => match reply.await {
-                Ok(node) => Ok(node),
-                Err(_) => Err(()),
-            },
-            Err(_) => Err(()),
-        }
-    }
-
-    pub(crate) async fn spawn_as_client(
-        local_node: LocalNode,
-        addr: SocketAddr,
-    ) -> Result<Self, NodeConnectError> {
-        let mut child = actor::spawn::<NodeActor>(NodeInit::Client(local_node, addr));
-        // todo: don't detatch, but instead handle this properly somewhere
-        child.detach();
-
-        match Self::get_node(child.address()).await {
-            Ok(node) => Ok(node),
-            Err(_) => match child.await {
-                ProcessExit::InitFailed(e) => Err(e),
-                ProcessExit::Handled(e) => {
-                    panic!("{:?}", e)
-                }
-                ProcessExit::Panic(e) => panic!("{:?}", e),
-                ProcessExit::HardAbort => panic!("hard abort"),
-            },
-        }
-    }
-
-    pub(crate) fn spawn_as_server(
-        local_node: LocalNode,
-        stream: TcpStream,
-        addr: SocketAddr,
-    ) -> Child<NodeActor> {
-        let mut child = actor::spawn::<NodeActor>(NodeInit::Server(local_node, stream, addr));
-        // todo: don't detatch, but instead handle this properly somewhere
-        child.detach();
-        child
-    }
-}
-
 impl NodeActor {
-    async fn ws_message(&mut self, msg_result: Result<msg::Msg, WsRecvError>) -> MsgFlow<Self> {
+    async fn ws_msg(&mut self, msg_result: Result<msg::Msg, WsRecvError>) -> MsgFlow<Self> {
         match msg_result {
             Ok(msg) => match msg {
-                msg::Msg::Challenge(_) => {
-                    panic!("Shouldnt receive any more challenge messages now!")
-                }
-                msg::Msg::Process(msg) => match msg {
-                    msg::CheckForProcess::Request(msg_id, process_id, check_fn) => {
-                        let result =
-                            unsafe { check_fn.call(self.local_node.registry(), process_id) };
-                        self.ws
-                            .send(msg::Msg::Process(msg::CheckForProcess::Reply(
-                                msg_id, result,
-                            )))
-                            .await
-                            .unwrap();
-                    }
-                    msg::CheckForProcess::Reply(msg_id, result) => {
-                        let request = self.outstanding_find_processes.remove(&msg_id).unwrap();
-                        let _ = request.reply(result);
-                    }
-                },
-                msg::Msg::Action(_) => todo!(),
+                // RECEIVE: Challenge
+                msg::Msg::Challenge(msg) => self.ws_challenge(msg).await,
+
+                // RECEIVE: FindProcess
+                msg::Msg::FindProcess(msg) => self.ws_find_process(msg).await,
+
+                // RECEIVE: Action
+                msg::Msg::Action(msg) => self.ws_action(msg).await,
             },
-            Err(_) => {}
+
+            // RECEIVE: Error
+            Err(error) => self.ws_error(error).await,
         }
+    }
+
+    async fn ws_find_process(&mut self, msg: msg::FindProcess) -> MsgFlow<Self> {
+        match msg {
+            msg::FindProcess::RequestById(msg_id, process_id, lookup_fn) => {
+                // Check whether the process is in the local registry,
+                // safe since its the same binary
+                let lookup_result =
+                    unsafe { lookup_fn.call(self.local_node.registry(), process_id) };
+
+                // Send back a reply using the same msg id
+                self.ws
+                    .send(msg::Msg::FindProcess(msg::FindProcess::Reply(
+                        msg_id,
+                        lookup_result,
+                    )))
+                    .await
+                    .unwrap();
+            }
+            msg::FindProcess::RequestByName(msg_id, name, lookup_fn) => {
+                // Check whether the process is in the local registry,
+                // safe since its the same binary
+                let lookup_result = unsafe { lookup_fn.call(self.local_node.registry(), &name) };
+
+                // Send back a reply using the same msg id
+                self.ws
+                    .send(msg::Msg::FindProcess(msg::FindProcess::Reply(
+                        msg_id,
+                        lookup_result,
+                    )))
+                    .await
+                    .unwrap();
+            }
+            msg::FindProcess::Reply(msg_id, result) => {
+                if let NodeRequest::FindProcess(request) = self.requests.remove(&msg_id).unwrap() {
+                    match result {
+                        Ok(process_id) => {
+                            let _ = request.reply(self.node.clone(), process_id);
+                        }
+                        Err(e) => {
+                            let _ = request.reply_err(e);
+                        }
+                    }
+                } else {
+                    panic!()
+                }
+            }
+        };
 
         MsgFlow::Ok
     }
 
+    async fn ws_challenge(&mut self, msg: msg::Challenge) -> MsgFlow<Self> {
+        MsgFlow::ExitWithError(anyhow::anyhow!(
+            "Shouldnt receive challenge messages anymore"
+        ))
+    }
+
+    async fn ws_action(&mut self, msg: msg::Action) -> MsgFlow<Self> {
+        MsgFlow::ExitWithError(anyhow::anyhow!(
+            "Shouldnt receive challenge messages anymore"
+        ))
+    }
+
+    async fn ws_error(&mut self, error: WsRecvError) -> MsgFlow<Self> {
+        MsgFlow::ExitWithError(error.into())
+    }
+}
+
+//------------------------------------------------------------------------------------------------
+//  Handling normal messages
+//------------------------------------------------------------------------------------------------
+
+impl NodeActor {
     fn get_node(&mut self, _: ()) -> ReqFlow<Self, Node> {
         ReqFlow::Reply(self.node.clone())
     }
 
-    pub(crate) async fn send_action(&mut self, action: RemoteAction) -> MsgFlow<Self> {
+    pub async fn send_action(&mut self, action: RemoteAction) -> MsgFlow<Self> {
         let id = self.next_id.next();
         self.ws
             .send(msg::Msg::Action(msg::Action::Action(id, action)))
@@ -263,48 +410,51 @@ impl NodeActor {
         MsgFlow::Ok
     }
 
-    pub(crate) async fn find_process_by_id<A: Actor>(
+    async fn find_process_by_id<A: Actor>(
         &mut self,
-        id: ProcessId,
-        request: Request<Result<(), RegistryGetError>>,
+        process_id: ProcessId,
+        request: Request<Result<ProcessRef<A>, RegistryGetError>>,
     ) -> MsgFlow<Self> {
         let msg_id = self.next_id.next();
 
         self.ws
-            .send(msg::Msg::Process(msg::CheckForProcess::Request(
+            .send(msg::Msg::FindProcess(msg::FindProcess::RequestById(
                 msg_id,
-                id,
-                CheckForProcessFn::new::<A>(),
+                process_id,
+                FindProcessByIdFn::new::<A>(),
             )))
             .await?;
 
-        let res = self.outstanding_find_processes.insert(msg_id, request);
+        let res = self.requests.insert(
+            msg_id,
+            NodeRequest::FindProcess(ProcessRefRequest::new::<A>(request)),
+        );
         assert!(res.is_none());
 
         MsgFlow::Ok
     }
 
-    pub(crate) fn test1(&mut self, action: RemoteAction) -> MsgFlow<Self> {
-        MsgFlow::Ok
-    }
+    async fn find_process_by_name<A: Actor>(
+        &mut self,
+        name: String,
+        request: Request<Result<ProcessRef<A>, RegistryGetError>>,
+    ) -> MsgFlow<Self> {
+        let msg_id = self.next_id.next();
 
-    pub(crate) fn test2(&mut self, action: RemoteAction) -> ReqFlow<Self, ()> {
-        ReqFlow::Reply(())
-    }
+        self.ws
+            .send(msg::Msg::FindProcess(msg::FindProcess::RequestByName(
+                msg_id,
+                name,
+                FindProcessByNameFn::new::<A>(),
+            )))
+            .await?;
 
-    pub(crate) async fn test3(&mut self, action: RemoteAction) -> MsgFlow<Self> {
-        MsgFlow::Ok
-    }
+        let res = self.requests.insert(
+            msg_id,
+            NodeRequest::FindProcess(ProcessRefRequest::new::<A>(request)),
+        );
+        assert!(res.is_none());
 
-    pub(crate) async fn test4(&mut self, action: RemoteAction) -> ReqFlow<Self, ()> {
-        ReqFlow::Reply(())
-    }
-
-    pub(crate) fn test5(&mut self, action: RemoteAction, request: Request<()>) -> MsgFlow<Self> {
-        MsgFlow::Ok
-    }
-
-    pub(crate) fn test6(&mut self, action: RemoteAction, request: Request<()>) -> MsgFlow<Self> {
         MsgFlow::Ok
     }
 }

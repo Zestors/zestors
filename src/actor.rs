@@ -1,20 +1,19 @@
-use std::{fmt::Debug, pin::Pin, sync::atomic::{AtomicU32, Ordering}, time::Duration};
-
-use futures::{
-    future::{self, Fuse},
-    stream::{self, Next, PollNext},
-    Future, FutureExt, Stream, StreamExt,
+use std::{
+    fmt::Debug,
+    sync::atomic::{AtomicU32, Ordering},
+    time::Duration,
 };
-use serde::{Serialize, Deserialize};
+
+use futures::{stream::PollNext, Stream, StreamExt};
 
 use crate::{
     abort::{AbortAction, AbortReceiver, AbortSender},
     action::Action,
     address::Address,
     child::Child,
-    context::{BasicCtx, StreamItem},
+    context::{StreamItem},
     flows::{EventFlow, InitFlow, MsgFlow},
-    inbox::{channel, ActionReceiver, Capacity, Unbounded},
+    inbox::{Inbox, self},
     AnyhowError,
 };
 
@@ -24,54 +23,6 @@ static NEXT_PROCESS_ID: NextProcessId = NextProcessId::new();
 //  Actor trait
 //--------------------------------------------------------------------------------------------------
 
-/// This is the main trait, which `Zestors` revolves around. All actors have to implement this.
-/// if this trait is implemented, it can be spawned with either [spawn]. (or [Spawn::spawn] if
-/// [Actor::Init] == [Actor]). See module documentation ([crate]) for more general
-/// information.
-///
-/// ### Methods:
-/// There are two required methods which must be implemented manually: [Actor::init] and
-/// [Actor::handle_exit].
-///
-/// [Actor::init] is called whenever the actor has just spawned on a new
-/// `tokio::task`. This method should take an [Actor::Init], and then return the [Actor] itself.
-///
-/// [Actor::handle_exit] is called whenever this actor is trying to exit. This method can decide
-/// what to do based on different [ExitReason]s, see the documentation of [ExitReason] for what
-/// these reasons can be. **Important**: This method will **not** be called if this [Actor] is
-/// exiting because of a `panic` or `hard-abort`.
-///
-/// ### Types:
-/// There are a bunch of associated types, which all have sensible defaults, but can be overridden
-/// when necessary. The following types can be overridden: [Actor::ExitError], [Actor::ExitNormal],
-/// [Actor::ExitWith], [Actor::State], [Actor::Address], [Actor::Inbox].
-///
-/// ### Generics:
-/// There are two associated generics, which can be used to customize an actor. These also have
-/// sensible defaults, but can be overridden: [Actor::INBOX_CAPACITY] and [Actor::ABORT_TIMER].
-///
-/// ### Basic implementation:
-/// ```
-/// # use zestors::{flows::{InitFlow, ExitFlow}, actor::{ExitReason, Actor, Spawn, spawn}};
-/// #
-/// struct MyActor {}
-///
-/// impl Actor for MyActor {
-///     fn init(init: Self::Init, state: &mut Self::State) -> InitFlow<Self> {
-///         InitFlow::Init(init)
-///     }
-///
-///     fn handle_exit(self, state: &mut Self::State, reason: ExitReason<Self>) -> ExitFlow<Self> {
-///         ExitFlow::ContinueExit(reason)
-///     }
-/// }
-///
-/// #[tokio::main]
-/// async fn main() {
-///     let (process, address) = spawn::<MyActor>(MyActor{});
-///     // or: let (process, address) = MyActor{}.spawn();
-/// }
-///
 #[async_trait::async_trait]
 pub trait Actor: Send + 'static + Debug + Sized {
     /// The value that can be used to initialise this actor. This value is then passed on to
@@ -110,7 +61,7 @@ pub trait Actor: Send + 'static + Debug + Sized {
     ///
     /// For 99% of applications, the default state of [State] should work perfectly fine. The state
     /// can be used to schedule futures, or get the [Actor::Address] of your own actor.
-    type Ctx: Stream<Item = StreamItem<Self>> + Unpin + Send;
+    type Context: Stream<Item = StreamItem<Self>> + Unpin + Send;
 
     // /// Whether the inbox should be [Bounded] or [Unbounded]. If setting this to [Bounded],
     // /// don't forget to set [Actor::INBOX_CAPACITY] as well.
@@ -140,7 +91,7 @@ pub trait Actor: Send + 'static + Debug + Sized {
     /// can cancel initialisation and return an error.
     ///
     /// Cancelation does **not** call [Actor::handle_exit], but directly exits the process instead.
-    async fn init(init: Self::Init, state: Address<Self>) -> InitFlow<Self>;
+    async fn init(init: Self::Init, address: Address<Self>) -> InitFlow<Self>;
 
     /// Whenever this actor exits for any [ExitReason] (excluding `panics` or `hard-aborts`),
     /// this function is called with the reason.
@@ -160,7 +111,7 @@ pub trait Actor: Send + 'static + Debug + Sized {
         MsgFlow::Ok
     }
 
-    fn ctx(&mut self) -> &mut Self::Ctx;
+    fn ctx(&mut self) -> &mut Self::Context;
 
     fn debug() -> &'static str {
         ""
@@ -173,6 +124,7 @@ pub trait Actor: Send + 'static + Debug + Sized {
 
 #[derive(Debug)]
 pub struct NextProcessId(AtomicU32);
+pub type ProcessId = u32;
 
 impl NextProcessId {
     const fn new() -> Self {
@@ -184,7 +136,6 @@ impl NextProcessId {
     }
 }
 
-pub type ProcessId = u32;
 
 //--------------------------------------------------------------------------------------------------
 //  Spawn
@@ -197,10 +148,8 @@ pub type ProcessId = u32;
 pub fn spawn<A: Actor>(init: A::Init) -> Child<A> {
     // Aquire a new process id
     let process_id = NEXT_PROCESS_ID.next();
-    // Get the capacity for the channel.
-    // let capacity = <A::Inbox as Capacity<A::Inbox>>::capacity(A::INBOX_CAPACITY);
     // Create the sender and receiver.
-    let (sender, receiver) = channel(None);
+    let (sender, receiver) = inbox::channel(None);
     // Create the raw address from this sender.
     let address = Address::new(sender, process_id);
     // create the abort sender
@@ -230,6 +179,9 @@ pub enum ExitReason<A: Actor + ?Sized> {
     Normal(A::ExitNormal),
     /// The soft_abort message has been received. This can only be done once per [Process].
     SoftAbort,
+    /// It is impossible for this actor to do anything since all addresses have been dropped,
+    /// and there are no actions waiting to be taken.
+    Dead,
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -238,7 +190,7 @@ pub enum ExitReason<A: Actor + ?Sized> {
 
 async fn event_loop<A: Actor>(
     init: A::Init,
-    mut receiver: ActionReceiver<A>,
+    inbox: Inbox<A>,
     address: Address<A>,
     abort_receiver: AbortReceiver,
 ) -> InternalExitReason<A> {
@@ -246,6 +198,7 @@ async fn event_loop<A: Actor>(
     // Initialisation
     //-------------------------------------
     let mut optional_abort_receiver = Some(abort_receiver);
+    let mut optional_inbox = Some(inbox);
     let mut optional_before = None;
     let mut optional_after = None;
     let mut actor = match <A as Actor>::init(init, address).await {
@@ -265,7 +218,12 @@ async fn event_loop<A: Actor>(
         //-------------------------------------
         // Select the next event
         //-------------------------------------
-        let next_event = select(&mut optional_abort_receiver, &mut receiver, actor.ctx()).await;
+        let next_event = next_event(
+            &mut optional_abort_receiver,
+            &mut optional_inbox,
+            actor.ctx(),
+        )
+        .await;
 
         //-------------------------------------------------
         //  Handle a possible before
@@ -275,14 +233,10 @@ async fn event_loop<A: Actor>(
                 EventFlow::Ok => (),
                 EventFlow::Before(_) => (), // ignore before from before
                 EventFlow::ErrorExit(e) => {
-                    return InternalExitReason::Handled(
-                        <A as Actor>::exit(actor, ExitReason::Error(e)).await,
-                    )
+                    return InternalExitReason::Handled(actor.exit(ExitReason::Error(e)).await)
                 }
                 EventFlow::NormalExit(n) => {
-                    return InternalExitReason::Handled(
-                        <A as Actor>::exit(actor, ExitReason::Normal(n)).await,
-                    )
+                    return InternalExitReason::Handled(actor.exit(ExitReason::Normal(n)).await)
                 }
                 EventFlow::After(_) => unreachable!(),
             };
@@ -294,11 +248,20 @@ async fn event_loop<A: Actor>(
         let flow = match next_event {
             NextEvent::StreamItem(item) => item.handle(&mut actor).await,
             NextEvent::SoftAbort => {
-                return InternalExitReason::Handled(
-                    <A as Actor>::exit(actor, ExitReason::SoftAbort).await,
-                )
+                return InternalExitReason::Handled(actor.exit(ExitReason::SoftAbort).await)
             }
-            NextEvent::Isolated => actor.isolated().await.into_event_flow(),
+            NextEvent::Isolated => {
+                optional_abort_receiver = None;
+                actor.isolated().await.into_event_flow()
+            }
+            NextEvent::AddressesDropped => {
+                optional_inbox = None;
+                assert!(optional_abort_receiver.is_none());
+                actor.addresses_dropped().await.into_event_flow()
+            }
+            NextEvent::Dead => {
+                return InternalExitReason::Handled(actor.exit(ExitReason::Dead).await)
+            }
         };
 
         //-------------------------------------------------
@@ -309,14 +272,10 @@ async fn event_loop<A: Actor>(
             EventFlow::After(action) => optional_after = Some(action),
             EventFlow::Before(action) => optional_before = Some(action),
             EventFlow::ErrorExit(e) => {
-                return InternalExitReason::Handled(
-                    <A as Actor>::exit(actor, ExitReason::Error(e)).await,
-                )
+                return InternalExitReason::Handled(actor.exit(ExitReason::Error(e)).await)
             }
             EventFlow::NormalExit(n) => {
-                return InternalExitReason::Handled(
-                    <A as Actor>::exit(actor, ExitReason::Normal(n)).await,
-                )
+                return InternalExitReason::Handled(actor.exit(ExitReason::Normal(n)).await)
             }
         }
 
@@ -328,14 +287,10 @@ async fn event_loop<A: Actor>(
                 EventFlow::Ok => (),
                 EventFlow::Before(_) => (), // ignore before from before
                 EventFlow::ErrorExit(e) => {
-                    return InternalExitReason::Handled(
-                        <A as Actor>::exit(actor, ExitReason::Error(e)).await,
-                    )
+                    return InternalExitReason::Handled(actor.exit(ExitReason::Error(e)).await)
                 }
                 EventFlow::NormalExit(n) => {
-                    return InternalExitReason::Handled(
-                        <A as Actor>::exit(actor, ExitReason::Normal(n)).await,
-                    )
+                    return InternalExitReason::Handled(actor.exit(ExitReason::Normal(n)).await)
                 }
                 EventFlow::After(_) => unreachable!(),
             };
@@ -348,93 +303,93 @@ async fn event_loop<A: Actor>(
 //--------------------------------------------------------------------------------------------------
 
 // return the next event which should be handled by this actor.
-async fn select<A: Actor>(
+async fn next_event<A: Actor>(
     optional_abort_receiver: &mut Option<AbortReceiver>,
-    receiver: &mut ActionReceiver<A>,
-    ctx: &mut A::Ctx,
+    optional_inbox: &mut Option<Inbox<A>>,
+    ctx: &mut A::Context,
 ) -> NextEvent<A> {
-    if let Some(abort_receiver) = optional_abort_receiver {
-        tokio::select! {
-            biased;
-
-            to_abort = abort_receiver => {
-                // Okay, we can remove the abort_receiver
-                optional_abort_receiver.take();
-
-                match to_abort {
-                    AbortAction::SoftAbort => {
-                        NextEvent::SoftAbort
-                    }
-                    AbortAction::Isolated => {
-                        NextEvent::Isolated
-                    }
-                }
-            }
-            item = ctx.next() => {
-                match item {
-                    Some(item) => {
-                        NextEvent::StreamItem(item)
-                    }
-                    None => {
-                        match select_without_state(receiver, optional_abort_receiver.as_mut().unwrap()).await {
-                            NextEvent::SoftAbort => {
-                                optional_abort_receiver.take();
-                                NextEvent::SoftAbort
-                            }
-                            action => action
-                        }
-                    }
-                }
-            }
-            item = receiver.next() => {
-                NextEvent::StreamItem(StreamItem::Action(item.unwrap()))
-            }
-        }
-    } else {
-        select_without_abort(ctx, receiver).await
+    match (optional_abort_receiver, optional_inbox) {
+        (None, None) => match ctx.next().await {
+            Some(event) => event.into(),
+            None => NextEvent::Dead,
+        },
+        (None, Some(inbox)) => select_without_abort(ctx, inbox).await,
+        (Some(_abort_receiver), None) => unreachable!("child also has an address!"),
+        (Some(abort_receiver), Some(inbox)) => select(abort_receiver, inbox, ctx).await,
     }
 }
 
-async fn select_without_state<A: Actor>(
-    receiver: &mut ActionReceiver<A>,
+async fn select<A: Actor>(
+    mut abort_receiver: &mut AbortReceiver,
+    inbox: &mut Inbox<A>,
+    ctx: &mut A::Context,
+) -> NextEvent<A> {
+    tokio::select! {
+        biased;
+
+        to_abort = &mut abort_receiver => {
+            to_abort.into()
+        }
+
+        action = ctx.next() => {
+            match action {
+                Some(action) => action.into(),
+                None => select_without_ctx(inbox, abort_receiver).await,
+            }
+        }
+
+        action = inbox.next() => {
+            match action {
+                Some(action) => action.into(),
+                None => NextEvent::AddressesDropped,
+            }
+        }
+    }
+}
+
+async fn select_without_ctx<A: Actor>(
+    inbox: &mut Inbox<A>,
     abort_receiver: &mut AbortReceiver,
 ) -> NextEvent<A> {
     tokio::select! {
         biased;
 
         to_abort = abort_receiver => {
-            match to_abort {
-                AbortAction::SoftAbort => {
-                    NextEvent::SoftAbort
-                }
-                AbortAction::Isolated => {
-                    NextEvent::Isolated
-                }
-            }
+            to_abort.into()
         }
-        item = receiver.next() => {
-            NextEvent::StreamItem(StreamItem::Action(item.unwrap()))
+
+        action = inbox.next() => {
+            match action {
+                Some(action) => action.into(),
+                None => unreachable!("child also has an address!"),
+            }
         }
     }
 }
 
-async fn select_without_abort<A: Actor>(
-    ctx: &mut A::Ctx,
-    receiver: &mut ActionReceiver<A>,
-) -> NextEvent<A> {
+async fn select_without_abort<A: Actor>(ctx: &mut A::Context, receiver: &mut Inbox<A>) -> NextEvent<A> {
     tokio::select! {
+        biased;
+
         item = ctx.next() => {
             match item {
                 Some(item) => {
-                    NextEvent::StreamItem(item)
+                    item.into()
                 }
                 None => {
-                    NextEvent::StreamItem(StreamItem::Action(receiver.next().await.unwrap()))
+                    match receiver.next().await {
+                        Some(action) => action.into(),
+                        None => NextEvent::Dead,
+                    }
                 }
             }
         }
+
         item = receiver.next() => {
-            NextEvent::StreamItem(StreamItem::Action(item.unwrap()))
+            match item {
+                Some(item) => item.into(),
+                None => NextEvent::AddressesDropped,
+            }
         }
     }
 }
@@ -447,18 +402,30 @@ async fn select_without_abort<A: Actor>(
 enum NextEvent<A: Actor> {
     StreamItem(StreamItem<A>),
     Isolated,
+    AddressesDropped,
     SoftAbort,
+    Dead,
 }
 
-/// Strategy for selecting the left stream
-fn left_first_strat(_: &mut ()) -> PollNext {
-    PollNext::Left
+impl<A: Actor> From<StreamItem<A>> for NextEvent<A> {
+    fn from(item: StreamItem<A>) -> Self {
+        NextEvent::StreamItem(item)
+    }
 }
 
-/// The output of the combined stream
-enum CombinedStreamOutput<A: Actor> {
-    ActionMsg(Action<A>),
-    Scheduled(StreamItem<A>),
+impl<A: Actor> From<Action<A>> for NextEvent<A> {
+    fn from(action: Action<A>) -> Self {
+        NextEvent::StreamItem(StreamItem::Action(action))
+    }
+}
+
+impl<A: Actor> From<AbortAction> for NextEvent<A> {
+    fn from(item: AbortAction) -> Self {
+        match item {
+            AbortAction::SoftAbort => NextEvent::SoftAbort,
+            AbortAction::Isolated => NextEvent::Isolated,
+        }
+    }
 }
 
 /// An internal exitreason, which is then converted into the actual exit reason upon awaiting a

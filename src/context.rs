@@ -6,12 +6,13 @@ use futures::{
 };
 
 use crate::{
-    action::{Action, AsyncMsgFnType, MsgFnType},
+    action::Action,
     actor::Actor,
     address::Address,
     flows::{EventFlow, MsgFlow},
     function::MsgFn,
 };
+
 
 //--------------------------------------------------------------------------------------------------
 //  StreamItem
@@ -26,7 +27,7 @@ pub enum StreamItem<A: Actor + ?Sized> {
 impl<A: Actor> StreamItem<A> {
     /// If this is an action, handle it and return the flow.
     /// Otherwise just return the flow directly.
-    pub(crate) async fn handle(self, actor: &mut A) -> EventFlow<A> {
+    pub async fn handle(self, actor: &mut A) -> EventFlow<A> {
         match self {
             StreamItem::Action(action) => action.handle(actor).await,
             StreamItem::Flow(flow) => flow.into_event_flow(),
@@ -40,14 +41,15 @@ impl<A: Actor> StreamItem<A> {
 
 /// This is the default state implementation, that should be fine for 90% of use cases. It offers
 /// a lot of functionality, while still being quite fast.
-pub struct BasicCtx<A: Actor + ?Sized> {
+pub struct BasicContext<A: Actor + ?Sized> {
     address: Address<A>,
     futures: FuturesUnordered<Pin<Box<dyn Future<Output = StreamItem<A>> + Send + Sync + 'static>>>,
     streams:
         stream::SelectAll<Pin<Box<(dyn Stream<Item = StreamItem<A>> + Send + Sync + 'static)>>>,
 }
 
-impl<A: Actor + ?Sized> BasicCtx<A> {
+
+impl<A: Actor + ?Sized> BasicContext<A> {
     pub fn address(&self) -> &Address<A> {
         &self.address
     }
@@ -98,7 +100,7 @@ impl<A: Actor + ?Sized> BasicCtx<A> {
     }
 }
 
-impl<A: Actor + ?Sized> Stream for BasicCtx<A> {
+impl<A: Actor + ?Sized> Stream for BasicContext<A> {
     type Item = StreamItem<A>;
 
     fn poll_next(
@@ -112,7 +114,7 @@ impl<A: Actor + ?Sized> Stream for BasicCtx<A> {
     }
 }
 
-impl<A: Actor> Debug for BasicCtx<A> {
+impl<A: Actor> Debug for BasicContext<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DefaultCtx")
             .field("address", &self.address)
@@ -120,7 +122,7 @@ impl<A: Actor> Debug for BasicCtx<A> {
     }
 }
 
-impl<A: Actor + ?Sized> Unpin for BasicCtx<A> {}
+impl<A: Actor + ?Sized> Unpin for BasicContext<A> {}
 
 #[derive(Debug)]
 pub struct NoCtx<A>(PhantomData<A>);

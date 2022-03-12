@@ -1,64 +1,11 @@
 use crate::{
     action::Action,
     actor::Actor,
-    errors::{
-        DidntArrive, ActorDiedAfterSending, SendRecvError, TryRecvError, TrySendError,
-        TrySendRecvError,
-    },
-    inbox::{
-        ActionReceiver, ActionSendError, ActionSender, ActionTrySendError, IsBounded, IsUnbounded,
-    },
+    errors::{DidntArrive, NoReply, ReqRecvError, RequestDropped, TryRecvError},
+    inbox::{ActionSender, ActionTrySendError, Inbox},
 };
 use futures::{Future, FutureExt};
 use std::{marker::PhantomData, task::Poll};
-
-//--------------------------------------------------------------------------------------------------
-//  Reply
-//--------------------------------------------------------------------------------------------------
-
-/// When a [Req] is sent, you get a [Reply]. this can be awaited to return the reply to this [Req].
-#[derive(Debug)]
-#[must_use]
-pub struct Reply<T> {
-    receiver: oneshot::Receiver<T>,
-}
-
-impl<T> Reply<T> {
-    /// Wait asynchronously for this [Reply]. Can fail only if the [Actor] dies.
-    ///
-    /// This is the same as directly `.await`ing the [Reply].
-    pub async fn async_recv(self) -> Result<T, ActorDiedAfterSending> {
-        self.await
-    }
-
-    /// Try if the [Reply] is ready. Can fail either if the [Reply] is not yet ready, or if the
-    /// [Actor] died.
-    pub fn try_recv(self) -> Result<T, TryRecvError> {
-        self.receiver.try_recv().map_err(|e| match e {
-            oneshot::TryRecvError::Empty => TryRecvError::NoReplyYet,
-            oneshot::TryRecvError::Disconnected => TryRecvError::ActorDiedAfterSending,
-        })
-    }
-
-    /// Wait synchronously for this reply. Can fail only if the [Actor] dies.
-    pub fn blocking_recv(self) -> Result<T, ActorDiedAfterSending> {
-        self.receiver.recv().map_err(|_| ActorDiedAfterSending)
-    }
-}
-
-impl<T> Future for Reply<T> {
-    type Output = Result<T, ActorDiedAfterSending>;
-
-    fn poll(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Self::Output> {
-        self.receiver.poll_unpin(cx).map(|ready| match ready {
-            Ok(t) => Ok(t),
-            Err(_e) => Err(ActorDiedAfterSending),
-        })
-    }
-}
 
 //--------------------------------------------------------------------------------------------------
 //  Request
@@ -72,8 +19,8 @@ pub struct Request<T> {
 
 impl<T> Request<T> {
     /// Send back a reply.
-    pub fn reply(self, reply: T) {
-        let _ = self.sender.send(reply);
+    pub fn reply(self, reply: T) -> Result<(), RequestDropped<T>> {
+        self.sender.send(reply).map_err(|e| RequestDropped(e.into_inner()))
     }
 
     /// Create a new request.
@@ -87,14 +34,45 @@ impl<T> Request<T> {
     }
 }
 
-//------------------------------------------------------------------------------------------------
-//  RequestMsg
-//------------------------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------------
+//  Reply
+//--------------------------------------------------------------------------------------------------
 
-// todo: implement this maybe?
-enum RequestMsg<R> {
-    Msg(R),
-    ActorDied,
+/// When a [Req] is sent, you get a [Reply]. this can be awaited to return the reply to this [Req].
+#[derive(Debug)]
+#[must_use]
+pub struct Reply<T> {
+    receiver: oneshot::Receiver<T>,
+}
+
+impl<T> Reply<T> {
+    /// Try if the [Reply] is ready. Can fail either if the [Reply] is not yet ready, or if the
+    /// [Actor] died.
+    pub fn try_recv(self) -> Result<T, TryRecvError> {
+        self.receiver.try_recv().map_err(|e| match e {
+            oneshot::TryRecvError::Empty => TryRecvError::NoReplyYet,
+            oneshot::TryRecvError::Disconnected => TryRecvError::NoReply,
+        })
+    }
+
+    /// Wait synchronously for this reply. Can fail only if the [Actor] dies.
+    pub fn recv_blocking(self) -> Result<T, NoReply> {
+        self.receiver.recv().map_err(|_| NoReply)
+    }
+}
+
+impl<T> Future for Reply<T> {
+    type Output = Result<T, NoReply>;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Self::Output> {
+        self.receiver.poll_unpin(cx).map(|ready| match ready {
+            Ok(t) => Ok(t),
+            Err(_e) => Err(NoReply),
+        })
+    }
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -105,7 +83,7 @@ enum RequestMsg<R> {
 /// `await`ed to return the actual reply.
 #[derive(Debug)]
 #[must_use]
-pub struct Req<'a, A, P, R>
+pub(crate) struct Req<'a, A, P, R>
 where
     A: Actor,
 {
@@ -146,7 +124,7 @@ where
         match self.sender.try_send(self.action) {
             Ok(()) => Ok(self.reply),
             Err(ActionTrySendError::Disconnected(action)) => {
-                Err(DidntArrive(action.downcast_req::<P, R>().unwrap()))
+                Err(DidntArrive(action.downcast_req::<P, R>().unwrap().0))
             }
             Err(ActionTrySendError::Full(_)) => unreachable!("should be unbounded"),
         }
@@ -158,15 +136,15 @@ where
     ///
     /// This method can fail if the [Actor] dies before the method could be sent, or before a
     /// reply was received.
-    pub async fn send_recv(self) -> Result<R, SendRecvError<P>>
+    pub async fn send_recv(self) -> Result<R, ReqRecvError<P>>
     where
         P: Send + 'static,
         R: Send + 'static,
     {
         match self.sender.try_send(self.action) {
             Ok(()) => Ok(self.reply.await?),
-            Err(ActionTrySendError::Disconnected(action)) => Err(SendRecvError::ActorDied(
-                action.downcast_req::<P, R>().unwrap(),
+            Err(ActionTrySendError::Disconnected(action)) => Err(ReqRecvError::DidntArrive(
+                action.downcast_req::<P, R>().unwrap().0,
             )),
             Err(ActionTrySendError::Full(_action)) => unreachable!("should be unbounded"),
         }
@@ -178,16 +156,16 @@ where
     ///
     /// This method can fail if either the [Actor] dies before sending or if it dies before a
     /// [Reply] could be received.
-    pub fn send_blocking_recv(self) -> Result<R, SendRecvError<P>>
+    pub fn send_blocking_recv(self) -> Result<R, ReqRecvError<P>>
     where
         P: Send + 'static,
         R: Send + 'static,
     {
         match self.sender.try_send(self.action) {
-            Ok(()) => Ok(self.reply.blocking_recv()?),
+            Ok(()) => Ok(self.reply.recv_blocking()?),
             Err(e) => match e {
-                ActionTrySendError::Disconnected(action) => Err(SendRecvError::ActorDied(
-                    action.downcast_req::<P, R>().unwrap(),
+                ActionTrySendError::Disconnected(action) => Err(ReqRecvError::DidntArrive(
+                    action.downcast_req::<P, R>().unwrap().0,
                 )),
                 ActionTrySendError::Full(_action) => {
                     unreachable!("Should be unbounded!")
@@ -195,145 +173,6 @@ where
             },
         }
     }
-
-    /// If the [Actor::Inbox] is [Bounded], then it is not guaranteed that the inbox has space.
-    /// This method fails to send if the inbox is currently full or if the [Actor] has died.
-    pub fn try_send(self) -> Result<Reply<R>, TrySendError<P>>
-    where
-        P: Send + 'static,
-        R: Send + 'static,
-    {
-        match self.sender.try_send(self.action) {
-            Ok(()) => Ok(self.reply),
-            Err(e) => match e {
-                ActionTrySendError::Disconnected(action) => Err(TrySendError::ActorDied(
-                    action.downcast_req::<P, R>().unwrap(),
-                )),
-                ActionTrySendError::Full(action) => Err(TrySendError::NoSpace(
-                    action.downcast_req::<P, R>().unwrap(),
-                )),
-            },
-        }
-    }
-
-    // /// A method to make `try_send` followed by `recv_async` easier. It first tries to send the
-    // /// message, and if this succeeds asynchronously awaits the reply. It combines these error
-    // /// types into a single unified error.
-    // ///
-    // /// This method can fail if either the [Actor] dies before sending, if it dies before a
-    // /// [Reply] could be received or if the inbox is full.
-    // pub async fn try_send_recv(self) -> Result<R, TrySendRecvError<P>>
-    // where
-    //     P: 'static,
-    //     R: 'static,
-    //     A::Inbox: IsBounded,
-    // {
-    //     match self.sender.try_send(self.action) {
-    //         Ok(()) => Ok(self.reply.await?),
-    //         Err(e) => match e {
-    //             ActionTrySendError::Disconnected(action) => {
-    //                 Err(TrySendRecvError::ActorDied(action.get_params_req::<P, R>().unwrap()))
-    //             }
-    //             ActionTrySendError::Full(action) => {
-    //                 Err(TrySendRecvError::NoSpace(action.get_params_req::<P, R>().unwrap()))
-    //             }
-    //         },
-    //     }
-    // }
-
-    // /// If the [Actor::Inbox] is [Bbounded], then it is not guaranteed the inbox has
-    // /// space. Therefore to guarantee the message arrives, it must sometimes wait for space to be
-    // /// free. This method waits asynchronously until there is space in the inbox and then sends
-    // /// the message.
-    // ///
-    // /// This method can fail only if the [Actor] dies.
-    // pub async fn async_send(self) -> Result<Reply<R>, ActorDied<P>>
-    // where
-    //     P: 'static,
-    //     R: 'static,
-    //     A::Inbox: IsBounded,
-    // {
-    //     match self.sender.send_async(self.action).await {
-    //         Ok(()) => Ok(self.reply),
-    //         Err(ActionSendError::Disconnected(action)) => {
-    //             Err(ActorDied(action.get_params_req::<P, R>().unwrap()))
-    //         }
-    //     }
-    // }
-
-    // /// A method to make `async_send` followed by `recv_async` easier. It first sends the
-    // /// message, and if this succeeds asynchronously awaits the reply. It combines these error
-    // /// types into a single unified error.
-    // ///
-    // /// This method can fail if either the [Actor] dies before sending or if it dies before a
-    // /// [Reply] could be received.
-    // pub async fn async_send_recv(self) -> Result<R, SendRecvError<P>>
-    // where
-    //     P: 'static,
-    //     R: 'static,
-    //     A::Inbox: IsBounded,
-    // {
-    //     match self.sender.send_async(self.action).await {
-    //         Ok(()) => Ok(self.reply.await?),
-    //         Err(ActionSendError::Disconnected(action)) => {
-    //             Err(SendRecvError::ActorDied(action.get_params_req::<P, R>().unwrap()))
-    //         }
-    //     }
-    // }
-
-    // /// A method to make `try_send` followed by `blocking_recv` easier. It first tries to send the
-    // /// message, and if this succeeds synchronously awaits the reply. It combines these error
-    // /// types into a single unified error.
-    // ///
-    // /// This method can fail if either the [Actor] dies before sending or if it dies before a
-    // /// [Reply] could be received.
-    // pub fn try_send_blocking_recv(self) -> Result<R, TrySendRecvError<P>>
-    // where
-    //     P: 'static,
-    //     R: 'static,
-    //     A::Inbox: IsBounded,
-    // {
-    //     match self.sender.try_send(self.action) {
-    //         Ok(()) => Ok(self.reply.blocking_recv()?),
-    //         Err(e) => match e {
-    //             ActionTrySendError::Disconnected(action) => {
-    //                 Err(TrySendRecvError::ActorDied(action.get_params_req::<P, R>().unwrap()))
-    //             }
-    //             ActionTrySendError::Full(action) => {
-    //                 Err(TrySendRecvError::NoSpace(action.get_params_req::<P, R>().unwrap()))
-    //             }
-    //         },
-    //     }
-    // }
-
-    // /// Same as [Req::async_send] but blocking.
-    // pub fn blocking_send(self) -> Result<Reply<R>, ActorDied<P>>
-    // where
-    //     P: 'static,
-    //     R: 'static,
-    //     A::Inbox: IsBounded,
-    // {
-    //     match self.sender.send_action_blocking(self.action) {
-    //         Ok(()) => Ok(self.reply),
-    //         Err(PacketSendError::Disconnected(action)) => {
-    //             Err(ActorDied(action.get_params_req::<P, R>()))
-    //         }
-    //     }
-    // }
-
-    // pub fn blocking_send_blocking_recv(self) -> Result<R, SendRecvError<P>>
-    // where
-    //     P: 'static,
-    //     R: 'static,
-    //     A::Inbox: IsBounded,
-    // {
-    //     match self.sender.send_action_blocking(self.action) {
-    //         Ok(()) => Ok(self.reply.blocking_recv()?),
-    //         Err(PacketSendError::Disconnected(action)) => {
-    //             Err(SendRecvError::ActorDied(action.get_params_req::<P, R>()))
-    //         }
-    //     }
-    // }
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -343,7 +182,7 @@ where
 /// A message that can be sent. This will not return a [Reply].
 #[derive(Debug)]
 #[must_use]
-pub struct Msg<'a, A, P>
+pub(crate) struct Msg<'a, A, P>
 where
     A: Actor,
 {
@@ -382,54 +221,6 @@ where
             Err(ActionTrySendError::Full(_)) => unreachable!("should be unbounded"),
         }
     }
-
-    // /// If the [Actor::Inbox] is [Bounded], then it is not guaranteed that the inbox has space.
-    // /// This method fails to send if the inbox is currently full or if the [Actor] has died.
-    // pub fn try_send(self) -> Result<(), TrySendError<P>>
-    // where
-    //     P: 'static,
-    //     A::Inbox: IsBounded,
-    // {
-    //     match self.sender.try_send(self.action) {
-    //         Ok(()) => Ok(()),
-    //         Err(e) => match e {
-    //             ActionTrySendError::Disconnected(action) => {
-    //                 Err(TrySendError::ActorDied(action.get_params().unwrap()))
-    //             }
-    //             ActionTrySendError::Full(action) => {
-    //                 Err(TrySendError::NoSpace(action.get_params().unwrap()))
-    //             }
-    //         },
-    //     }
-    // }
-
-    // /// If the [Actor::Inbox] is [Bounded], then it is not guaranteed the inbox has
-    // /// space. Therefore to guarantee the message arrives, it must sometimes wait for space to be
-    // /// free. This method waits asynchronously until there is space in the inbox and then sends
-    // /// the message.
-    // ///
-    // /// This method can fail only if the [Actor] dies.
-    // pub async fn async_send(self) -> Result<(), ActorDied<P>>
-    // where
-    //     P: 'static,
-    //     A::Inbox: IsBounded,
-    // {
-    //     match self.sender.send_async(self.action).await {
-    //         Ok(()) => Ok(()),
-    //         Err(ActionSendError::Disconnected(action)) => Err(ActorDied(action.get_params().unwrap())),
-    //     }
-    // }
-
-    // pub fn blocking_send(self) -> Result<(), ActorDied<P>>
-    // where
-    //     P: 'static,
-    //     A::Inbox: IsBounded,
-    // {
-    //     match self.sender.send_action_blocking(self.action) {
-    //         Ok(()) => Ok(()),
-    //         Err(PacketSendError::Disconnected(action)) => Err(ActorDied(action.get_params())),
-    //     }
-    // }
 }
 
-impl<A: Actor> Unpin for ActionReceiver<A> {}
+impl<A: Actor> Unpin for Inbox<A> {}

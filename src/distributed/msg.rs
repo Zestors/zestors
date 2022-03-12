@@ -2,10 +2,10 @@ use crate::actor::{Actor, ProcessId};
 
 use super::{
     challenge,
-    pid::AnyPid,
+    pid::AnyProcessRef,
     registry::{Registry, RegistryGetError},
-    remote_action::RemoteAction,
-    NodeId, 
+    remote_action::{RemoteAction, AbsPtr},
+    NodeId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) enum Msg {
     Challenge(Challenge),
-    Process(CheckForProcess),
+    FindProcess(FindProcess),
     Action(Action),
 }
 
@@ -50,37 +50,71 @@ pub(crate) enum Challenge {
 
 /// Messages related to finding out where process is located
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) enum CheckForProcess {
-    Request(Id, ProcessId, CheckForProcessFn),
-    Reply(Id, Result<(), RegistryGetError>),
+pub(crate) enum FindProcess {
+    RequestById(Id, ProcessId, FindProcessByIdFn),
+    RequestByName(Id, String, FindProcessByNameFn),
+    Reply(Id, Result<ProcessId, RegistryGetError>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct CheckForProcessFn(usize);
+pub(crate) struct FindProcessByIdFn(AbsPtr);
 
-impl CheckForProcessFn {
-    pub fn new<A: Actor>() -> Self {
-        Self(Self::function::<A> as usize)
+#[derive(Serialize, Deserialize, Debug)]
+pub(crate) struct FindProcessByNameFn(AbsPtr);
+
+impl FindProcessByIdFn {
+    pub(crate) fn new<A: Actor>() -> Self {
+        Self(AbsPtr::new(Self::function::<A> as usize))
     }
 
-    /// Is safe serialization and deserialization happens using the same binary!
-    pub unsafe fn call(
+    /// ### Safety:
+    /// Serialize/Deserialize using same binary
+    pub(crate) unsafe fn call(
         &self,
         registry: &Registry,
         process_id: ProcessId,
-    ) -> Result<(), RegistryGetError> {
-        let function: fn(&Registry, process_id: ProcessId) -> Result<(), RegistryGetError> =
-            std::mem::transmute(self.0);
-
+    ) -> Result<ProcessId, RegistryGetError> {
+        let function: fn(&Registry, ProcessId) -> Result<ProcessId, RegistryGetError> =
+            std::mem::transmute(self.0.get());
         function(registry, process_id)
     }
 
     fn function<A: Actor>(
         registry: &Registry,
         process_id: ProcessId,
-    ) -> Result<(), RegistryGetError> {
-        // registry.pid_by_id::<A>(process_id).map(|_| ())
-        todo!()
+    ) -> Result<ProcessId, RegistryGetError> {
+        match registry.find_by_id::<A>(process_id) {
+            Ok(_pid) => Ok(process_id),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+impl FindProcessByNameFn {
+    pub(crate) fn new<A: Actor>() -> Self {
+        Self(AbsPtr::new(Self::function::<A> as usize))
+    }
+
+    /// ### Safety:
+    /// Serialize/Deserialize using same binary
+    pub(crate) unsafe fn call(
+        &self,
+        registry: &Registry,
+        name: &str,
+    ) -> Result<ProcessId, RegistryGetError> {
+        let function: fn(&Registry, &str) -> Result<ProcessId, RegistryGetError> =
+            std::mem::transmute(self.0.get());
+        function(registry, name)
+    }
+
+    fn function<A: Actor>(
+        registry: &Registry,
+        name: &str,
+    ) -> Result<ProcessId, RegistryGetError> {
+        match registry.find_by_name::<A>(name) {
+            Ok(pid) => Ok(pid.process_id()),
+            Err(e) => Err(e),
+        }
     }
 }
 

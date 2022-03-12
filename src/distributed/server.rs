@@ -1,97 +1,148 @@
-use std::any::Any;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use tokio::net::TcpListener;
-use tokio::net::TcpStream;
-use tokio_tungstenite::MaybeTlsStream;
-
-use crate::distributed::node::Node;
-
-use super::challenge;
-use super::challenge::ChallengeError;
-use super::cluster::AddNodeError;
-use super::local_node::LocalNode;
-use super::msg;
-use super::ws_stream::WsRecvError;
-use super::ws_stream::WsSendError;
-use super::ws_stream::WsStream;
-use super::NodeId;
-use tokio::task::JoinHandle;
+use super::{
+    challenge::ChallengeError,
+    cluster::AddNodeError,
+    local_node::{InitializationError, LocalNode},
+    node::NodeActor,
+    ws_stream::{WsRecvError, WsSendError},
+    NodeId, Token,
+};
+use crate::{
+    action::Action,
+    actor::{self, Actor, ExitReason},
+    address::{Address, Callable},
+    child::{Child, ProcessExit},
+    context::StreamItem,
+    distributed::node::Node,
+    flows::{InitFlow, MsgFlow, ReqFlow},
+    Fn,
+};
+use async_trait::async_trait;
+use futures::{
+    stream::{select_all, FuturesUnordered},
+    FutureExt, Stream, StreamExt,
+};
+use std::{any::Any, net::SocketAddr, pin::Pin, task::Poll};
+use tokio::{
+    net::{TcpListener, TcpStream},
+};
 use tokio_tungstenite::tungstenite;
 
 //--------------------------------------------------------------------------------------------------
 //  Server
 //--------------------------------------------------------------------------------------------------
 
+/// This is the server, which communicates with the other nodes, and spawns tasks
 #[derive(Debug)]
 pub(crate) struct Server {
     listener: TcpListener,
     local_node: LocalNode,
+    child_nodes: FuturesUnordered<Child<NodeActor>>,
+}
+
+impl Stream for Server {
+    type Item = StreamItem<Self>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        match self.child_nodes.poll_next_unpin(cx) {
+            Poll::Ready(Some(process_exit)) => Poll::Ready(Some(StreamItem::Action(Action::new(
+                Fn!(Self::child_node_exited),
+                process_exit,
+            )))),
+            Poll::Pending | Poll::Ready(None) => match self.listener.poll_accept(cx) {
+                Poll::Ready(res) => Poll::Ready(Some(StreamItem::Action(Action::new(
+                    Fn!(Self::incoming_connection),
+                    res,
+                )))),
+                Poll::Pending => Poll::Pending,
+            },
+        }
+    }
+}
+
+#[async_trait]
+impl Actor for Server {
+    type Init = (SocketAddr, Token, NodeId);
+    type InitError = InitializationError;
+    type Context = Self;
+
+    async fn init((socket, token, node_id): Self::Init, address: Address<Self>) -> InitFlow<Self> {
+        let listener = TcpListener::bind(socket).await?;
+
+        let local_node = LocalNode::new(token, node_id, socket, address);
+
+        InitFlow::Init(Self {
+            listener,
+            local_node,
+            child_nodes: FuturesUnordered::new(),
+        })
+    }
+
+    async fn exit(self, reason: ExitReason<Self>) -> Self::ExitWith {
+        reason
+    }
+
+    fn ctx(&mut self) -> &mut Self::Context {
+        self
+    }
 }
 
 impl Server {
-    pub(crate) fn new(listener: TcpListener, local_node: LocalNode) -> Self {
-        Self {
-            listener,
-            local_node,
+    pub(crate) async fn add_child(&mut self, child: Child<NodeActor>) -> MsgFlow<Self> {
+        self.child_nodes.push(child);
+        MsgFlow::Ok
+    }
+
+    async fn child_node_exited(&mut self, exit: ProcessExit<NodeActor>) -> MsgFlow<Self> {
+        match exit {
+            ProcessExit::Handled(exit) => {
+                println!("Child node exited: {:?}", exit);
+                MsgFlow::Ok
+            }
+            ProcessExit::InitFailed(exit) => {
+                println!("Child node exited: {:?}", exit);
+                MsgFlow::Ok
+            }
+            ProcessExit::Panic(_) => panic!(),
+            ProcessExit::HardAbort => panic!(),
         }
     }
 
-    /// Spawn a new server that starts listening on the given port. It will spawn tokio::tasks
-    /// for every new incoming connection, and add the nodes to the `LocalNode`.
-    pub(crate) fn spawn(self) -> (async_channel::Sender<ServerMsg>, JoinHandle<ServerExit>) {
-        let (sender, receiver) = async_channel::unbounded();
+    async fn incoming_connection(
+        &mut self,
+        res: Result<(TcpStream, SocketAddr), std::io::Error>,
+    ) -> MsgFlow<Self> {
+        if let Ok((stream, addr)) = res {
+            let child = Node::spawn_as_server(self.local_node.clone(), stream, addr);
+            self.child_nodes.push(child)
+        }
 
-        let handle = tokio::task::spawn(async move {
-            loop {
-                tokio::select! {
-                    // Either we receive a new connection
-                    res = self.listener.accept() => {
-                        match res {
-                            Ok((stream, addr)) => {
-                                Node::spawn_as_server(self.local_node.clone(), stream, addr);
-                            },
-                            Err(e) => break ServerExit::Io(e),
-                        }
-                    }
-                    // Or we receive a message
-                    msg = receiver.recv() => {
-                        match msg {
-                            Ok(msg) => match msg {
-                                ServerMsg::Stop => break ServerExit::StopMsgReceived
-                            },
-                            Err(_) => break ServerExit::AllAddressesDropped,
-                        }
-                    }
-                }
-            }
-        });
+        MsgFlow::Ok
+    }
 
-        (sender, handle)
+    fn get_local_node(&mut self, _: ()) -> ReqFlow<Self, LocalNode> {
+        ReqFlow::Reply(self.local_node.clone())
+    }
+
+    pub(crate) async fn spawn(
+        socket: SocketAddr,
+        token: Token,
+        node_id: NodeId,
+    ) -> Result<LocalNode, InitializationError> {
+        let mut child = actor::spawn::<Server>((socket, token, node_id));
+        child.detach();
+
+        match child.call(Fn!(Self::get_local_node), ()) {
+            Ok(reply) => match reply.await {
+                Ok(local_node) => Ok(local_node),
+                Err(_) => Err(InitializationError::SocketAddressNotAvailable),
+            },
+            Err(_) => Err(InitializationError::SocketAddressNotAvailable),
+        }
     }
 }
-
-#[derive(Debug)]
-pub(crate) enum ServerExit {
-    Ok,
-    Io(std::io::Error),
-    AllAddressesDropped,
-    StopMsgReceived,
-}
-
-#[derive(Debug)]
-pub(crate) enum ServerMsg {
-    Stop,
-}
-
-#[derive(Debug)]
-pub(crate) enum NodeExit {
-    NodeDisconnectedNormal,
-    NodeDisconnectAbrupt(tungstenite::Error),
-}
-
-#[derive(Debug)]
-pub(crate) enum NodeMsg {}
 
 #[derive(Debug)]
 pub enum NodeConnectError {
@@ -141,7 +192,7 @@ impl From<AddNodeError> for NodeConnectError {
     fn from(e: AddNodeError) -> Self {
         match e {
             AddNodeError::NodeIdAlreadyRegistered => Self::NodeIdAlreadyRegistered,
-            AddNodeError::NodeIdIsLocalNode => Self::NodeIdIsLocalNode
+            AddNodeError::NodeIdIsLocalNode => Self::NodeIdIsLocalNode,
         }
     }
 }

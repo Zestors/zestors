@@ -140,14 +140,21 @@ impl WsStream {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Error, derive_more::Display)]
 pub(crate) enum WsRecvError {
     StreamClosed,
     Tungstenite(tungstenite::Error),
+    #[error(ignore)]
     NonBinaryMsg(Message),
+    #[display(fmt = "bin")]
+    #[error(ignore)]
     NotDeserializable(Vec<u8>),
+    #[error(ignore)]
+    #[display(fmt = "{:?}", "0")]
     UnExpectedMsgType(msg::Msg),
 }
+
+
 
 
 #[derive(Debug, derive_more::Error, derive_more::Display)]

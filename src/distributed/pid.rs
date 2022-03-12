@@ -4,8 +4,9 @@ use crate::{
     action::MsgFnType,
     actor::{Actor, ProcessId},
     address::{Address, Addressable},
-    Fn,
+    Fn, function::MsgFn,
 };
+use derive_more::DebugCustom;
 use serde::{de::DeserializeOwned, Serialize};
 use uuid::Uuid;
 
@@ -20,32 +21,33 @@ use super::{
 //  Pid
 //------------------------------------------------------------------------------------------------
 
-#[derive(Debug)]
+#[derive(DebugCustom)]
+#[debug(fmt = "ProcessRef {{ id: {}, node: {:?} }}", "process_id", "node")]
 pub struct ProcessRef<A: ?Sized> {
     a: PhantomData<A>,
-    id: ProcessId,
+    process_id: ProcessId,
     node: Node,
 }
 
 impl<A: Actor> ProcessRef<A> {
-    pub(crate) fn new(node: Node, id: ProcessId) -> Self {
+    pub(crate) unsafe fn new(node: Node, id: ProcessId) -> Self {
         Self {
-            id,
+            process_id: id,
             node,
             a: PhantomData,
         }
     }
 
     pub fn id(&self) -> ProcessId {
-        self.id
+        self.process_id
     }
 
     pub fn msg<P: Serialize + DeserializeOwned + Send + 'static>(
         &self,
-        function: MsgFnType<A, P>,
+        function: MsgFn<A, P>,
         params: &P,
     ) {
-        self.node.send_action(RemoteAction::new_msg(function, params, self.id));
+        self.node.send_action(RemoteAction::new_msg(function, params, self.process_id));
     }
 }
 
@@ -53,7 +55,7 @@ impl<A> Clone for ProcessRef<A> {
     fn clone(&self) -> Self {
         Self {
             a: self.a.clone(),
-            id: self.id.clone(),
+            process_id: self.process_id.clone(),
             node: self.node.clone(),
         }
     }
@@ -70,9 +72,9 @@ pub(crate) enum NodeLocation {
 //------------------------------------------------------------------------------------------------
 
 #[derive(Debug)]
-pub struct AnyPid(Box<dyn Any + Send + Sync>);
+pub struct AnyProcessRef(Box<dyn Any + Send + Sync>);
 
-impl AnyPid {
+impl AnyProcessRef {
     pub(crate) fn new<A: 'static>(pid: ProcessRef<A>) -> Self {
         Self(Box::new(pid))
     }

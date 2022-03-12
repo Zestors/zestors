@@ -2,13 +2,13 @@ use std::{
     any::Any,
     lazy::SyncOnceCell,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::{Arc, RwLock},
+    sync::{Arc, RwLock}, 
 };
 
 use crate::{
     actor::{Actor},
-    address::Address,
-    child::Child, distributed::node::NodeInit,
+    address::{Address, Callable},
+    child::Child, distributed::node::NodeInit, Fn,
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -24,7 +24,7 @@ use super::{
     cluster::Cluster,
     pid::{NodeLocation, ProcessRef},
     registry::{Registry, RegistrationError},
-    server::{NodeConnectError, NodeExit, Server, ServerExit, ServerMsg},
+    server::{NodeConnectError, Server},
     BuildId, NodeId, Token, node::{NodeActor, Node},
 };
 
@@ -68,23 +68,9 @@ impl LocalNode {
     async fn initialize(
         token: Token,
         node_id: NodeId,
-        addr: SocketAddr,
+        socket: SocketAddr,
     ) -> Result<Self, InitializationError> {
-        // Start listening on the socket.
-        let listener = TcpListener::bind(addr)
-            .await
-            .map_err(|e| InitializationError::SocketAddressNotAvailable(e))?;
-
-        // Create the local node.
-        let local_node = LocalNode::new(token, node_id, addr);
-
-        // Spawn the task that will be listening
-        let (sender, handle) = Server::new(listener, local_node.clone()).spawn();
-
-        // set the `JoinHandle`.
-        local_node.0.set_server_handle(sender, handle);
-
-        Ok(local_node)
+        Server::spawn(socket, token, node_id).await
     }
 
     /// Attempt to connect directly to another node. This will establish an unencrypted TCP
@@ -96,7 +82,9 @@ impl LocalNode {
     /// If succesful, these nodes are now connected in the cluster, and can send messages 
     /// back and forth using `Pids`.
     pub async fn connect(&self, addr: SocketAddr) -> Result<Node, NodeConnectError> {
-        Node::spawn_as_client(self.clone(), addr).await
+        let (node, child) = Node::spawn_as_client(self.clone(), addr).await?;
+        self.0.server.call(Fn!(Server::add_child), child).unwrap();
+        Ok(node)
     }
 
     pub fn registry(&self) -> &Registry {
@@ -120,10 +108,14 @@ impl LocalNode {
         &self.0.cluster
     }
 
-    fn new(token: Token, node_id: NodeId, addr: SocketAddr) -> Self {
+    pub(crate) fn add_node_child(&self, node: Child<NodeActor>) {
+        // self.0.server.get().unwrap();
+    }
+
+    pub(crate) fn new(token: Token, node_id: NodeId, socket: SocketAddr, server: Address<Server>) -> Self {
         Self(Arc::new(SharedLocalNode {
             token,
-            addr,
+            socket,
             registry: Registry::new(),
             // Get build_id from binary.
             build_id: build_id::get(),
@@ -131,7 +123,7 @@ impl LocalNode {
             // No connected nodes.
             cluster: Cluster::new(),
             // No `Process<Server>` yet.
-            server: SyncOnceCell::new(),
+            server,
         }))
     }
 }
@@ -147,7 +139,7 @@ pub(crate) struct SharedLocalNode {
     /// The token used to verify that a Node has permission to connect to the cluster.
     token: Uuid,
     /// The address that this node is listening on.
-    addr: SocketAddr,
+    socket: SocketAddr,
     /// The build_id used to verify that two Nodes have the same binary.
     build_id: BuildId,
     /// The name of this node, which can be used to find it from another node.
@@ -157,31 +149,10 @@ pub(crate) struct SharedLocalNode {
     /// The cluster, with all connected nodes
     cluster: Cluster,
     // The  join_handle of the server task
-    server: SyncOnceCell<(async_channel::Sender<ServerMsg>, JoinHandle<ServerExit>)>,
+    server: Address<Server>,
 }
 
 unsafe impl Send for LocalNode {}
-
-impl SharedLocalNode {
-    /// Panics if already set!!
-    fn set_server_handle(
-        &self,
-        sender: async_channel::Sender<ServerMsg>,
-        process: JoinHandle<ServerExit>,
-    ) {
-        self.server.set((sender, process)).unwrap();
-    }
-
-    /// Panics if not yet set!
-    fn server_handle(&self) -> &JoinHandle<ServerExit> {
-        &self.server.get().unwrap().1
-    }
-
-    /// Panics if not yet set!
-    fn server_sender(&self) -> &async_channel::Sender<ServerMsg> {
-        &self.server.get().unwrap().0
-    }
-}
 
 //--------------------------------------------------------------------------------------------------
 //  RegisteredActor
@@ -216,5 +187,11 @@ pub enum UnRegistrationError {
 
 #[derive(Debug)]
 pub enum InitializationError {
-    SocketAddressNotAvailable(std::io::Error),
+    SocketAddressNotAvailable,
+}
+
+impl From<std::io::Error> for InitializationError {
+    fn from(_: std::io::Error) -> Self {
+        InitializationError::SocketAddressNotAvailable
+    }
 }

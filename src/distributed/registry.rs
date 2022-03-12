@@ -6,7 +6,7 @@ use crate::{actor::{Actor, ProcessId}, address::{Address, AnyAddress}};
 
 use super::{
     local_node::LocalNode,
-    pid::{AnyPid, NodeLocation, ProcessRef},
+    pid::{AnyProcessRef, NodeLocation, ProcessRef},
 };
 
 #[derive(Debug)]
@@ -25,11 +25,10 @@ impl Registry {
 
     /// Register a process which is located on the local_node, this will then
     /// return a Pid, which can be sent to other processes
-    pub(crate) fn register<A: Actor>(
+    pub fn register<A: Actor>(
         &self,
         address: &Address<A>,
         name: Option<String>,
-        local_node: LocalNode,
     ) -> Result<(), RegistrationError> {
         // Aquire locks: first id, then name
         let mut by_id = self.by_id.write().unwrap();
@@ -63,7 +62,7 @@ impl Registry {
         match self.by_id.read().unwrap().get(&process_id) {
             Some(any_address) => match any_address.downcast_ref::<A>() {
                 Some(address) => Ok(address.clone()),
-                None => Err(RegistryGetError::DownCastingFailed),
+                None => Err(RegistryGetError::IncorrectActorType),
             },
             None => Err(RegistryGetError::IdNotRegistered),
         }
@@ -73,7 +72,7 @@ impl Registry {
         match self.by_name.read().unwrap().get(name) {
             Some(any_address) => match any_address.downcast_ref::<A>() {
                 Some(address) => Ok(address.clone()),
-                None => Err(RegistryGetError::DownCastingFailed),
+                None => Err(RegistryGetError::IncorrectActorType),
             },
             None => Err(RegistryGetError::IdNotRegistered),
         }
@@ -91,7 +90,7 @@ impl Registry {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum RegistryGetError {
     IdNotRegistered,
-    DownCastingFailed,
+    IncorrectActorType,
 }
 
 #[derive(Debug)]

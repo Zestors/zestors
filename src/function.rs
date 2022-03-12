@@ -18,7 +18,7 @@ use std::{any::Any, marker::PhantomData, mem::transmute, pin::Pin};
 //------------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-enum HandlerPtr {
+pub(crate) enum HandlerPtr {
     Sync(usize),
     Async(usize),
 }
@@ -53,15 +53,14 @@ macro_rules! Fn {
 //  AnyFn
 //------------------------------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct AnyFn<A: ?Sized> {
-    function: usize,
-    handler: HandlerPtr,
-    a: PhantomData<A>,
+#[derive(Debug)]
+pub(crate) struct AnyFn {
+    pub(crate) function: usize,
+    pub(crate) handler: HandlerPtr,
 }
 
-impl<A: Actor> AnyFn<A> {
-    pub(crate) async unsafe fn call(&self, actor: &mut A, params: HandlerParams) -> EventFlow<A> {
+impl AnyFn {
+    pub(crate) async unsafe fn call<A: Actor>(&self, actor: &mut A, params: HandlerParams) -> EventFlow<A> {
         match self.handler {
             HandlerPtr::Async(handler) => {
                 let handler: AsyncHandlerFnType<A> = unsafe { transmute(handler) };
@@ -75,22 +74,20 @@ impl<A: Actor> AnyFn<A> {
     }
 }
 
-impl<A, P, R> From<ReqFn<A, P, R>> for AnyFn<A> {
+impl<A, P, R> From<ReqFn<A, P, R>> for AnyFn {
     fn from(ptr: ReqFn<A, P, R>) -> Self {
         Self {
             function: ptr.function,
             handler: ptr.handler,
-            a: PhantomData,
         }
     }
 }
 
-impl<A, P> From<MsgFn<A, P>> for AnyFn<A> {
+impl<A, P> From<MsgFn<A, P>> for AnyFn {
     fn from(ptr: MsgFn<A, P>) -> Self {
         Self {
             function: ptr.function,
             handler: ptr.handler,
-            a: PhantomData,
         }
     }
 }
@@ -182,7 +179,7 @@ impl<A: Actor, P: Send + 'static, R: Send + 'static> ReqFn<A, P, R> {
         let (flow, reply) = function(actor, params).take_reply();
 
         if let Some(reply) = reply {
-            request.reply(reply)
+            let _ = request.reply(reply);
         }
 
         flow
@@ -346,10 +343,9 @@ impl<A: Actor, P: Send + 'static> MsgFn<A, P> {
 //  Implementations
 //------------------------------------------------------------------------------------------------
 
-impl<A> Clone for AnyFn<A> {
+impl Clone for AnyFn {
     fn clone(&self) -> Self {
         Self {
-            a: self.a.clone(),
             function: self.function.clone(),
             handler: self.handler.clone(),
         }
@@ -376,11 +372,11 @@ impl<A, P, R> Clone for ReqFn<A, P, R> {
         }
     }
 }
-impl<A> Copy for AnyFn<A> {}
+impl Copy for AnyFn {}
 impl<A, P> Copy for MsgFn<A, P> {}
 impl<A, P, R> Copy for ReqFn<A, P, R> {}
-unsafe impl<A> Send for AnyFn<A> {}
-unsafe impl<A> Sync for AnyFn<A> {}
+unsafe impl Send for AnyFn {}
+unsafe impl Sync for AnyFn {}
 unsafe impl<A, P, R> Send for ReqFn<A, P, R> {}
 unsafe impl<A, P, R> Sync for ReqFn<A, P, R> {}
 unsafe impl<A, P> Send for MsgFn<A, P> {}

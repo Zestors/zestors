@@ -30,14 +30,14 @@ impl Capacity<Unbounded> for Unbounded {
 
 pub(crate) fn channel<A: Actor>(
     size: Option<usize>,
-) -> (ActionSender<A>, ActionReceiver<A>) {
+) -> (ActionSender<A>, Inbox<A>) {
     let (sender, receiver) = match size {
         Some(size) => async_channel::bounded(size),
         None => async_channel::unbounded(),
     };
 
     let tx = ActionSender { sender };
-    let rx = ActionReceiver { receiver };
+    let rx = Inbox { receiver };
 
     (tx, rx)
 }
@@ -118,11 +118,17 @@ impl<A: Actor> Clone for ActionSender<A> {
 
 /// A receiver of [Packet]s
 #[derive(Debug)]
-pub(crate) struct ActionReceiver<A: Actor> {
-    pub receiver: async_channel::Receiver<Action<A>>,
+pub(crate) struct Inbox<A: Actor> {
+    receiver: async_channel::Receiver<Action<A>>,
 }
 
-impl<A: Actor> Stream for ActionReceiver<A> {
+impl<A: Actor> Inbox<A> {
+    pub(crate) fn is_alive(&self) -> bool {
+        !self.receiver.is_closed()
+    }
+}
+
+impl<A: Actor> Stream for Inbox<A> {
     type Item = Action<A>;
 
     fn poll_next(
@@ -133,7 +139,7 @@ impl<A: Actor> Stream for ActionReceiver<A> {
     }
 }
 
-impl<A: Actor> Drop for ActionReceiver<A> {
+impl<A: Actor> Drop for Inbox<A> {
     fn drop(&mut self) {
         self.receiver.close();
         while let Ok(packet) = self.receiver.try_recv() {
