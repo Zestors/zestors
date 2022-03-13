@@ -1,33 +1,86 @@
+use std::borrow::Cow;
+
 use crate::actor::{Actor, ProcessId};
 
 use super::{
     challenge,
-    pid::AnyProcessRef,
     registry::{Registry, RegistryGetError},
-    remote_action::{RemoteAction, AbsPtr},
-    NodeId,
+    remote_action::{AbsPtr, RemoteAction},
+    NodeId, ws_stream::WsRecvError,
 };
+use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
+use tokio_tungstenite::tungstenite;
 
 //------------------------------------------------------------------------------------------------
 //  Message
 //------------------------------------------------------------------------------------------------
 
+pub(crate) struct RawMsg(Result<tungstenite::Message, WsRecvError>);
+
+#[macro_export]
+macro_rules! into_msg {
+    ($raw_msg:ident) => {{
+        let type_check: &$crate::distributed::msg::RawMsg = &$raw_msg;
+        match $raw_msg.as_ref() {
+            Ok(msg) => {
+                $crate::distributed::msg::Msg::from_tungstenite_msg(msg)
+            },
+            Err(_) => {
+                if let Err(e) = $raw_msg.inner() {
+                    Err(e)
+                } else {
+                    panic!()
+                }
+            }
+        }
+    }};
+}
+
+impl RawMsg {
+    pub fn new(msg: Result<tungstenite::Message, WsRecvError>) -> Self {
+        Self(msg)
+    }
+
+    pub fn as_ref(&self) -> &Result<tungstenite::Message, WsRecvError> {
+        &self.0
+    }
+
+    pub fn inner(self) -> Result<tungstenite::Message, WsRecvError> {
+        self.0
+    }
+}
+
 /// The message type that is serialized, and sent over the websocket connection
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) enum Msg {
+pub(crate) enum Msg<'a> {
     Challenge(Challenge),
-    FindProcess(FindProcess),
+    FindProcess(FindProcess<'a>),
     Action(Action),
 }
 
-impl Msg {
+impl<'a> Msg<'a> {
     pub(crate) fn serialize(&self) -> Vec<u8> {
         bincode::serialize(self).unwrap()
     }
 
-    pub(crate) fn deserialize(bytes: &[u8]) -> Result<Self, ()> {
-        bincode::deserialize(bytes).map_err(|e| ())
+    pub(crate) fn from_tungstenite_msg(msg: &'a tungstenite::Message) -> Result<Self, WsRecvError> {
+        match msg {
+            tungstenite::Message::Binary(bin) => Msg::deserialize(bin),
+            msg => Err(WsRecvError::NonBinaryMsg(msg.clone()))
+        }
+    }
+
+    pub(crate) fn deserialize(bytes: &'a [u8]) -> Result<Self, WsRecvError> {
+        bincode::deserialize(bytes).map_err(|_| WsRecvError::NotDeserializable)
+    }
+
+    pub fn as_challenge(self) -> Result<Challenge, WsRecvError> {
+        if let Msg::Challenge(msg) = self {
+            Ok(msg)
+        } else {
+            Err(WsRecvError::UnExpectedMsgType)
+        }
     }
 }
 
@@ -50,9 +103,9 @@ pub(crate) enum Challenge {
 
 /// Messages related to finding out where process is located
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) enum FindProcess {
+pub(crate) enum FindProcess<'a> {
     RequestById(Id, ProcessId, FindProcessByIdFn),
-    RequestByName(Id, String, FindProcessByNameFn),
+    RequestByName(Id, Cow<'a, String>, FindProcessByNameFn),
     Reply(Id, Result<ProcessId, RegistryGetError>),
 }
 
@@ -107,10 +160,7 @@ impl FindProcessByNameFn {
         function(registry, name)
     }
 
-    fn function<A: Actor>(
-        registry: &Registry,
-        name: &str,
-    ) -> Result<ProcessId, RegistryGetError> {
+    fn function<A: Actor>(registry: &Registry, name: &str) -> Result<ProcessId, RegistryGetError> {
         match registry.find_by_name::<A>(name) {
             Ok(pid) => Ok(pid.process_id()),
             Err(e) => Err(e),

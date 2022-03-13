@@ -183,6 +183,7 @@ pub mod context;
 pub mod distributed;
 pub mod function;
 pub mod handle;
+pub mod scope;
 
 pub mod derive {
     pub use zestors_codegen::{Address, Addressable};

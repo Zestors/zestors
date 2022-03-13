@@ -14,7 +14,7 @@ use crate::{
     distributed::pid::ProcessRef,
     errors::{DidntArrive, ReqRecvError},
     flows::{EventFlow, MsgFlow, ReqFlow},
-    function::{MsgFn, ReqFn},
+    function::{MsgFn, RefSafe, ReqFn},
     inbox::ActionSender,
     messaging::{Msg, Reply, Req, Request},
 };
@@ -31,7 +31,7 @@ pub struct Address<A: ?Sized> {
 
 unsafe impl<A> Sync for Address<A> {}
 
-impl<A: Actor> Address<A> {
+impl<'params, A: Actor> Address<A> {
     pub(crate) fn new(sender: ActionSender<A>, process_id: ProcessId) -> Self {
         Self {
             sender,
@@ -44,28 +44,42 @@ impl<A: Actor> Address<A> {
         self.process_id
     }
 
-    pub async fn req_recv<P, R>(
+    pub async fn req_recv_old<P, R>(
         &self,
-        function: ReqFn<A, P, R>,
+        function: ReqFn<'params, A, P, R, RefSafe>,
         params: P,
     ) -> Result<R, ReqRecvError<P>>
     where
-        P: Send + 'static,
-        R: Send + 'static,
+        P: Send + 'params,
+        R: Send + 'params,
     {
-        Ok(self.req(function, params)?.await?)
+        Ok(unsafe { self.req_ref(function, params) }?.await?)
     }
 
-    pub fn req_recv_blocking<P, R>(
+    pub async fn req_recv_sync<'a, P, R>(
         &self,
-        function: ReqFn<A, P, R>,
+        function: ReqFnType<'a, A, P, R>,
         params: P,
     ) -> Result<R, ReqRecvError<P>>
     where
-        P: Send + 'static,
-        R: Send + 'static,
+        P: Send + 'a,
+        R: Send + 'a,
     {
-        Ok(self.req(function, params)?.recv_blocking()?)
+        let (request, reply) = Request::new();
+        let request = unsafe {
+            Req::new(
+                &self.sender,
+                Action::new_req_ref::<'a, _, _, RefSafe>(
+                    ReqFn::new_sync(function),
+                    params,
+                    request,
+                ),
+                reply,
+            )
+            .send_ref()
+        };
+
+        Ok(request?.await?)
     }
 
     pub fn msg<'a, P>(&'a self, function: MsgFn<A, P>, params: P) -> Result<(), DidntArrive<P>>
@@ -75,7 +89,36 @@ impl<A: Actor> Address<A> {
         Msg::new(&self.sender, Action::new(function, params)).send()
     }
 
-    pub fn req<P, R>(&self, function: ReqFn<A, P, R>, params: P) -> Result<Reply<R>, DidntArrive<P>>
+    pub unsafe fn req_ref<'a, P, R>(
+        &self,
+        function: ReqFn<A, P, R, RefSafe>,
+        params: P,
+    ) -> Result<Reply<R>, DidntArrive<P>>
+    where
+        P: Send + 'a,
+        R: Send + 'a,
+    {
+        let (request, reply) = Request::new();
+        Req::new(
+            &self.sender,
+            Action::new_req_ref::<'a, _, _, RefSafe>(function, params, request),
+            reply,
+        )
+        .send_ref()
+    }
+
+    pub(crate) fn send_raw<P: Send + 'static>(
+        &self,
+        action: Action<A>,
+    ) -> Result<(), DidntArrive<P>> {
+        Msg::new(&self.sender, action).send()
+    }
+
+    pub fn req<P, R, S>(
+        &self,
+        function: ReqFn<A, P, R, S>,
+        params: P,
+    ) -> Result<Reply<R>, DidntArrive<P>>
     where
         P: Send + 'static,
         R: Send + 'static,
@@ -87,13 +130,6 @@ impl<A: Actor> Address<A> {
             reply,
         )
         .send()
-    }
-
-    pub(crate) fn send_raw<P: Send + 'static>(
-        &self,
-        action: Action<A>,
-    ) -> Result<(), DidntArrive<P>> {
-        Msg::new(&self.sender, action).send()
     }
 }
 
@@ -134,15 +170,15 @@ impl AnyAddress {
 ///
 /// This can be derived using [crate::derive::Addressable].
 pub trait Addressable<A: Actor> {
-    fn address(&self) -> &Address<A>;
+    fn addr(&self) -> &Address<A>;
 
     /// Whether this process is still alive.
     fn is_alive(&self) -> bool {
-        self.address().sender.is_alive()
+        self.addr().sender.is_alive()
     }
 
     fn process_id(&self) -> ProcessId {
-        self.address().process_id()
+        self.addr().process_id()
     }
 }
 
@@ -151,7 +187,7 @@ pub trait Addressable<A: Actor> {
 //--------------------------------------------------------------------------------------------------
 
 impl<A: Actor> Addressable<A> for Address<A> {
-    fn address(&self) -> &Address<A> {
+    fn addr(&self) -> &Address<A> {
         self
     }
 }
@@ -188,29 +224,29 @@ macro_rules! call {
     }};
 }
 
-pub trait Callable<'a, A, F, P, R, X: 'a> {
+pub trait Callable<'a, A, F, P, R, X: 'a, S> {
     fn call(&'a self, function: F, params: P) -> X;
 }
 
-impl<'a, A: Actor, P, T> Callable<'a, A, MsgFn<A, P>, P, (), Result<(), DidntArrive<P>>> for T
+impl<'a, A: Actor, P, T> Callable<'a, A, MsgFn<A, P>, P, (), Result<(), DidntArrive<P>>, ()> for T
 where
     P: Send + 'static,
     T: Addressable<A>,
 {
     fn call(&'a self, function: MsgFn<A, P>, params: P) -> Result<(), DidntArrive<P>> {
-        self.address().msg(function, params)
+        self.addr().msg(function, params)
     }
 }
 
-impl<'a, A: Actor, P, R, T> Callable<'a, A, ReqFn<A, P, R>, P, R, Result<Reply<R>, DidntArrive<P>>>
-    for T
+impl<'a, A: Actor, P, R, T, S>
+    Callable<'a, A, ReqFn<'static, A, P, R, S>, P, R, Result<Reply<R>, DidntArrive<P>>, S> for T
 where
     P: Send + 'static,
     R: Send + 'static,
     T: Addressable<A>,
 {
-    fn call(&'a self, function: ReqFn<A, P, R>, params: P) -> Result<Reply<R>, DidntArrive<P>> {
-        self.address().req(function, params)
+    fn call(&'a self, function: ReqFn<A, P, R, S>, params: P) -> Result<Reply<R>, DidntArrive<P>> {
+        self.addr().req(function, params)
     }
 }
 
@@ -226,8 +262,10 @@ mod test {
 
     use crate::{
         actor::{self, Actor, ExitReason},
+        address::Addressable,
         context::BasicContext,
         flows::{InitFlow, MsgFlow, ReqFlow},
+        function::ReqFn,
         messaging::Request,
         Fn,
     };
@@ -236,13 +274,61 @@ mod test {
 
     #[tokio::test]
     pub async fn main() {
+        let test = 10;
         let child = actor::spawn::<MyActor>(());
-        let res1 = child.call(Fn!(MyActor::test_a), 10).unwrap();
-        let res2 = child.call(Fn!(MyActor::test_b), 10).unwrap();
-        let res3 = child.call(Fn!(MyActor::test_c), 10).unwrap().await.unwrap();
-        let res4 = child.call(Fn!(MyActor::test_d), 10).unwrap().await.unwrap();
-        let res5 = child.call(Fn!(MyActor::test_e), 10).unwrap().await.unwrap();
-        let res6 = child.call(Fn!(MyActor::test_f), 10).unwrap().await.unwrap();
+
+        let res1 = child.call(Fn!(MyActor::test_a), &10).unwrap();
+        let res2 = child.call(Fn!(MyActor::test_b), &10).unwrap();
+
+        // let res3 = call!(child, MyActor::test_a, &10).unwrap();
+        // let res3 = req!(child, MyActor::test_a, &10).unwrap().await.unwrap();
+        // let res3 = msg!(child, MyActor::test_a, &10).unwrap();
+        // let res3 = req_recv!(child, MyActor::test_a, &10).await.unwrap();
+        // let action1 = action!(MyActor::test_a, &10);
+        // let (action2, request) = action_req!(MyActor::test_a, &10);
+
+        let res3 = child
+            .addr()
+            .req(Fn!(MyActor::test_c), &10)
+            .unwrap()
+            .await
+            .unwrap();
+        let res4 = child
+            .call(Fn!(MyActor::test_d), &10)
+            .unwrap()
+            .await
+            .unwrap();
+        let res5 = child
+            .call(Fn!(MyActor::test_e), &10)
+            .unwrap()
+            .await
+            .unwrap();
+        let res6 = child
+            .call(Fn!(MyActor::test_f), &10)
+            .unwrap()
+            .await
+            .unwrap();
+
+        // let res3 = child
+        //     .addr()
+        //     .req_recv_ref_safe(Fn!(MyActor::test_c), &test)
+        //     .await
+        //     .unwrap();
+        // let res4 = child
+        //     .addr()
+        //     .req_recv_ref_safe(Fn!(MyActor::test_d), &test)
+        //     .await
+        //     .unwrap();
+        // let res5 = child
+        //     .addr()
+        //     .req_recv_old(Fn!(MyActor::test_e), &10)
+        //     .await
+        //     .unwrap();
+        // let res6 = child
+        //     .addr()
+        //     .req_recv_old(Fn!(MyActor::test_f), &10)
+        //     .await
+        //     .unwrap();
 
         println!(
             "{:?}, {:?}, {:?}, {:?}, {:?}, {:?}",
@@ -257,33 +343,33 @@ mod test {
 
     #[allow(dead_code, unused_variables)]
     impl MyActor {
-        fn test_a(&mut self, c: u32) -> MsgFlow<Self> {
+        fn test_a(&mut self, c: &u32) -> MsgFlow<Self> {
             println!("test_a: {}", c);
             MsgFlow::Ok
         }
 
-        async fn test_b(&mut self, c: u32) -> MsgFlow<Self> {
+        async fn test_b(&mut self, c: &u32) -> MsgFlow<Self> {
             println!("test_b: {}", c);
             MsgFlow::Ok
         }
 
-        fn test_c(&mut self, c: u32) -> ReqFlow<Self, &'static str> {
+        fn test_c(&mut self, c: &u32) -> ReqFlow<Self, &'static str> {
             println!("test_c: {}", c);
             ReqFlow::Reply("ok")
         }
 
-        async fn test_d(&mut self, c: u32) -> ReqFlow<Self, &'static str> {
+        async fn test_d(&mut self, c: &u32) -> ReqFlow<Self, &'static str> {
             println!("test_d: {}", c);
             ReqFlow::Reply("ok")
         }
 
-        fn test_e(&mut self, c: u32, request: Request<&'static str>) -> MsgFlow<Self> {
+        fn test_e(&mut self, c: &u32, request: Request<&'static str>) -> MsgFlow<Self> {
             println!("test_e: {}", c);
             request.reply("ok");
             MsgFlow::Ok
         }
 
-        async fn test_f(&mut self, c: u32, request: Request<&'static str>) -> MsgFlow<Self> {
+        async fn test_f(&mut self, c: &u32, request: Request<&'static str>) -> MsgFlow<Self> {
             println!("test_f: {}", c);
             request.reply("ok");
             MsgFlow::Ok

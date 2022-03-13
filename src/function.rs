@@ -60,7 +60,11 @@ pub(crate) struct AnyFn {
 }
 
 impl AnyFn {
-    pub(crate) async unsafe fn call<A: Actor>(&self, actor: &mut A, params: HandlerParams) -> EventFlow<A> {
+    pub(crate) async unsafe fn call<A: Actor>(
+        &self,
+        actor: &mut A,
+        params: HandlerParams,
+    ) -> EventFlow<A> {
         match self.handler {
             HandlerPtr::Async(handler) => {
                 let handler: AsyncHandlerFnType<A> = unsafe { transmute(handler) };
@@ -74,8 +78,8 @@ impl AnyFn {
     }
 }
 
-impl<A, P, R> From<ReqFn<A, P, R>> for AnyFn {
-    fn from(ptr: ReqFn<A, P, R>) -> Self {
+impl<'params, A, P, R, S> From<ReqFn<'params, A, P, R, S>> for AnyFn {
+    fn from(ptr: ReqFn<A, P, R, S>) -> Self {
         Self {
             function: ptr.function,
             handler: ptr.handler,
@@ -97,29 +101,76 @@ impl<A, P> From<MsgFn<A, P>> for AnyFn {
 //------------------------------------------------------------------------------------------------
 
 #[derive(Debug)]
-pub(crate) struct HandlerParams(Box<dyn Any + Send>);
+pub(crate) enum HandlerParams {
+    Box(Box<dyn Any + Send>),
+    Ref(RefParams<'static>),
+}
 
-impl HandlerParams {
-    pub fn new_req<P: Send + 'static, R: Send + 'static>(params: P, request: Request<R>) -> Self {
+pub(crate) struct RefParams<'a>(Box<dyn Send + 'a>);
+
+impl<'a> RefParams<'a> {
+    pub fn new<P: Send + 'a, R: Send + 'a>(params: P, request: Request<R>) -> Self {
         Self(Box::new((params, request)))
     }
 
+    pub unsafe fn transmute<P: Send + 'a, R: Send + 'a>(self) -> (P, Request<R>) {
+        let (address, _metadata) = Box::into_raw(self.0).to_raw_parts();
+        let boxed: Box<(P, Request<R>)> = transmute(address);
+        *boxed
+    }
+}
+
+unsafe impl Send for HandlerParams {}
+
+impl HandlerParams {
+    // pub fn new_req<P: Send + 'static, R: Send + 'static>(params: P, request: Request<R>) -> Self {
+    //     Self::Box(Box::new((params, request)))
+    // }
+
     pub fn new_msg<P: Send + 'static>(params: P) -> Self {
-        Self(Box::new(params))
+        Self::Box(Box::new(params))
+    }
+
+    pub unsafe fn new_req_ref<'a, P: Send + 'a, R: Send + 'a>(
+        params: P,
+        request: Request<R>,
+    ) -> Self {
+        let params = RefParams::new(params, request);
+        let params: RefParams<'static> = std::mem::transmute(params);
+        Self::Ref(params)
     }
 
     pub(crate) unsafe fn new_raw(inner: Box<dyn Any + Send>) -> Self {
-        Self(inner)
+        Self::Box(inner)
     }
 
-    pub fn downcast_req<P: Send + 'static, R: Send + 'static>(
-        self,
-    ) -> Result<(P, Request<R>), Box<dyn Any + Send>> {
-        self.0.downcast().map(|p| *p)
+    pub unsafe fn transmute_req_ref<'a, P: Send + 'a, R: Send + 'a>(self) -> (P, Request<R>) {
+        match self {
+            HandlerParams::Box(boxed) => panic!(),
+            HandlerParams::Ref(boxed) => boxed.transmute(),
+        }
     }
+
+    // pub fn downcast_req<P: Send + 'static, R: Send + 'static>(
+    //     self,
+    // ) -> Result<(P, Request<R>), Box<dyn Any + Send>> {
+    //     match self {
+    //         HandlerParams::Box(boxed) => boxed.downcast().map(|p| *p),
+    //         HandlerParams::Ref(boxed) => panic!(),
+    //     }
+    // }
 
     pub fn downcast_msg<P: Send + 'static>(self) -> Result<P, Box<dyn Any + Send>> {
-        self.0.downcast().map(|p| *p)
+        match self {
+            HandlerParams::Box(boxed) => boxed.downcast().map(|p| *p),
+            HandlerParams::Ref(_) => panic!(),
+        }
+    }
+}
+
+impl<'a> std::fmt::Debug for RefParams<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("RefParams").field(&"").finish()
     }
 }
 
@@ -128,18 +179,85 @@ impl HandlerParams {
 //------------------------------------------------------------------------------------------------
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ReqFn<A: ?Sized, P: ?Sized, R: ?Sized> {
-    a: PhantomData<A>,
-    p: PhantomData<P>,
-    r: PhantomData<R>,
+pub struct ReqFn<'params, Actor: ?Sized, Params: ?Sized, Reply: ?Sized, RefSafe: ?Sized> {
+    a: PhantomData<Actor>,
+    p: PhantomData<&'params Params>,
+    r: PhantomData<&'params Reply>,
+    st: PhantomData<RefSafe>,
     function: usize,
     handler: HandlerPtr,
 }
 
-impl<A: Actor, P: Send + 'static, R: Send + 'static> ReqFn<A, P, R> {
-    pub(crate) async unsafe fn call(&self, actor: &mut A, params: P, request: Request<R>) -> EventFlow<A> {
+pub struct RefSafe;
+pub struct RefUnsafe;
+
+impl<A: Actor, P: Send + 'static, R: Send + 'static> ReqFn<'static, A, P, R, RefUnsafe> {
+    pub fn new_sync2(function: ReqFn2Type<A, P, R>) -> Self {
+        Self {
+            r: PhantomData,
+            a: PhantomData,
+            p: PhantomData,
+            st: PhantomData,
+            function: function as usize,
+            handler: HandlerPtr::new_sync(Self::__sync2_handler__),
+        }
+    }
+
+    fn __sync2_handler__(actor: &mut A, params: HandlerParams, actual_fn: usize) -> EventFlow<A> {
+        let function: ReqFn2Type<A, P, R> = unsafe { transmute(actual_fn) };
+
+        let (params, request) = unsafe { params.transmute_req_ref() };
+
+        function(actor, params, request).into_event_flow()
+    }
+
+    pub fn new_async2<F>(function: AsyncReqFn2Type<A, P, R, F>) -> Self
+    where
+        F: Future<Output = MsgFlow<A>> + Send + 'static,
+    {
+        Self {
+            r: PhantomData,
+            a: PhantomData,
+            p: PhantomData,
+            st: PhantomData,
+            function: function as usize,
+            handler: HandlerPtr::new_async(Self::__async2_handler__::<F>),
+        }
+    }
+
+    fn __async2_handler__<F>(
+        actor: &mut A,
+        params: HandlerParams,
+        actual_fn: usize,
+    ) -> Pin<Box<dyn Future<Output = EventFlow<A>> + Send + 'static>>
+    where
+        F: Future<Output = MsgFlow<A>> + Send + 'static,
+    {
+        let function: AsyncReqFn2Type<A, P, R, F> = unsafe { transmute(actual_fn) };
+
+        let (params, request): (P, Request<R>) = unsafe { params.transmute_req_ref() };
+
+        Box::pin(function(actor, params, request).map(|f| f.into_event_flow()))
+    }
+}
+
+impl<'params, A, P, R> From<ReqFn<'params, A, P, R, RefSafe>>
+    for ReqFn<'params, A, P, R, RefUnsafe>
+{
+    fn from(req: ReqFn<A, P, R, RefSafe>) -> Self {
+        unsafe { std::mem::transmute(req) }
+    }
+}
+
+impl<'params, A: Actor, P: Send + 'params, R: Send + 'params> ReqFn<'params, A, P, R, RefSafe> {
+    pub(crate) async unsafe fn call(
+        &self,
+        actor: &mut A,
+        params: P,
+        request: Request<R>,
+    ) -> EventFlow<A> {
         unsafe {
-            self.call_unchecked(actor, HandlerParams::new_req(params, request))
+            self.call_unchecked(actor, HandlerParams::new_req_ref(params, request))
                 .await
         }
     }
@@ -161,11 +279,12 @@ impl<A: Actor, P: Send + 'static, R: Send + 'static> ReqFn<A, P, R> {
         }
     }
 
-    pub fn new_sync(function: ReqFnType<A, P, R>) -> Self {
+    pub fn new_sync(function: ReqFnType<'params, A, P, R>) -> Self {
         Self {
             r: PhantomData,
             a: PhantomData,
             p: PhantomData,
+            st: PhantomData,
             function: function as usize,
             handler: HandlerPtr::new_sync(Self::__sync_handler__),
         }
@@ -174,7 +293,7 @@ impl<A: Actor, P: Send + 'static, R: Send + 'static> ReqFn<A, P, R> {
     fn __sync_handler__(actor: &mut A, params: HandlerParams, actual_fn: usize) -> EventFlow<A> {
         let function: ReqFnType<A, P, R> = unsafe { transmute(actual_fn) };
 
-        let (params, request) = params.downcast_req().unwrap();
+        let (params, request) = unsafe { params.transmute_req_ref() };
 
         let (flow, reply) = function(actor, params).take_reply();
 
@@ -187,81 +306,38 @@ impl<A: Actor, P: Send + 'static, R: Send + 'static> ReqFn<A, P, R> {
 
     pub fn new_async<F>(function: AsyncReqFnType<A, P, F>) -> Self
     where
-        F: Future<Output = ReqFlow<A, R>> + Send + 'static,
+        F: Future<Output = ReqFlow<A, R>> + Send + 'params,
+        A: 'params,
+        P: 'params,
     {
         Self {
             r: PhantomData,
             a: PhantomData,
             p: PhantomData,
+            st: PhantomData,
             function: function as usize,
             handler: HandlerPtr::new_async(Self::__async_handler__::<F>),
         }
     }
 
-    fn __async_handler__<F: Future<Output = ReqFlow<A, R>> + Send + 'static>(
+    fn __async_handler__<F: Future<Output = ReqFlow<A, R>> + Send + 'params>(
         actor: &mut A,
         params: HandlerParams,
         actual_fn: usize,
-    ) -> Pin<Box<dyn Future<Output = EventFlow<A>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = EventFlow<A>> + Send + 'params>> {
         let function: AsyncReqFnType<A, P, F> = unsafe { transmute(actual_fn) };
 
-        let (params, request) = params.downcast_req().unwrap();
+        let (params, request) = unsafe { params.transmute_req_ref() };
 
         Box::pin(function(actor, params).map(|f| {
             let (flow, reply) = f.take_reply();
 
             if let Some(reply) = reply {
-                request.reply(reply);
+                let _ = request.reply(reply);
             }
 
             flow
         }))
-    }
-
-    pub fn new_sync2(function: ReqFn2Type<A, P, R>) -> Self {
-        Self {
-            r: PhantomData,
-            a: PhantomData,
-            p: PhantomData,
-            function: function as usize,
-            handler: HandlerPtr::new_sync(Self::__sync2_handler__),
-        }
-    }
-
-    fn __sync2_handler__(actor: &mut A, params: HandlerParams, actual_fn: usize) -> EventFlow<A> {
-        let function: ReqFn2Type<A, P, R> = unsafe { transmute(actual_fn) };
-
-        let (params, request) = params.downcast_req().unwrap();
-
-        function(actor, params, request).into_event_flow()
-    }
-
-    pub fn new_async2<F>(function: AsyncReqFn2Type<A, P, R, F>) -> Self
-    where
-        F: Future<Output = MsgFlow<A>> + Send + 'static,
-    {
-        Self {
-            r: PhantomData,
-            a: PhantomData,
-            p: PhantomData,
-            function: function as usize,
-            handler: HandlerPtr::new_async(Self::__async2_handler__::<F>),
-        }
-    }
-
-    fn __async2_handler__<F>(
-        actor: &mut A,
-        params: HandlerParams,
-        actual_fn: usize,
-    ) -> Pin<Box<dyn Future<Output = EventFlow<A>> + Send + 'static>>
-    where
-        F: Future<Output = MsgFlow<A>> + Send + 'static,
-    {
-        let function: AsyncReqFn2Type<A, P, R, F> = unsafe { transmute(actual_fn) };
-
-        let (params, request): (P, Request<R>) = params.downcast_req().unwrap();
-
-        Box::pin(function(actor, params, request).map(|f| f.into_event_flow()))
     }
 }
 
@@ -270,16 +346,19 @@ impl<A: Actor, P: Send + 'static, R: Send + 'static> ReqFn<A, P, R> {
 //------------------------------------------------------------------------------------------------
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct MsgFn<A: ?Sized, P: ?Sized> {
-    a: PhantomData<A>,
-    p: PhantomData<P>,
+pub struct MsgFn<Actor: ?Sized, Params: ?Sized> {
+    a: PhantomData<Actor>,
+    p: PhantomData<Params>,
     function: usize,
     handler: HandlerPtr,
 }
 
 impl<A: Actor, P: Send + 'static> MsgFn<A, P> {
     pub(crate) async unsafe fn call(&self, actor: &mut A, params: P) -> EventFlow<A> {
-        unsafe { self.call_unchecked(actor, HandlerParams::new_msg(params)).await }
+        unsafe {
+            self.call_unchecked(actor, HandlerParams::new_msg(params))
+                .await
+        }
     }
 
     pub(crate) async unsafe fn call_unchecked(
@@ -361,24 +440,25 @@ impl<A, P> Clone for MsgFn<A, P> {
         }
     }
 }
-impl<A, P, R> Clone for ReqFn<A, P, R> {
+impl<'params, A, P, R> Clone for ReqFn<'params, A, P, R, RefSafe> {
     fn clone(&self) -> Self {
         Self {
             a: self.a.clone(),
             p: self.p.clone(),
+            st: self.st.clone(),
             function: self.function.clone(),
             handler: self.handler.clone(),
-            r: self.r.clone()
+            r: self.r.clone(),
         }
     }
 }
 impl Copy for AnyFn {}
 impl<A, P> Copy for MsgFn<A, P> {}
-impl<A, P, R> Copy for ReqFn<A, P, R> {}
+impl<'params, A, P, R> Copy for ReqFn<'params, A, P, R, RefSafe> {}
 unsafe impl Send for AnyFn {}
 unsafe impl Sync for AnyFn {}
-unsafe impl<A, P, R> Send for ReqFn<A, P, R> {}
-unsafe impl<A, P, R> Sync for ReqFn<A, P, R> {}
+unsafe impl<'params, A, P, R> Send for ReqFn<'params, A, P, R, RefSafe> {}
+unsafe impl<'params, A, P, R> Sync for ReqFn<'params, A, P, R, RefSafe> {}
 unsafe impl<A, P> Send for MsgFn<A, P> {}
 unsafe impl<A, P> Sync for MsgFn<A, P> {}
 
@@ -390,9 +470,9 @@ pub trait IntoFn<A, Fun, P, R, Fut, X, Id> {
     unsafe fn into_fn(function_ptr: usize, function: Fun) -> X;
 }
 
-impl<A, Fun, P> IntoFn<A, Fun, P, (), (), MsgFn<A, P>, MsgFnId> for ()
+impl<'a, 'f, A, Fun, P> IntoFn<A, Fun, P, (), (), MsgFn<A, P>, MsgFnId> for ()
 where
-    Fun: Fn(&mut A, P) -> MsgFlow<A>,
+    Fun: Fn(&'a mut A, P) -> MsgFlow<A>,
     A: Actor,
     P: Send + 'static,
 {
@@ -415,47 +495,48 @@ where
     }
 }
 
-impl<A, F, P, R> IntoFn<A, F, P, R, (), ReqFn<A, P, R>, ReqFnId> for ()
+impl<'params, A, F, P, R> IntoFn<A, F, P, R, (), ReqFn<'params, A, P, R, RefSafe>, ReqFnId> for ()
 where
-    F: Fn(&mut A, P) -> ReqFlow<A, R>,
+    F: Fn(&'params mut A, P) -> ReqFlow<A, R>,
     A: Actor,
-    P: Send + 'static,
-    R: Send + 'static,
+    P: Send + 'params,
+    R: Send + 'params,
 {
-    unsafe fn into_fn(ptr: usize, _: F) -> ReqFn<A, P, R> {
+    unsafe fn into_fn(ptr: usize, _: F) -> ReqFn<'params, A, P, R, RefSafe> {
         let function: ReqFnType<A, P, R> = transmute(ptr);
         ReqFn::new_sync(function)
     }
 }
 
-impl<'a, A, Fun, P, Fut, R> IntoFn<A, Fun, P, R, Fut, ReqFn<A, P, R>, AsyncReqFnId> for ()
+impl<'params, A, Fun, P, Fut, R> IntoFn<A, Fun, P, R, Fut, ReqFn<'params, A, P, R, RefSafe>, AsyncReqFnId> for ()
 where
-    Fun: Fn(&'a mut A, P) -> Fut,
-    Fut: Future<Output = ReqFlow<A, R>> + 'static + ReqHelperTrait + Send,
+    Fun: Fn(&'params mut A, P) -> Fut,
+    Fut: Future<Output = ReqFlow<A, R>> + 'params + ReqHelperTrait + Send,
     A: Actor,
-    P: Send + 'static,
-    R: Send + 'static,
+    P: Send + 'params,
+    R: Send + 'params,
 {
-    unsafe fn into_fn(ptr: usize, _: Fun) -> ReqFn<A, P, R> {
+    unsafe fn into_fn(ptr: usize, _: Fun) -> ReqFn<'params, A, P, R, RefSafe> {
         let function: AsyncReqFnType<A, P, Fut> = transmute(ptr);
         ReqFn::new_async(function)
     }
 }
 
-impl<A, F, P, R> IntoFn<A, F, P, R, (), ReqFn<A, P, R>, ReqFn2Id> for ()
+impl<'a, A, F, P, R> IntoFn<A, F, P, R, (), ReqFn<'static, A, P, R, RefUnsafe>, ReqFn2Id> for ()
 where
-    F: Fn(&mut A, P, Request<R>) -> MsgFlow<A>,
+    F: Fn(&'a mut A, P, Request<R>) -> MsgFlow<A>,
     A: Actor,
     P: Send + 'static,
     R: Send + 'static,
 {
-    unsafe fn into_fn(ptr: usize, _: F) -> ReqFn<A, P, R> {
+    unsafe fn into_fn(ptr: usize, _: F) -> ReqFn<'static, A, P, R, RefUnsafe> {
         let function: ReqFn2Type<A, P, R> = transmute(ptr);
         ReqFn::new_sync2(function)
     }
 }
 
-impl<'a, A, Fun, P, Fut, R> IntoFn<A, Fun, P, R, Fut, ReqFn<A, P, R>, AsyncReqFn2Id> for ()
+impl<'a, A, Fun, P, Fut, R> IntoFn<A, Fun, P, R, Fut, ReqFn<'static, A, P, R, RefUnsafe>, AsyncReqFn2Id>
+    for ()
 where
     Fun: Fn(&'a mut A, P, Request<R>) -> Fut,
     Fut: Future<Output = MsgFlow<A>> + 'static + Send,
@@ -463,7 +544,7 @@ where
     P: Send + 'static,
     R: Send + 'static,
 {
-    unsafe fn into_fn(ptr: usize, _: Fun) -> ReqFn<A, P, R> {
+    unsafe fn into_fn(ptr: usize, _: Fun) -> ReqFn<'static, A, P, R, RefUnsafe> {
         let function: AsyncReqFn2Type<A, P, R, Fut> = transmute(ptr);
         ReqFn::new_async2(function)
     }

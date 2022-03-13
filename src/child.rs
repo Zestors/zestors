@@ -182,8 +182,8 @@ impl<A: Actor> Drop for Child<A> {
 }
 
 impl<A: Actor> Addressable<A> for Child<A> {
-    fn address(&self) -> &Address<A> {
-        &self.address.address()
+    fn addr(&self) -> &Address<A> {
+        &self.address.addr()
     }
 }
 

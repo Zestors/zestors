@@ -1,16 +1,16 @@
 use std::{net::SocketAddr, task::Poll};
 
-use futures::{
-    stream::{SplitSink, SplitStream},
-    SinkExt, Stream, StreamExt,
-};
+use futures::{SinkExt, Stream, StreamExt};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
     tungstenite::{self, Message},
     MaybeTlsStream, WebSocketStream,
 };
 
-use super::{msg, server::NodeConnectError};
+use super::{
+    msg::{self, RawMsg},
+    server::NodeConnectError,
+};
 
 #[derive(Debug)]
 pub(crate) struct WsStream {
@@ -19,26 +19,15 @@ pub(crate) struct WsStream {
 }
 
 impl Stream for WsStream {
-    type Item = Result<msg::Msg, WsRecvError>;
+    type Item = RawMsg;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        match self.stream.poll_next_unpin(cx) {
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Ready(Some(val)) => match val {
-                Ok(msg) => match msg {
-                    Message::Binary(bin) => match msg::Msg::deserialize(&bin) {
-                        Ok(msg) => Poll::Ready(Some(Ok(msg))),
-                        Err(_) => Poll::Ready(Some(Err(WsRecvError::NotDeserializable(bin)))),
-                    },
-                    other_msg => Poll::Ready(Some(Err(WsRecvError::NonBinaryMsg(other_msg)))),
-                },
-                Err(e) => Poll::Ready(Some(Err(WsRecvError::Tungstenite(e)))),
-            },
-            Poll::Pending => Poll::Pending,
-        }
+        self.stream
+            .poll_next_unpin(cx)
+            .map(|val| val.map(|res| RawMsg::new(res.map_err(|e| WsRecvError::Tungstenite(e)))))
     }
 }
 
@@ -50,7 +39,7 @@ impl WsStream {
             .map_err(|e| WsSendError::Tungstenite(e))
     }
 
-    pub async fn send(&mut self, msg: msg::Msg) -> Result<(), WsSendError> {
+    pub async fn send<'a>(&mut self, msg: msg::Msg<'a>) -> Result<(), WsSendError> {
         self.stream
             .send(Message::Binary(msg.serialize()))
             .await
@@ -66,14 +55,10 @@ impl WsStream {
     ) -> Result<Self, NodeConnectError> {
         let peer_address = Self::_peer_addr_(&stream)?;
         match tokio_tungstenite::accept_async(stream).await {
-            Ok(stream) => {
-                Ok(
-                    Self {
-                        stream,
-                        peer_address,
-                    },
-                )
-            }
+            Ok(stream) => Ok(Self {
+                stream,
+                peer_address,
+            }),
             Err(e) => Err(NodeConnectError::HandShakeFailed(e)),
         }
     }
@@ -88,12 +73,10 @@ impl WsStream {
             .await
             .map_err(|e| NodeConnectError::HandShakeFailed(e))?;
 
-        Ok(
-            Self {
-                stream,
-                peer_address,
-            },
-        )
+        Ok(Self {
+            stream,
+            peer_address,
+        })
     }
 
     fn _peer_addr_(stream: &MaybeTlsStream<TcpStream>) -> std::io::Result<SocketAddr> {
@@ -104,38 +87,11 @@ impl WsStream {
         }
     }
 
-    pub async fn recv_challenge(&mut self) -> Result<msg::Challenge, WsRecvError> {
-        match self.stream.next().await {
-            Some(val) => match val {
-                Ok(msg) => match msg {
-                    Message::Binary(bin) => match msg::Msg::deserialize(&bin) {
-                        Ok(msg) => match msg {
-                            msg::Msg::Challenge(msg) => Ok(msg),
-                            other => Err(WsRecvError::UnExpectedMsgType(other)),
-                        },
-                        Err(_) => Err(WsRecvError::NotDeserializable(bin)),
-                    },
-                    other_msg => Err(WsRecvError::NonBinaryMsg(other_msg)),
-                },
-                Err(e) => Err(WsRecvError::Tungstenite(e)),
-            },
-            None => Err(WsRecvError::StreamClosed),
-        }
-    }
 
-    pub async fn recv(&mut self) -> Result<msg::Msg, WsRecvError> {
-        match self.stream.next().await {
-            Some(val) => match val {
-                Ok(msg) => match msg {
-                    Message::Binary(bin) => match msg::Msg::deserialize(&bin) {
-                        Ok(msg) => Ok(msg),
-                        Err(_) => Err(WsRecvError::NotDeserializable(bin)),
-                    },
-                    other_msg => Err(WsRecvError::NonBinaryMsg(other_msg)),
-                },
-                Err(e) => Err(WsRecvError::Tungstenite(e)),
-            },
-            None => Err(WsRecvError::StreamClosed),
+    pub async fn recv(&mut self) -> RawMsg {
+        match self.next().await {
+            Some(msg) => msg,
+            None => RawMsg::new(Err(WsRecvError::StreamClosed)),
         }
     }
 }
@@ -146,19 +102,14 @@ pub(crate) enum WsRecvError {
     Tungstenite(tungstenite::Error),
     #[error(ignore)]
     NonBinaryMsg(Message),
-    #[display(fmt = "bin")]
     #[error(ignore)]
-    NotDeserializable(Vec<u8>),
+    NotDeserializable,
     #[error(ignore)]
-    #[display(fmt = "{:?}", "0")]
-    UnExpectedMsgType(msg::Msg),
+    #[display(fmt = "UnexpectedMsgType({:?})", "0")]
+    UnExpectedMsgType,
 }
-
-
-
 
 #[derive(Debug, derive_more::Error, derive_more::Display)]
 pub enum WsSendError {
     Tungstenite(tungstenite::Error),
 }
-

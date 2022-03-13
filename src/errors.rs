@@ -33,13 +33,13 @@ pub enum TryRecvError {
 }
 
 #[derive(Debug)]
-pub enum ProcessRefRequestError {
+pub enum FindProcessError {
     NotRegistered,
     IncorrectActorType,
     NodeDisconnected
 }
 
-impl From<RegistryGetError> for ProcessRefRequestError {
+impl From<RegistryGetError> for FindProcessError {
     fn from(e: RegistryGetError) -> Self {
         match e {
             RegistryGetError::IdNotRegistered => Self::NotRegistered,

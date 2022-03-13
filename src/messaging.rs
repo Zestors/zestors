@@ -100,8 +100,8 @@ where
     /// create a new request.
     pub(crate) fn new(sender: &'a ActionSender<A>, action: Action<A>, reply: Reply<R>) -> Self
     where
-        P: 'static,
-        R: 'static,
+        // P: 'static,
+        // R: 'static,
     {
         Self {
             action,
@@ -124,7 +124,26 @@ where
         match self.sender.try_send(self.action) {
             Ok(()) => Ok(self.reply),
             Err(ActionTrySendError::Disconnected(action)) => {
-                Err(DidntArrive(action.downcast_req::<P, R>().unwrap().0))
+                Err(DidntArrive(unsafe { action.transmute_req_ref::<P, R>().0 }))
+            }
+            Err(ActionTrySendError::Full(_)) => unreachable!("should be unbounded"),
+        }
+    }
+
+        /// If the [Actor::Inbox] is [Unbounded] (default), then a message can be sent without
+    /// waiting for space in the inbox. For this reason, [Unbounded] mailboxes only have a single
+    /// `send` method, which works for both synchronous and asynchronous contexts.
+    ///
+    /// This method can only fail if the [Actor] has died before the message could be sent.
+    pub unsafe fn send_ref(self) -> Result<Reply<R>, DidntArrive<P>>
+    where
+        P: Send + 'a,
+        R: Send + 'a,
+    {
+        match self.sender.try_send(self.action) {
+            Ok(()) => Ok(self.reply),
+            Err(ActionTrySendError::Disconnected(action)) => {
+                Err(DidntArrive(action.transmute_req_ref::<P, R>().0))
             }
             Err(ActionTrySendError::Full(_)) => unreachable!("should be unbounded"),
         }
@@ -144,7 +163,7 @@ where
         match self.sender.try_send(self.action) {
             Ok(()) => Ok(self.reply.await?),
             Err(ActionTrySendError::Disconnected(action)) => Err(ReqRecvError::DidntArrive(
-                action.downcast_req::<P, R>().unwrap().0,
+                unsafe { action.transmute_req_ref::<P, R>().0 },
             )),
             Err(ActionTrySendError::Full(_action)) => unreachable!("should be unbounded"),
         }
@@ -165,7 +184,7 @@ where
             Ok(()) => Ok(self.reply.recv_blocking()?),
             Err(e) => match e {
                 ActionTrySendError::Disconnected(action) => Err(ReqRecvError::DidntArrive(
-                    action.downcast_req::<P, R>().unwrap().0,
+                    unsafe { action.transmute_req_ref::<P, R>().0 },
                 )),
                 ActionTrySendError::Full(_action) => {
                     unreachable!("Should be unbounded!")

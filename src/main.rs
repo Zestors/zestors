@@ -1,5 +1,6 @@
 use std::env::{self, Args};
-use std::fmt;
+use std::fmt::{self};
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::time::Duration;
@@ -13,7 +14,11 @@ use zestors::context::{BasicContext, NoCtx};
 use zestors::distributed::node::Node;
 use zestors::distributed::pid::ProcessRef;
 use zestors::distributed::NodeId;
+use zestors::errors::{DidntArrive, NoReply};
 use zestors::flows::{InitFlow, ReqFlow};
+use zestors::function::{RefSafe, ReqFn};
+use zestors::messaging::Reply;
+use zestors::Fn;
 use zestors::{
     actor::Actor,
     distributed::local_node::{self, LocalNode},
@@ -105,7 +110,7 @@ async fn main2() {
     child.detach();
 
     registry
-        .register(child.address(), Some("my_actor".to_string()))
+        .register(child.addr(), Some("my_actor".to_string()))
         .unwrap();
 
     println!("spawned child: {:?}", child)
@@ -142,12 +147,6 @@ async fn main3() {
         .find_process_by_name::<MyActor>("my_actor2".to_string())
         .await;
     println!("ref: {:?}", process_ref);
-}
-
-type BoxFut<T> = Pin<Box<dyn Future<Output = T>>>;
-
-trait CallRemote<'a, A: Actor, M, P, F, R: 'a> {
-    fn call_rem(&'a self, function: fn(&mut A, &mut A::Context, M) -> F, params: P) -> R;
 }
 
 #[derive(Debug)]
@@ -187,6 +186,14 @@ impl MyActor {
     pub async fn say_hello(&mut self, _: &mut BasicContext<Self>, params: u32) -> MsgFlow<Self> {
         MsgFlow::Ok
     }
+
+    pub async fn say_hello2(&mut self, _: &str) -> ReqFlow<Self, u32> {
+        ReqFlow::Reply(10)
+    }
+
+    pub async fn say_hello3<'a>(&'a mut self, val: &'a u32) -> ReqFlow<Self, &u32> {
+        ReqFlow::Reply(val)
+    }
 }
 
 #[derive(Debug)]
@@ -212,4 +219,69 @@ impl Actor for MyActor2 {
     fn ctx(&mut self) -> &mut Self::Context {
         NoCtx::new()
     }
+}
+
+struct Scope<'scope, R>(Vec<&'scope Reply<R>>);
+
+impl<'scope, R> Scope<'scope, R>
+where
+    R: 'scope,
+{
+    fn send<A, P>(
+        &mut self,
+        address: &Address<A>,
+        req_fn: ReqFn<A, P, R, RefSafe>,
+        params: P,
+    ) -> Result<(), DidntArrive<P>>
+    where
+        P: 'scope,
+    {
+        todo!()
+    }
+
+    fn send_map<A, P, R2>(
+        &mut self,
+        address: &Address<A>,
+        req_fn: ReqFn<A, P, R2, RefSafe>,
+        params: P,
+        map: impl FnOnce(R2) -> R,
+    ) -> Result<(), DidntArrive<P>>
+    where
+        P: 'scope,
+        R2: 'scope,
+    {
+        todo!()
+    }
+}
+
+async unsafe fn scope<'a, R>(function: impl FnOnce(&mut Scope<'a, R>)) -> Vec<Result<R, NoReply>> {
+    todo!()
+}
+
+macro_rules! scope {
+    ($function:expr) => {
+        unsafe { scope($function).await }
+    };
+}
+
+async fn test2(address: Address<MyActor>) {
+    let str = "hi".to_string();
+    let u32 = 10;
+
+    let res = scope!(|scope| {
+        scope
+            .send(&address, Fn!(MyActor::say_hello2), &str)
+            .unwrap();
+        scope
+            .send(&address, Fn!(MyActor::say_hello2), &str)
+            .unwrap();
+        scope
+            .send(&address, Fn!(MyActor::say_hello2), &str)
+            .unwrap();
+        scope
+            .send_map(&address, Fn!(MyActor::say_hello3), &u32, |val| *val)
+            .unwrap();
+    });
+
+    drop(str);
 }
