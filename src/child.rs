@@ -51,7 +51,11 @@ impl<A: Actor> Child<A> {
         }
     }
 
-    pub fn clone_address(&self) -> Address<A> {
+    pub fn addr(&self) -> &Address<A> {
+        &self.address
+    }
+
+    pub fn clone_addr(&self) -> Address<A> {
         self.address.clone()
     }
 

@@ -10,7 +10,7 @@ use tokio::process::Command;
 use uuid::Uuid;
 use zestors::actor::{self};
 use zestors::address::{Address, Addressable};
-use zestors::context::{BasicContext, NoCtx};
+use zestors::context::{BasicCtx, NoCtx};
 use zestors::distributed::node::Node;
 use zestors::distributed::pid::ProcessRef;
 use zestors::distributed::NodeId;
@@ -177,13 +177,13 @@ impl Actor for MyActor {
 impl MyActor {
     pub async fn my_message(
         &mut self,
-        _: &mut BasicContext<Self>,
+        _: &mut BasicCtx<Self>,
         params: (u32, u32),
     ) -> MsgFlow<Self> {
         MsgFlow::Ok
     }
 
-    pub async fn say_hello(&mut self, _: &mut BasicContext<Self>, params: u32) -> MsgFlow<Self> {
+    pub async fn say_hello(&mut self, _: &mut BasicCtx<Self>, params: u32) -> MsgFlow<Self> {
         MsgFlow::Ok
     }
 

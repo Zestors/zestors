@@ -1,7 +1,7 @@
 use crate::{
     actor::Actor,
     flows::{EventFlow, MsgFlow, ReqFlow},
-    function::{AnyFn, HandlerParams, MsgFn, ReqFn},
+    function::{AnyFn, Params, MsgFn, ReqFn},
     messaging::Request,
 };
 use futures::Future;
@@ -20,7 +20,7 @@ use std::{fmt::Debug, marker::PhantomData, pin::Pin};
 #[derive(Debug)]
 pub struct Action<A: ?Sized> {
     function: AnyFn,
-    params: HandlerParams,
+    params: Params,
     a: PhantomData<A>,
 }
 
@@ -28,7 +28,7 @@ impl<A: Actor> Action<A> {
     pub fn new<P: Send + 'static>(function: MsgFn<A, fn(P)>, params: P) -> Self {
         Self {
             function: function.into(),
-            params: HandlerParams::new_msg(params),
+            params: Params::new_msg(params),
             a: PhantomData,
         }
     }
@@ -40,7 +40,7 @@ impl<A: Actor> Action<A> {
     ) -> Self {
         Self {
             function: function.into(),
-            params: HandlerParams::new_req(params, request),
+            params: Params::new_req(params, request),
             a: PhantomData,
         }
     }
@@ -54,7 +54,7 @@ impl<A: Actor> Action<A> {
             Ok(params) => Ok(params),
             Err(boxed) => Err(Self {
                 function: self.function,
-                params: unsafe { HandlerParams::new_raw(boxed) },
+                params: unsafe { Params::new_raw(boxed) },
                 a: PhantomData,
             }),
         }
@@ -67,7 +67,7 @@ impl<A: Actor> Action<A> {
     pub(crate) unsafe fn new_raw_msg<P: Send + 'static>(function: AnyFn, params: P) -> Self {
         Self {
             function,
-            params: HandlerParams::new_msg(params),
+            params: Params::new_msg(params),
             a: PhantomData,
         }
     }
@@ -79,7 +79,7 @@ impl<A: Actor> Action<A> {
     ) -> Self {
         Self {
             function,
-            params: HandlerParams::new_req(params, request),
+            params: Params::new_req(params, request),
             a: PhantomData,
         }
     }

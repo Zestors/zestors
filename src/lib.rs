@@ -37,9 +37,9 @@
 //! after the timeout set by [actor::Actor::ABORT_TIMER], then it will hard_abort it instead. If
 //! you would like to disable this behaviour, then it is possible to [process::Process::detach] a
 //! process. It can be reattached with [process::Process::re_attach].
-//! 
+//!
 //! All public structs/traits/functions are documented, so for more information you can take a look
-//! at those docs. It would probably also be a good idea to look at the [actor::Actor] trait 
+//! at those docs. It would probably also be a good idea to look at the [actor::Actor] trait
 //! definition.
 //!
 //! ## Simple example
@@ -174,27 +174,37 @@ pub mod abort;
 pub mod action;
 pub mod actor;
 pub mod address;
-pub mod errors;
-pub mod flows;
-pub mod inbox;
-pub mod messaging;
 pub mod child;
 pub mod context;
 pub mod distributed;
+pub mod errors;
+pub mod flows;
 pub mod function;
-pub mod handle;
-pub mod scope;
 pub mod function2;
+pub mod handle;
+pub mod inbox;
+pub mod messaging;
+pub mod scope;
+pub mod test;
 
 pub mod derive {
     pub use zestors_codegen::{Address, Addressable};
 }
 
 pub use anyhow::Error as AnyhowError;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum Either<A, B> {
     A(A),
-    B(B)
+    B(B),
+}
+
+pub mod prelude {
+    pub use crate::{
+        actor::{self, Actor},
+        flows::{MsgFlow, ReqFlow},
+        messaging::{Reply, Request},
+        scoped, Fn,
+    };
 }

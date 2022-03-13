@@ -1,27 +1,55 @@
-use std::{marker::PhantomData, time::Duration};
-
-use futures::future;
+use futures::Future;
 
 use crate::{
-    actor::{self, Actor, ExitReason},
-    address::{Address, Addressable},
-    context::NoCtx,
+    actor::{self, Actor},
+    address::Address,
     errors::{DidntArrive, NoReply},
-    flows::{InitFlow, ReqFlow},
-    function::{ReqFn},
-    messaging::Reply, Fn,
+    function::ReqFn,
+    messaging::Reply,
 };
+use std::{marker::PhantomData, mem::transmute, pin::Pin};
 
-struct Scope<'scope, R> {
-    vec: Vec<Reply<R>>,
+/// A scope for which references to a variable can be sent to processes. After the scope,
+/// all replies are `.await`ed, and collected into a `Vec<Reply<R>>`. Values sent by reference
+/// cannot be dropped until the end of the scope, which guarantees that the process does not
+/// have access to this reference anymore. Any data returned which has a lifetime, will have the
+/// lifetime of the shortest borrowed parameter that is sent in the scope.
+#[macro_export]
+macro_rules! scoped {
+    ($function:expr) => {
+        unsafe { Scope::new($function).await }
+    };
+}
+
+/// A scope for which references to a variable can be sent to processes. After the scope,
+/// all replies are `.await`ed, and collected into a `Vec<Reply<R>>`. Values sent by reference
+/// cannot be dropped until the end of the scope, which guarantees that the process does not
+/// have access to this reference anymore. Any data returned which has a lifetime, will have the
+/// lifetime of the shortest borrowed parameter that is sent in the scope.
+pub struct Scope<'scope, R> {
+    items: Vec<ScopeItem<'scope, R>>,
     scope: PhantomData<&'scope ()>,
+}
+
+enum ScopeItem<'scope, R> {
+    Reply(Reply<R>),
+    MapReply(
+        Box<dyn Send + 'scope>,
+        usize,
+        unsafe fn(
+            Box<dyn Send + 'scope>,
+            usize,
+        ) -> Pin<Box<dyn Future<Output = Result<R, NoReply>> + Send + 'scope>>,
+    ),
 }
 
 impl<'scope, R> Scope<'scope, R>
 where
     R: 'scope + Send,
 {
-    fn send<A: Actor, P>(
+    /// Send a request that will be awaited once this scope completes. Values can be sent by
+    /// reference.
+    pub fn send<A: Actor, P>(
         &mut self,
         address: &Address<A>,
         req_fn: ReqFn<A, fn(P) -> R>,
@@ -32,159 +60,133 @@ where
     {
         match unsafe { address.req_ref(req_fn, params) } {
             Ok(reply) => {
-                self.vec.push(reply);
+                self.items.push(ScopeItem::Reply(reply));
                 Ok(())
             }
             Err(e) => Err(e),
         }
     }
 
-    async unsafe fn new<T>(function: impl FnOnce(&mut Self) -> T) -> (Vec<Result<R, NoReply>>, T)
+    /// Create a new scope
+    ///
+    /// ### Safety
+    /// Must be awaited after usage, which is why this is wrapped in the macro [scoped!].
+    pub async unsafe fn new<T>(scope_fn: impl FnOnce(&mut Self) -> T) -> (Vec<Result<R, NoReply>>, T)
     where
         T: 'static,
         R: 'scope,
     {
         let mut scope = Scope {
-            vec: Vec::new(),
+            items: Vec::new(),
             scope: PhantomData,
         };
 
-        let t = function(&mut scope);
+        let t = scope_fn(&mut scope);
 
-        let vec = future::join_all(scope.vec).await;
+        let mut replies = Vec::new();
 
-        (vec, t)
+        for item in scope.items {
+            match item {
+                ScopeItem::Reply(reply) => replies.push(reply.await),
+                ScopeItem::MapReply(boxed, function, wrapper) => {
+                    replies.push(wrapper(boxed, function).await)
+                }
+            }
+        }
+
+        (replies, t)
     }
 
-    // fn send_map<A, P, R2>(
-    //     &mut self,
-    //     address: &Address<A>,
-    //     req_fn: ReqFn<A, P, R2, RefSafe>,
-    //     params: P,
-    //     map: impl FnOnce(R2) -> R,
-    // ) -> Result<(), DidntArrive<P>>
-    // where
-    //     P: 'scope,
-    //     R2: 'scope,
-    // {
-    //     todo!()
-    // }
-}
-
-#[macro_export]
-macro_rules! scope {
-    ($function:expr) => {
-        unsafe { Scope::new($function).await }
-    };
-}
-
-struct Fn1;
-struct Fn2;
-
-trait Test<P, R, Fn>: Sized {
-    fn test(self, p: P) -> R;
-}
-
-impl<P, R, T> Test<P, R, Fn1> for T
-where
-    T: Fn(P) -> R,
-{
-    fn test(self, p: P) -> R {
-        self(p)
-    }
-}
-
-
-impl<P, R, T> Test<P, R, Fn2> for T
-where
-    T: Fn(P, P) -> R,
-    P: Clone
-{
-    fn test(self, p: P) -> R {
-        self(p.clone(), p)
-    }
-}
-
-fn test_fn(str: &str) -> &str {
-    todo!()
-}
-
-#[derive(Debug)]
-pub struct Struct<T>(T);
-
-#[tokio::test]
-async fn test2() {
-    let child = actor::spawn(MyActor);
-    let address = child.addr();
-
-    let val = "hi".to_string();
-    let val2 = test_fn.test(&val);
-    // drop(val);
-    println!("{:?}", val2);
-
-    let val = "hi".to_string();
-    let val2 = address
-        .req_recv(Fn!(MyActor::say_hello3), &val)
-        .await
-        .unwrap();
-
-    // drop(val);
-    println!("{:?}", val2);
-
-    let str = "hi".to_string();
-    let u32 = 10;
-
-    let (results, operation) = scope!(|scope| {
-        scope.send(&address, Fn!(MyActor::say_hello3), &str).unwrap();
-        scope.send(&address, Fn!(MyActor::say_hello3), &str).unwrap();
-        scope.send(&address, Fn!(MyActor::say_hello3), &str).unwrap();
-
-        expensive_operation_while_waiting()
-    });
-
-    // drop(str);
-    drop(u32);
-
-    println!("res: {:?}", results);
-    // println!("res: {:?}", reply);
-    println!("operation: {:?}", operation);
-}
-
-fn expensive_operation_while_waiting() -> u32 {
-    10
-}
-
-#[derive(Debug)]
-struct MyActor;
-
-#[async_trait::async_trait]
-impl Actor for MyActor {
-    type Init = Self;
-    type ExitError = crate::AnyhowError;
-    type ExitNormal = ();
-    type ExitWith = ExitReason<Self>;
-    type Context = NoCtx<Self>;
-    const ABORT_TIMER: Duration = Duration::from_secs(5);
-
-    async fn init(init: Self::Init, address: Address<Self>) -> InitFlow<Self> {
-        InitFlow::Init(init)
+    /// Send a request that will be awaited once this scope completes. Values can be sent by
+    /// reference.
+    pub fn send_map<A: Actor, P, R2, F>(
+        &mut self,
+        address: &Address<A>,
+        req_fn: ReqFn<A, fn(P) -> R2>,
+        params: P,
+        map: fn(R2) -> F,
+    ) -> Result<(), DidntArrive<P>>
+    where
+        P: 'scope + Send,
+        F: Future<Output = R> + Send + 'scope,
+        R2: 'scope + Send,
+    {
+        match unsafe { address.req_ref(req_fn, params) } {
+            Ok(reply) => {
+                self.items.push(ScopeItem::MapReply(
+                    Box::new(reply),
+                    map as usize,
+                    Self::__map__::<R2, F>,
+                ));
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
     }
 
-    async fn exit(self, reason: actor::ExitReason<Self>) -> Self::ExitWith {
-        reason
-    }
+    unsafe fn __map__<R2: Send + 'scope, F: Future<Output = R> + Send + 'scope>(
+        reply: Box<dyn Send + 'scope>,
+        map: usize,
+    ) -> Pin<Box<dyn Future<Output = Result<R, NoReply>> + Send + 'scope>> {
+        let (address, _meta) = Box::into_raw(reply).to_raw_parts();
+        let reply: Box<Reply<R2>> = transmute(address);
 
-    fn ctx(&mut self) -> &mut Self::Context {
-        NoCtx::new()
+        let map: fn(R2) -> F = transmute(map);
+
+        Box::pin(async move {
+            match reply.await {
+                Ok(reply) => Ok(map(reply).await),
+                Err(e) => Err(e),
+            }
+        })
     }
 }
 
-impl MyActor {
-    pub async fn say_hello2(&mut self, _: &str) -> ReqFlow<Self, u32> {
-        ReqFlow::Reply(10)
+mod test {
+    use super::*;
+    use crate::{prelude::*, test::TestActor};
+
+    #[tokio::test]
+    async fn basic_scoped_test() {
+        let child = actor::spawn::<TestActor>(10);
+        let address = child.addr();
+
+        let str = "hi".to_string();
+
+        let (results, operation) = scoped!(|scope| {
+            scope
+                .send(&address, Fn!(TestActor::echo), &str)
+                .unwrap();
+            scope
+                .send(&address, Fn!(TestActor::echo), &str)
+                .unwrap();
+            scope
+                .send(&address, Fn!(TestActor::echo), &str)
+                .unwrap();
+
+            scope
+                .send_map(&address, Fn!(TestActor::echo), &str, |_val| async {
+                    "bye"
+                })
+                .unwrap();
+
+            expensive_operation_while_waiting()
+        });
+
+        for (i, result) in results.into_iter().enumerate() {
+            let result = result.unwrap();
+            if i == 3 {
+                assert_eq!(result, "bye")
+            } else {
+                assert_eq!(result, "hi")
+            }
+        }
+
+        assert_eq!(operation, 10)
     }
 
-    pub fn say_hello3<'a>(&mut self, val: &'a str) -> ReqFlow<Self, &'a str> {
-        ReqFlow::Reply(val)
+    #[allow(dead_code)]
+    fn expensive_operation_while_waiting() -> u32 {
+        10
     }
 }

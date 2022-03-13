@@ -41,7 +41,7 @@ impl<A: Actor> StreamItem<A> {
 
 /// This is the default state implementation, that should be fine for 90% of use cases. It offers
 /// a lot of functionality, while still being quite fast.
-pub struct BasicContext<A: Actor + ?Sized> {
+pub struct BasicCtx<A: Actor + ?Sized> {
     address: Address<A>,
     futures: FuturesUnordered<Pin<Box<dyn Future<Output = StreamItem<A>> + Send + Sync + 'static>>>,
     streams:
@@ -49,7 +49,7 @@ pub struct BasicContext<A: Actor + ?Sized> {
 }
 
 
-impl<A: Actor + ?Sized> BasicContext<A> {
+impl<A: Actor + ?Sized> BasicCtx<A> {
     pub fn address(&self) -> &Address<A> {
         &self.address
     }
@@ -100,7 +100,7 @@ impl<A: Actor + ?Sized> BasicContext<A> {
     }
 }
 
-impl<A: Actor + ?Sized> Stream for BasicContext<A> {
+impl<A: Actor + ?Sized> Stream for BasicCtx<A> {
     type Item = StreamItem<A>;
 
     fn poll_next(
@@ -114,7 +114,7 @@ impl<A: Actor + ?Sized> Stream for BasicContext<A> {
     }
 }
 
-impl<A: Actor> Debug for BasicContext<A> {
+impl<A: Actor> Debug for BasicCtx<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DefaultCtx")
             .field("address", &self.address)
@@ -122,7 +122,7 @@ impl<A: Actor> Debug for BasicContext<A> {
     }
 }
 
-impl<A: Actor + ?Sized> Unpin for BasicContext<A> {}
+impl<A: Actor + ?Sized> Unpin for BasicCtx<A> {}
 
 #[derive(Debug)]
 pub struct NoCtx<A>(PhantomData<A>);

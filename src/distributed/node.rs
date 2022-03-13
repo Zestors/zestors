@@ -17,7 +17,7 @@ use crate::{
     actor::{self, Actor, ExitReason, ProcessId},
     address::{Address, Addressable},
     child::{Child, ProcessExit},
-    context::{BasicContext, NoCtx, StreamItem},
+    context::{BasicCtx, NoCtx, StreamItem},
     distributed::msg::{ActorTypeId, FindProcessByIdFn, FindProcessByNameFn},
     errors::{DidntArrive, FindProcessError, ReqRecvError},
     flows::{InitFlow, MsgFlow, ReqFlow},

@@ -4,7 +4,7 @@ use crate::{
     actor::Actor,
     distributed::node::NodeActor,
     flows::{EventFlow, MsgFlow, ReqFlow},
-    function::{HandlerParams, HandlerPtr},
+    function::{Params, HandlerPtr},
 };
 use futures::{Future, FutureExt};
 
