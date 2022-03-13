@@ -124,7 +124,7 @@ where
         match self.sender.try_send(self.action) {
             Ok(()) => Ok(self.reply),
             Err(ActionTrySendError::Disconnected(action)) => {
-                Err(DidntArrive(unsafe { action.transmute_req_ref::<P, R>().0 }))
+                Err(DidntArrive(unsafe { action.transmute_req::<P, R>().0 }))
             }
             Err(ActionTrySendError::Full(_)) => unreachable!("should be unbounded"),
         }
@@ -143,7 +143,7 @@ where
         match self.sender.try_send(self.action) {
             Ok(()) => Ok(self.reply),
             Err(ActionTrySendError::Disconnected(action)) => {
-                Err(DidntArrive(action.transmute_req_ref::<P, R>().0))
+                Err(DidntArrive(action.transmute_req::<P, R>().0))
             }
             Err(ActionTrySendError::Full(_)) => unreachable!("should be unbounded"),
         }
@@ -163,7 +163,7 @@ where
         match self.sender.try_send(self.action) {
             Ok(()) => Ok(self.reply.await?),
             Err(ActionTrySendError::Disconnected(action)) => Err(ReqRecvError::DidntArrive(
-                unsafe { action.transmute_req_ref::<P, R>().0 },
+                unsafe { action.transmute_req::<P, R>().0 },
             )),
             Err(ActionTrySendError::Full(_action)) => unreachable!("should be unbounded"),
         }
@@ -184,7 +184,7 @@ where
             Ok(()) => Ok(self.reply.recv_blocking()?),
             Err(e) => match e {
                 ActionTrySendError::Disconnected(action) => Err(ReqRecvError::DidntArrive(
-                    unsafe { action.transmute_req_ref::<P, R>().0 },
+                    unsafe { action.transmute_req::<P, R>().0 },
                 )),
                 ActionTrySendError::Full(_action) => {
                     unreachable!("Should be unbounded!")
@@ -235,7 +235,7 @@ where
         match self.sender.try_send(self.action) {
             Ok(()) => Ok(()),
             Err(ActionTrySendError::Disconnected(action)) => {
-                Err(DidntArrive(action.downcast::<P>().unwrap()))
+                Err(DidntArrive(action.downcast_msg::<P>().unwrap()))
             }
             Err(ActionTrySendError::Full(_)) => unreachable!("should be unbounded"),
         }

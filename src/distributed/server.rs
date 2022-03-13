@@ -9,12 +9,11 @@ use super::{
 use crate::{
     action::Action,
     actor::{self, Actor, ExitReason},
-    address::{Address, Callable},
+    address::{Address, Addressable},
     child::{Child, ProcessExit},
     context::StreamItem,
     distributed::node::Node,
-    flows::{InitFlow, MsgFlow, ReqFlow},
-    Fn,
+    flows::{InitFlow, MsgFlow, ReqFlow}, function::{MsgFn, ReqFn},
 };
 use async_trait::async_trait;
 use futures::{
@@ -48,12 +47,12 @@ impl Stream for Server {
     ) -> Poll<Option<Self::Item>> {
         match self.child_nodes.poll_next_unpin(cx) {
             Poll::Ready(Some(process_exit)) => Poll::Ready(Some(StreamItem::Action(Action::new(
-                Fn!(Self::child_node_exited),
+                MsgFn::new_async(Self::child_node_exited),
                 process_exit,
             )))),
             Poll::Pending | Poll::Ready(None) => match self.listener.poll_accept(cx) {
                 Poll::Ready(res) => Poll::Ready(Some(StreamItem::Action(Action::new(
-                    Fn!(Self::incoming_connection),
+                    MsgFn::new_async(Self::incoming_connection),
                     res,
                 )))),
                 Poll::Pending => Poll::Pending,
@@ -134,7 +133,7 @@ impl Server {
         let mut child = actor::spawn::<Server>((socket, token, node_id));
         child.detach();
 
-        match child.call(Fn!(Self::get_local_node), ()) {
+        match child.addr().req(ReqFn::new_sync(Self::get_local_node), ()) {
             Ok(reply) => match reply.await {
                 Ok(local_node) => Ok(local_node),
                 Err(_) => Err(InitializationError::SocketAddressNotAvailable),

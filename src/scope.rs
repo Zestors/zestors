@@ -4,13 +4,12 @@ use futures::future;
 
 use crate::{
     actor::{self, Actor, ExitReason},
-    address::{Address, Addressable, Callable},
+    address::{Address, Addressable},
     context::NoCtx,
     errors::{DidntArrive, NoReply},
     flows::{InitFlow, ReqFlow},
-    function::{RefSafe, ReqFn},
-    messaging::Reply,
-    Fn, action::ReqFnType,
+    function::{ReqFn},
+    messaging::Reply, Fn,
 };
 
 struct Scope<'scope, R> {
@@ -25,13 +24,13 @@ where
     fn send<A: Actor, P>(
         &mut self,
         address: &Address<A>,
-        req_fn: ReqFnType<'scope, A, P, R>,
+        req_fn: ReqFn<A, fn(P) -> R>,
         params: P,
     ) -> Result<(), DidntArrive<P>>
     where
         P: 'scope + Send,
     {
-        match unsafe { address.req_ref(Fn!(req_fn), params) } {
+        match unsafe { address.req_ref(req_fn, params) } {
             Ok(reply) => {
                 self.vec.push(reply);
                 Ok(())
@@ -79,79 +78,66 @@ macro_rules! scope {
     };
 }
 
-fn test<'a, T>(val: T) -> Ref<'a, T> {
-    Ref {
-        t: val,
-        a: PhantomData,
+struct Fn1;
+struct Fn2;
+
+trait Test<P, R, Fn>: Sized {
+    fn test(self, p: P) -> R;
+}
+
+impl<P, R, T> Test<P, R, Fn1> for T
+where
+    T: Fn(P) -> R,
+{
+    fn test(self, p: P) -> R {
+        self(p)
     }
+}
+
+
+impl<P, R, T> Test<P, R, Fn2> for T
+where
+    T: Fn(P, P) -> R,
+    P: Clone
+{
+    fn test(self, p: P) -> R {
+        self(p.clone(), p)
+    }
+}
+
+fn test_fn(str: &str) -> &str {
+    todo!()
 }
 
 #[derive(Debug)]
-pub struct Ref<'a, T: 'a> {
-    t: T,
-    a: PhantomData<&'a ()>,
-}
-
-impl<'a, T: 'a> Ref<'a, T> {
-    pub fn get(self) -> T {
-        self.t
-    }
-
-    pub fn new(t: T) -> Self {
-        Self { t, a: PhantomData }
-    }
-}
-
-pub fn my_test<'a, T, R>(ref_in: Ref<'a, T>) -> Ref<'a, R>
-where
-    Ref<'a, R>: From<Ref<'a, T>>,
-{
-    ref_in.into()
-}
-
-fn my_test2(t: &str) -> &str {
-    todo!()
-}
+pub struct Struct<T>(T);
 
 #[tokio::test]
 async fn test2() {
     let child = actor::spawn(MyActor);
     let address = child.addr();
 
-    // let val = "hi".to_string();
-    // let val2 = test(&val).get();
+    let val = "hi".to_string();
+    let val2 = test_fn.test(&val);
     // drop(val);
-    // println!("{:?}", val2);
+    println!("{:?}", val2);
 
     let val = "hi".to_string();
     let val2 = address
-        .req_recv_old(ReqFn::new_sync(MyActor::say_hello3), &val)
+        .req_recv(Fn!(MyActor::say_hello3), &val)
         .await
         .unwrap();
 
-    drop(val);
+    // drop(val);
     println!("{:?}", val2);
 
-    let mut str = "hi".to_string();
+    let str = "hi".to_string();
     let u32 = 10;
 
-    let ref_str = &str;
-
-    // let reply = address
-    //     .req_recv_sync(MyActor::say_hello3, ref_str)
-    //     .await
-    //     .unwrap();
-
     let (results, operation) = scope!(|scope| {
-        scope
-            .send(&address, MyActor::say_hello3, &str)
-            .unwrap();
-        scope
-            .send(&address, MyActor::say_hello3, &str)
-            .unwrap();
-        scope
-            .send(&address, MyActor::say_hello3, &str)
-            .unwrap();
+        scope.send(&address, Fn!(MyActor::say_hello3), &str).unwrap();
+        scope.send(&address, Fn!(MyActor::say_hello3), &str).unwrap();
+        scope.send(&address, Fn!(MyActor::say_hello3), &str).unwrap();
 
         expensive_operation_while_waiting()
     });

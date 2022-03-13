@@ -1,10 +1,9 @@
 use std::{any::Any, marker::PhantomData, ptr::DynMetadata, sync::Arc};
 
 use crate::{
-    action::MsgFnType,
     actor::{Actor, ProcessId},
     address::{Address, Addressable},
-    Fn, function::MsgFn,
+    function::MsgFn,
 };
 use derive_more::DebugCustom;
 use serde::{de::DeserializeOwned, Serialize};

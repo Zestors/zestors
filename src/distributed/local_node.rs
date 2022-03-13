@@ -7,8 +7,8 @@ use std::{
 
 use crate::{
     actor::{Actor},
-    address::{Address, Callable},
-    child::Child, distributed::node::NodeInit, Fn,
+    address::{Address},
+    child::Child, distributed::node::NodeInit
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -83,7 +83,8 @@ impl LocalNode {
     /// back and forth using `Pids`.
     pub async fn connect(&self, addr: SocketAddr) -> Result<Node, NodeConnectError> {
         let (node, child) = Node::spawn_as_client(self.clone(), addr).await?;
-        self.0.server.call(Fn!(Server::add_child), child).unwrap();
+        // self.0.server.call(Fn!(Server::add_child), child).unwrap();
+        todo!();
         Ok(node)
     }
 

@@ -184,6 +184,7 @@ pub mod distributed;
 pub mod function;
 pub mod handle;
 pub mod scope;
+pub mod function2;
 
 pub mod derive {
     pub use zestors_codegen::{Address, Addressable};

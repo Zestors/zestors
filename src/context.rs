@@ -79,7 +79,7 @@ impl<A: Actor + ?Sized> BasicContext<A> {
     pub fn schedule_and<F: Future<Output = P> + Send + Sync + 'static, P: Send + 'static>(
         &mut self,
         future: F,
-        function: MsgFn<A, P>,
+        function: MsgFn<A, fn(P)>,
     ) where
         A: Sized,
     {
@@ -90,7 +90,7 @@ impl<A: Actor + ?Sized> BasicContext<A> {
 
     /// Add a stream that should be listened to on this actor. Any time a message is received on this stream, it
     /// is handled using the supplied handler function
-    pub fn listen<'a, S, P>(&mut self, stream: S, function: MsgFn<A, P>)
+    pub fn listen<'a, S, P>(&mut self, stream: S, function: MsgFn<A, fn(P)>)
     where
         S: Stream<Item = P> + Send + Sync + 'static,
         P: Send + Sync + 'static,

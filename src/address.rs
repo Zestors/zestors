@@ -7,14 +7,12 @@ use std::{
 };
 
 use crate::{
-    action::{
-        Action, AsyncMsgFnType, AsyncReqFn2Type, AsyncReqFnType, MsgFnType, ReqFn2Type, ReqFnType,
-    },
+    action::Action,
     actor::{Actor, ProcessId},
     distributed::pid::ProcessRef,
     errors::{DidntArrive, ReqRecvError},
     flows::{EventFlow, MsgFlow, ReqFlow},
-    function::{MsgFn, RefSafe, ReqFn},
+    function::{MsgFn, ReqFn},
     inbox::ActionSender,
     messaging::{Msg, Reply, Req, Request},
 };
@@ -44,45 +42,7 @@ impl<'params, A: Actor> Address<A> {
         self.process_id
     }
 
-    pub async fn req_recv_old<P, R>(
-        &self,
-        function: ReqFn<'params, A, P, R, RefSafe>,
-        params: P,
-    ) -> Result<R, ReqRecvError<P>>
-    where
-        P: Send + 'params,
-        R: Send + 'params,
-    {
-        Ok(unsafe { self.req_ref(function, params) }?.await?)
-    }
-
-    pub async fn req_recv_sync<'a, P, R>(
-        &self,
-        function: ReqFnType<'a, A, P, R>,
-        params: P,
-    ) -> Result<R, ReqRecvError<P>>
-    where
-        P: Send + 'a,
-        R: Send + 'a,
-    {
-        let (request, reply) = Request::new();
-        let request = unsafe {
-            Req::new(
-                &self.sender,
-                Action::new_req_ref::<'a, _, _, RefSafe>(
-                    ReqFn::new_sync(function),
-                    params,
-                    request,
-                ),
-                reply,
-            )
-            .send_ref()
-        };
-
-        Ok(request?.await?)
-    }
-
-    pub fn msg<'a, P>(&'a self, function: MsgFn<A, P>, params: P) -> Result<(), DidntArrive<P>>
+    pub fn msg<'a, P>(&'a self, function: MsgFn<A, fn(P)>, params: P) -> Result<(), DidntArrive<P>>
     where
         P: Send + 'static,
     {
@@ -91,7 +51,7 @@ impl<'params, A: Actor> Address<A> {
 
     pub unsafe fn req_ref<'a, P, R>(
         &self,
-        function: ReqFn<A, P, R, RefSafe>,
+        function: ReqFn<A, fn(P) -> R>,
         params: P,
     ) -> Result<Reply<R>, DidntArrive<P>>
     where
@@ -101,22 +61,43 @@ impl<'params, A: Actor> Address<A> {
         let (request, reply) = Request::new();
         Req::new(
             &self.sender,
-            Action::new_req_ref::<'a, _, _, RefSafe>(function, params, request),
+            Action::new_req(function, params, request),
             reply,
         )
         .send_ref()
     }
 
-    pub(crate) fn send_raw<P: Send + 'static>(
+    pub async fn req_recv<'a, P, R>(
+        &self,
+        function: ReqFn<A, fn(P) -> R>,
+        params: P,
+    ) -> Result<R, ReqRecvError<P>>
+    where
+        P: Send + 'a,
+        R: Send + 'a,
+    {
+        let (request, reply) = Request::new();
+        unsafe {
+            Ok(Req::new(
+                &self.sender,
+                Action::new_req(function, params, request),
+                reply,
+            )
+            .send_ref()?
+            .await?)
+        }
+    }
+
+    pub(crate) unsafe fn send_raw<P: Send + 'static>(
         &self,
         action: Action<A>,
     ) -> Result<(), DidntArrive<P>> {
         Msg::new(&self.sender, action).send()
     }
 
-    pub fn req<P, R, S>(
+    pub fn req<P, R>(
         &self,
-        function: ReqFn<A, P, R, S>,
+        function: ReqFn<A, fn(P) -> R>,
         params: P,
     ) -> Result<Reply<R>, DidntArrive<P>>
     where
@@ -211,45 +192,6 @@ impl<A: Actor> std::fmt::Debug for Address<A> {
     }
 }
 
-//------------------------------------------------------------------------------------------------
-//  Sendable
-//------------------------------------------------------------------------------------------------
-
-#[macro_export]
-macro_rules! call {
-    ($address:expr, $function:expr, $($param:expr),*) => {{
-        use $crate::address::Callable;
-        use $crate::Fn;
-        $address.call(Fn!($function), ($($param)*))
-    }};
-}
-
-pub trait Callable<'a, A, F, P, R, X: 'a, S> {
-    fn call(&'a self, function: F, params: P) -> X;
-}
-
-impl<'a, A: Actor, P, T> Callable<'a, A, MsgFn<A, P>, P, (), Result<(), DidntArrive<P>>, ()> for T
-where
-    P: Send + 'static,
-    T: Addressable<A>,
-{
-    fn call(&'a self, function: MsgFn<A, P>, params: P) -> Result<(), DidntArrive<P>> {
-        self.addr().msg(function, params)
-    }
-}
-
-impl<'a, A: Actor, P, R, T, S>
-    Callable<'a, A, ReqFn<'static, A, P, R, S>, P, R, Result<Reply<R>, DidntArrive<P>>, S> for T
-where
-    P: Send + 'static,
-    R: Send + 'static,
-    T: Addressable<A>,
-{
-    fn call(&'a self, function: ReqFn<A, P, R, S>, params: P) -> Result<Reply<R>, DidntArrive<P>> {
-        self.addr().req(function, params)
-    }
-}
-
 //--------------------------------------------------------------------------------------------------
 //  test
 //--------------------------------------------------------------------------------------------------
@@ -265,20 +207,25 @@ mod test {
         address::Addressable,
         context::BasicContext,
         flows::{InitFlow, MsgFlow, ReqFlow},
-        function::ReqFn,
+        function::{MsgFn, ReqFn},
         messaging::Request,
-        Fn,
     };
 
-    use super::{Address, Callable};
+    use super::Address;
 
     #[tokio::test]
     pub async fn main() {
         let test = 10;
         let child = actor::spawn::<MyActor>(());
 
-        let res1 = child.call(Fn!(MyActor::test_a), &10).unwrap();
-        let res2 = child.call(Fn!(MyActor::test_b), &10).unwrap();
+        let res1 = child
+            .addr()
+            .msg(MsgFn::new_sync(MyActor::test_a), &10)
+            .unwrap();
+        let res2 = child
+            .addr()
+            .msg(MsgFn::new_async(MyActor::test_b), &10)
+            .unwrap();
 
         // let res3 = call!(child, MyActor::test_a, &10).unwrap();
         // let res3 = req!(child, MyActor::test_a, &10).unwrap().await.unwrap();
@@ -289,25 +236,26 @@ mod test {
 
         let res3 = child
             .addr()
-            .req(Fn!(MyActor::test_c), &10)
+            .req(ReqFn::new_sync(MyActor::test_c), &10)
             .unwrap()
             .await
             .unwrap();
         let res4 = child
-            .call(Fn!(MyActor::test_d), &10)
+            .addr()
+            .req(ReqFn::new_async(MyActor::test_d), &10)
             .unwrap()
             .await
             .unwrap();
-        let res5 = child
-            .call(Fn!(MyActor::test_e), &10)
-            .unwrap()
-            .await
-            .unwrap();
-        let res6 = child
-            .call(Fn!(MyActor::test_f), &10)
-            .unwrap()
-            .await
-            .unwrap();
+        // let res5 = child
+        //     .call(Fn!(MyActor::test_e), &10)
+        //     .unwrap()
+        //     .await
+        //     .unwrap();
+        // let res6 = child
+        //     .call(Fn!(MyActor::test_f), &10)
+        //     .unwrap()
+        //     .await
+        //     .unwrap();
 
         // let res3 = child
         //     .addr()
@@ -330,10 +278,7 @@ mod test {
         //     .await
         //     .unwrap();
 
-        println!(
-            "{:?}, {:?}, {:?}, {:?}, {:?}, {:?}",
-            res1, res2, res3, res4, res5, res6
-        );
+        println!("{:?}, {:?}, {:?}, {:?}", res1, res2, res3, res4);
     }
 
     #[derive(Debug)]

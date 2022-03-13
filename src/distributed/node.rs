@@ -13,19 +13,18 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::MaybeTlsStream;
 
 use crate::{
-    action::{Action, AsyncMsgFnType},
+    action::{Action},
     actor::{self, Actor, ExitReason, ProcessId},
-    address::{Address, Addressable, Callable},
-    call,
+    address::{Address, Addressable},
     child::{Child, ProcessExit},
     context::{BasicContext, NoCtx, StreamItem},
     distributed::msg::{ActorTypeId, FindProcessByIdFn, FindProcessByNameFn},
     errors::{DidntArrive, FindProcessError, ReqRecvError},
     flows::{InitFlow, MsgFlow, ReqFlow},
-    function::{ReqFn, RefSafe},
+    function::{ReqFn},
     into_msg,
     messaging::{Reply, Request},
-    Either, Fn,
+    Either,
 };
 
 use super::{
@@ -73,9 +72,10 @@ impl Node {
         &self,
         name: String,
     ) -> Result<ProcessRefReply<A>, DidntArrive<String>> {
-        self.address
-            .call(Fn!(NodeActor::find_process_by_name::<A>), name)
-            .map(|reply| ProcessRefReply(reply))
+        // self.address
+        //     .call(Fn!(NodeActor::find_process_by_name::<A>), name)
+        //     .map(|reply| ProcessRefReply(reply))
+        todo!()
     }
 
     pub async fn find_process_by_name<A: Actor>(
@@ -97,12 +97,13 @@ impl Node {
         &self,
         action: RemoteAction,
     ) -> Result<(), DidntArrive<RemoteAction>> {
-        self.address.call(Fn!(NodeActor::send_action), action)
+        // self.address.call(Fn!(NodeActor::send_action), action)
+        todo!()
     }
 
     async fn get_node(address: &Address<NodeActor>) -> Result<Node, ReqRecvError<()>> {
         address
-            .req_recv_old(ReqFn::new_sync(NodeActor::get_node), ())
+            .req_recv(ReqFn::new_sync(NodeActor::get_node), ())
             .await
     }
 
@@ -163,9 +164,10 @@ impl Stream for NodeActor {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        self.ws
-            .poll_next_unpin(cx)
-            .map(|val| val.map(|val| StreamItem::Action(Action::new(Fn!(NodeActor::ws_msg), val))))
+        // self.ws
+        //     .poll_next_unpin(cx)
+        //     .map(|val| val.map(|val| StreamItem::Action(Action::new(Fn!(NodeActor::ws_msg), val))))
+        todo!()
     }
 }
 

@@ -4,12 +4,11 @@ use futures::Future;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
-    action::{Action, MsgFnType},
+    action::{Action},
     actor::{Actor, ProcessId},
     address::Addressable,
     function::{AnyFn, HandlerPtr, MsgFn},
     inbox::Unbounded,
-    Fn,
 };
 
 use super::registry::Registry;
@@ -33,7 +32,7 @@ impl RemoteAction {
             if let Ok(address) = registry.find_by_id::<A>(process_id) {
                 let params: P = params.deserialize().unwrap();
                 let action: Action<A> = unsafe { Action::new_raw_msg(function.into(), params) };
-                match address.send_raw::<P>(action) {
+                match unsafe { address.send_raw::<P>(action) } {
                     Ok(_) => RemoteHandlerReturn::Arrived,
                     Err(_) => RemoteHandlerReturn::DidntArrive,
                 }

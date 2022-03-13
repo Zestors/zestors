@@ -16,9 +16,9 @@ use zestors::distributed::pid::ProcessRef;
 use zestors::distributed::NodeId;
 use zestors::errors::{DidntArrive, NoReply};
 use zestors::flows::{InitFlow, ReqFlow};
-use zestors::function::{RefSafe, ReqFn};
+use zestors::function::{ReqFn};
 use zestors::messaging::Reply;
-use zestors::Fn;
+// use zestors::Fn;
 use zestors::{
     actor::Actor,
     distributed::local_node::{self, LocalNode},
@@ -219,69 +219,4 @@ impl Actor for MyActor2 {
     fn ctx(&mut self) -> &mut Self::Context {
         NoCtx::new()
     }
-}
-
-struct Scope<'scope, R>(Vec<&'scope Reply<R>>);
-
-impl<'scope, R> Scope<'scope, R>
-where
-    R: 'scope,
-{
-    fn send<A, P>(
-        &mut self,
-        address: &Address<A>,
-        req_fn: ReqFn<A, P, R, RefSafe>,
-        params: P,
-    ) -> Result<(), DidntArrive<P>>
-    where
-        P: 'scope,
-    {
-        todo!()
-    }
-
-    fn send_map<A, P, R2>(
-        &mut self,
-        address: &Address<A>,
-        req_fn: ReqFn<A, P, R2, RefSafe>,
-        params: P,
-        map: impl FnOnce(R2) -> R,
-    ) -> Result<(), DidntArrive<P>>
-    where
-        P: 'scope,
-        R2: 'scope,
-    {
-        todo!()
-    }
-}
-
-async unsafe fn scope<'a, R>(function: impl FnOnce(&mut Scope<'a, R>)) -> Vec<Result<R, NoReply>> {
-    todo!()
-}
-
-macro_rules! scope {
-    ($function:expr) => {
-        unsafe { scope($function).await }
-    };
-}
-
-async fn test2(address: Address<MyActor>) {
-    let str = "hi".to_string();
-    let u32 = 10;
-
-    let res = scope!(|scope| {
-        scope
-            .send(&address, Fn!(MyActor::say_hello2), &str)
-            .unwrap();
-        scope
-            .send(&address, Fn!(MyActor::say_hello2), &str)
-            .unwrap();
-        scope
-            .send(&address, Fn!(MyActor::say_hello2), &str)
-            .unwrap();
-        scope
-            .send_map(&address, Fn!(MyActor::say_hello3), &u32, |val| *val)
-            .unwrap();
-    });
-
-    drop(str);
 }
