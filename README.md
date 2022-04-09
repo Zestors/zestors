@@ -17,7 +17,7 @@ This is currently in a very early stage of development, while almost everything 
 thoroughly documented, not a lot of testing has been done. Therefore, do not use this in
 production yet!
 
-Currently, `Zestors` uses nighly for the following features: `try_trait_v2` and
+Currently, `Zestors` uses nightly for the following features: `try_trait_v2` and
 `associated_type_defaults`. Once those features hit stable, `Zestors` can also run on stable.
 
 If you encounter any bugs or things that seem strange, don't hesitate to open an issue for it!
