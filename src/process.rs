@@ -72,7 +72,7 @@ impl<A: Actor> Process<A> {
     /// will first receive a soft_abort, with a hard_abort after the abort_timer set by the [Actor].
     ///
     /// If called on a process which is still attatched, nothing happens.
-    pub fn re_attatch(&mut self) {
+    pub fn re_attach(&mut self) {
         self.is_attatched = true;
     }
 
