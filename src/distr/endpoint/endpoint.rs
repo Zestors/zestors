@@ -24,7 +24,6 @@ pub struct Endpoint {
     endpoint_addr: EndpointAddr,
     node_store: NodeStore,
     quinn_endpoint: quinn::Endpoint,
-    // child: Arc<tokio::sync::Mutex<Option<ActorChild<EndpointActor>>>>,
 }
 
 impl Endpoint {
@@ -73,7 +72,7 @@ impl Endpoint {
     pub async fn spawn_insecure<A>(
         socket_addr: A,
         node_id: NodeId,
-    ) -> Result<(ActorChild<EndpointActor>, Self), NewEndpointError>
+    ) -> Result<(Child<EndpointActor>, Self), NewEndpointError>
     where
         A: std::net::ToSocketAddrs,
     {

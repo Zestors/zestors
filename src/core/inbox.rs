@@ -15,6 +15,7 @@ use crate::core::*;
 //  Inbox
 //------------------------------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct State<A> {
     receiver: async_channel::Receiver<InternalMsg<A>>,
     rcv_signal: Option<Rcv<ChildSignal>>,

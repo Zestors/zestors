@@ -30,22 +30,21 @@ where
     val: T,
 }
 
-
 #[async_trait]
 impl<T: Clone + Send + 'static> Actor for MyActor2<T> {
     type Init = T;
 
     type Error = Box<dyn Error + Send>;
+    type Halt = ();
 
-    type Exit = zestors::core::Signal<Self>;
-
+    type Exit = zestors::core::Event<Self>;
 
     async fn initialize(init: Self::Init, addr: Self::Addr<Local>) -> InitFlow<Self> {
         InitFlow::Init(Self { val: init })
     }
 
-    fn handle_signal(self, signal: Signal<Self>, state: &mut State<Self>) -> SignalFlow<Self> {
-        SignalFlow::Exit(signal)
+    fn handle_event(self, event: Event<Self>, state: &mut State<Self>) -> EventFlow<Self> {
+        EventFlow::Exit(event)
     }
 }
 
@@ -60,12 +59,12 @@ struct MyActor<T: Send + 'static + Clone> {
     scheduler: MyActorScheduler<T>,
 }
 
-
 #[async_trait]
 impl<T: Clone + Send + 'static> Actor for MyActor<T> {
     type Init = T;
     type Error = Box<dyn Error + Send>;
-    type Exit = Signal<Self>;
+    type Exit = Event<Self>;
+    type Halt = ();
 
     async fn initialize(init: Self::Init, addr: MyActorAddr<T>) -> InitFlow<Self> {
         InitFlow::Init(Self {
@@ -74,8 +73,8 @@ impl<T: Clone + Send + 'static> Actor for MyActor<T> {
         })
     }
 
-    fn handle_signal(self, signal: Signal<Self>, state: &mut State<Self>) -> SignalFlow<Self> {
-        SignalFlow::Exit(signal)
+    fn handle_event(self, signal: Event<Self>, state: &mut State<Self>) -> EventFlow<Self> {
+        EventFlow::Exit(signal)
     }
 }
 
@@ -232,7 +231,7 @@ async fn test_basic_actor_works() {
     child.soft_abort();
     match child.await {
         Ok(res) => match res {
-            Signal::SoftAbort => (),
+            Event::Signal(Signal::SoftAbort) => (),
             _ => panic!(),
         },
         Err(_) => panic!(),

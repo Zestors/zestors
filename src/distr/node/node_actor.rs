@@ -22,6 +22,7 @@ pub(crate) struct NodeActor {
 impl Actor for NodeActor {
     type Init = (quinn::Connecting, Endpoint);
     type Error = anyhow::Error;
+    type Halt = ();
     type Exit = NodeActorExit;
 
     async fn initialize(
@@ -40,7 +41,7 @@ impl Actor for NodeActor {
         }
     }
 
-    fn handle_signal(self, signal: Signal<Self>, _state: &mut State<Self>) -> SignalFlow<Self> {
+    fn handle_event(self, signal: Event<Self>, _state: &mut State<Self>) -> EventFlow<Self> {
         self.connection.close(VarInt::from_u32(0), &[]);
         info!(
             "[E{}] Node {} is exiting with Signal({:?})",
@@ -48,7 +49,7 @@ impl Actor for NodeActor {
             self.node.id(),
             signal
         );
-        SignalFlow::Exit(NodeActorExit::Signal(signal))
+        EventFlow::Exit(NodeActorExit::Signal(signal))
     }
 }
 
@@ -97,7 +98,7 @@ impl NodeActor {
                 self.node.id()
             ),
         }
-        Ok(Flow::Exit)
+        Ok(Flow::Halt(()))
     }
 
     /// Spawn a new node from a connection that has not yet been established.
@@ -110,7 +111,7 @@ impl NodeActor {
         system: Endpoint,
     ) -> Result<NodeChild, NodeSpawnError> {
         // First spawn the new node
-        let (child, addr): (ActorChild<NodeActor>, NodeAddr) =
+        let (child, addr): (Child<NodeActor>, NodeAddr) =
             spawn_actor::<NodeActor>((connecting, system.clone()));
 
         // Then attempt to retrieve the Node
@@ -180,7 +181,7 @@ impl NodeActor {
 #[derive(Debug)]
 pub(crate) enum NodeActorExit {
     InitFailed(NodeSpawnError),
-    Signal(Signal<NodeActor>),
+    Signal(Event<NodeActor>),
 }
 
 //------------------------------------------------------------------------------------------------

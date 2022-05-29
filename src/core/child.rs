@@ -15,12 +15,11 @@ use tokio::task::{JoinError, JoinHandle};
 //  Child
 //------------------------------------------------------------------------------------------------
 
-pub type ActorChild<A> = Child<<A as Actor>::Exit>;
 
 #[derive(Debug)]
 #[must_use = "If the child is dropped, the actor will be aborted."]
-pub struct Child<T: Send + 'static> {
-    handle: Option<JoinHandle<T>>,
+pub struct Child<A: Actor> {
+    handle: Option<JoinHandle<A::Exit>>,
     process_id: ProcessId,
     signal_sender: Option<Snd<ChildSignal>>,
     to_abort: bool,
@@ -28,9 +27,9 @@ pub struct Child<T: Send + 'static> {
     exited: Arc<AtomicBool>,
 }
 
-impl<T: Send + 'static> Child<T> {
+impl<A: Actor> Child<A> {
     pub(crate) fn new(
-        handle: JoinHandle<T>,
+        handle: JoinHandle<A::Exit>,
         process_id: ProcessId,
         signal_sender: Snd<ChildSignal>,
         abort_timeout: Duration,
@@ -57,8 +56,8 @@ impl<T: Send + 'static> Child<T> {
     }
 }
 
-impl<T: Send + 'static> Future for Child<T> {
-    type Output = Result<T, ExitError>;
+impl<A: Actor> Future for Child<A> {
+    type Output = Result<A::Exit, ExitError>;
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
@@ -81,24 +80,19 @@ impl<T: Send + 'static> Future for Child<T> {
     }
 }
 
-impl<T: Send + 'static> Unpin for Child<T> {}
+impl<A: Actor> Unpin for Child<A> {}
 
-impl<T: Send + 'static> Drop for Child<T> {
+impl<A: Actor> Drop for Child<A> {
     fn drop(&mut self) {
         // If we should not abort, or if the child has already exited, don't do anything
         let exited = self.exited.load(Ordering::Relaxed);
         if !self.to_abort || exited {
-            // info!(
-            //     "Child dropped, no abort. to_abort={}, exited={}",
-            //     self.to_abort, exited
-            // );
             return;
         }
 
         // If there is still a signal sender, send a soft abort message first
         if let Some(signal_sender) = self.signal_sender.take() {
             let _ = signal_sender.send(ChildSignal::SoftAbort);
-            // info!("Child dropped, soft abort has been sent");
         }
 
         // Then spawn a task which will hard abort the process in 1000 ms

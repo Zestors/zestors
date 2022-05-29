@@ -36,7 +36,8 @@ pub struct EndpointActor {
 impl Actor for EndpointActor {
     type Init = (quinn::Endpoint, quinn::Incoming, NodeId);
     type Error = anyhow::Error;
-    type Exit = (Self, Signal<Self>);
+    type Halt = ();
+    type Exit = (Self, Event<Self>);
 
     /// Initializing the SystemActor should never fail!. Anything that can fail should be done
     /// before spawning.
@@ -53,14 +54,14 @@ impl Actor for EndpointActor {
         })
     }
 
-    fn handle_signal(self, signal: Signal<Self>, _state: &mut State<Self>) -> SignalFlow<Self> {
+    fn handle_event(self, signal: Event<Self>, _state: &mut State<Self>) -> EventFlow<Self> {
         self.quinn_endpoint.close(VarInt::from_u32(0), &[]);
         info!(
             "[E{}] exiting with Signal({:?})",
             self.endpoint.id(),
             signal
         );
-        SignalFlow::Exit((self, signal))
+        EventFlow::Exit((self, signal))
     }
 }
 
@@ -239,7 +240,7 @@ impl EndpointActor {
         endpoint: quinn::Endpoint,
         incoming: quinn::Incoming,
         node_id: NodeId,
-    ) -> (ActorChild<Self>, Endpoint) {
+    ) -> (Child<Self>, Endpoint) {
         let (child, addr): (Child<_>, EndpointAddr) =
             spawn_actor::<EndpointActor>((endpoint, incoming, node_id));
 

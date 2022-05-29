@@ -81,7 +81,7 @@ where
         actor: &mut A,
         state: &mut State<A>,
         params: M,
-    ) -> Result<Flow, A::Error> {
+    ) -> FlowResult<A> {
         let params = Box::new((params, ()));
         unsafe {
             self.any

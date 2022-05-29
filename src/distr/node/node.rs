@@ -1,12 +1,8 @@
 use crate::{self as zestors, core::*, distr::*};
-use async_bincode::tokio::{AsyncBincodeReader, AsyncBincodeWriter};
-use async_trait::async_trait;
 use futures::{Future, FutureExt, SinkExt};
-use log::warn;
-use quinn::VarInt;
 use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock}, net::SocketAddr,
+    net::SocketAddr,
+    sync::{Arc, RwLock},
 };
 
 pub type NodeId = u32;
@@ -16,7 +12,7 @@ pub type NodeId = u32;
 pub struct Node {
     node_addr: NodeAddr,
     id: NodeId,
-    sock_addr: SocketAddr
+    sock_addr: SocketAddr,
 }
 
 impl Node {
@@ -42,10 +38,10 @@ impl Node {
 #[derive(Debug)]
 pub(crate) struct NodeChild {
     node: Node,
-    child: ActorChild<NodeActor>,
+    child: Child<NodeActor>,
 }
 impl NodeChild {
-    pub fn new(child: ActorChild<NodeActor>, node: Node) -> Self {
+    pub fn new(child: Child<NodeActor>, node: Node) -> Self {
         Self { node, child }
     }
 
@@ -79,8 +75,6 @@ impl Future for NodeChild {
         self.child.poll_unpin(cx)
     }
 }
-
-
 
 #[derive(Debug)]
 pub(crate) struct NodeStoreInsertError(pub Node);

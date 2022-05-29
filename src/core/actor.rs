@@ -25,25 +25,25 @@ impl<A> Scheduler for A where A: Stream<Item = Action<Self>> + Unpin {}
 //  spawn
 //------------------------------------------------------------------------------------------------
 
-pub fn spawn_task<F, T>(future: F) -> Child<T::Output>
-where
-    F: FnOnce(Rcv<ChildSignal>) -> T,
-    T: Future + Send + 'static,
-    T::Output: Send + 'static,
-{
-    let exited = Arc::new(AtomicBool::new(false));
-    let (snd, rcv) = Snd::new();
-    let handle = tokio::task::spawn(future(rcv));
-    Child::new(
-        handle,
-        ProcessId::new_v4(),
-        snd,
-        Duration::from_millis(1_000),
-        exited,
-    )
-}
+// pub fn spawn_task<F, T>(future: F) -> Child<>
+// where
+//     F: FnOnce(Rcv<ChildSignal>) -> T,
+//     T: Future + Send + 'static,
+//     T::Output: Send + 'static,
+// {
+//     let exited = Arc::new(AtomicBool::new(false));
+//     let (snd, rcv) = Snd::new();
+//     let handle = tokio::task::spawn(future(rcv));
+//     Child::new(
+//         handle,
+//         ProcessId::new_v4(),
+//         snd,
+//         Duration::from_millis(1_000),
+//         exited,
+//     )
+// }
 
-pub fn spawn_actor<A: Actor>(init: A::Init) -> (Child<A::Exit>, A::Addr<Local>) {
+pub fn spawn_actor<A: Actor>(init: A::Init) -> (Child<A>, A::Addr<Local>) {
     // Create the channel through which messages can be sent.
     let (tx, rx) = async_channel::unbounded();
 
@@ -86,24 +86,23 @@ async fn spawned<A: Actor>(mut state: State<A>, addr: A::Addr<Local>, init: A::I
     loop {
         let signal = loop_until_signal(&mut state, &mut actor).await;
 
-        match actor.handle_signal(signal, &mut state) {
-            SignalFlow::Resume(res_actor, res_state) => {
+        match actor.handle_event(signal, &mut state) {
+            EventFlow::Resume(res_actor) => {
                 actor = res_actor;
-                state = res_state
             }
-            SignalFlow::Exit(exit) => break exit,
+            EventFlow::Exit(exit) => break exit,
         }
     }
 }
 
-async fn loop_until_signal<A: Actor>(state: &mut State<A>, actor: &mut A) -> Signal<A> {
+async fn loop_until_signal<A: Actor>(state: &mut State<A>, actor: &mut A) -> Event<A> {
     loop {
         match next_event(state, actor).await {
-            NextEvent::Signal(signal) => break signal,
+            NextEvent::Event(event) => break event,
             NextEvent::Action(action) => match action.handle(actor, state).await {
                 Ok(Flow::Cont) => (),
-                Ok(Flow::Exit) => break Signal::HandlerExit,
-                Err(err) => break Signal::HandlerError(err),
+                Ok(Flow::Halt(reason)) => break Event::Halt(reason),
+                Err(err) => break Event::Error(err),
             },
         }
     }
@@ -123,7 +122,7 @@ async fn next_event<A: Actor>(state: &mut State<A>, actor: &mut A) -> NextEvent<
                     // There was a new message -> Return that message.
                     Some(msg) => msg.into(),
                     // The inbox has been closed and is empty
-                    None => NextEvent::Signal(Signal::ClosedAndEmpty)
+                    None => NextEvent::Event(Event::Signal(Signal::ClosedAndEmpty))
                 }
             }
 
@@ -139,7 +138,7 @@ async fn next_event<A: Actor>(state: &mut State<A>, actor: &mut A) -> NextEvent<
                             // There was a new message -> Return that message.
                             Some(msg) => msg.into(),
                             // The inbox has been closed and scheduler disabled -> dead
-                            None => NextEvent::Signal(Signal::Dead)
+                            None => NextEvent::Event(Event::Signal(Signal::Dead))
                         }
                     },
                 }
@@ -152,23 +151,23 @@ async fn next_event<A: Actor>(state: &mut State<A>, actor: &mut A) -> NextEvent<
             Some(action) => action.into(),
             None => {
                 state.disable_scheduler();
-                NextEvent::Signal(Signal::Dead)
+                NextEvent::Event(Event::Signal(Signal::Dead))
             }
         },
 
         // State only
         (false, true) => match state.next().await {
             Some(msg) => msg.into(),
-            None => NextEvent::Signal(Signal::Dead),
+            None => NextEvent::Event(Event::Signal(Signal::Dead)),
         },
 
         // None remain
-        (false, false) => NextEvent::Signal(Signal::Dead),
+        (false, false) => NextEvent::Event(Event::Signal(Signal::Dead)),
     }
 }
 
 enum NextEvent<A: Actor> {
-    Signal(Signal<A>),
+    Event(Event<A>),
     Action(Action<A>),
 }
 
@@ -200,15 +199,15 @@ pub trait Actor: Send + Sized + 'static + Scheduler + ActorFor {
     /// The error that it's handler-functions return.
     type Error: Send + 'static;
 
+    /// The normal value used when halting the Actor
+    type Halt: Send + 'static;
+
     /// The value that this actor will exit with.
     type Exit: Send + 'static;
 
     fn scheduler_disabled(&mut self, state: &mut State<Self>) -> FlowResult<Self> {
         Ok(Flow::Cont)
     }
-
-    /// The address of this actor, used to send messages.
-    // type Addr<AT: AddrType>: Addressable<Actor = Self, AddrType = AT>;
 
     /// After the new task is spawned, this function is called to initialize the `Actor`.
     async fn initialize(init: Self::Init, addr: Self::Addr<Local>) -> InitFlow<Self>;
@@ -218,77 +217,77 @@ pub trait Actor: Send + Sized + 'static + Scheduler + ActorFor {
     ///
     /// For a standard implementation, it is fine for the actor to continue it's exit,
     /// no matter what the reason is.
-    fn handle_signal(self, signal: Signal<Self>, state: &mut State<Self>) -> SignalFlow<Self>;
+    fn handle_event(self, event: Event<Self>, state: &mut State<Self>) -> EventFlow<Self>;
 }
 
 //------------------------------------------------------------------------------------------------
 //  Flows
 //------------------------------------------------------------------------------------------------
 
-pub type FlowResult<A> = Result<Flow, <A as Actor>::Error>;
+pub type FlowResult<A> = Result<Flow<A>, <A as Actor>::Error>;
 
 /// Any handler function can return a `Flow`. This indicates how the `Actor` should continue
-/// after the handler function.
-pub enum Flow {
-    /// Continue execution
+/// after the handler function. It can either:
+/// -
+pub enum Flow<A: Actor> {
+    /// Continue execution.
     Cont,
-    /// Exit normally
-    Exit,
+    /// Halt execution of this actor, and call `handle_event` with the value of `A::Halt`.
+    Halt(A::Halt),
 }
 
-/// When an actor receives a `Signal`, it can either:
-/// - Resume it's execution.
-/// - Exit
-pub enum SignalFlow<A: Actor> {
-    Resume(A, State<A>),
+/// When an actor handles an `Event`, it can either:
+/// - Resume it's execution with the `Actor`.
+/// - Exit execution, and return the value of `A::Exit`.
+#[derive(Debug)]
+pub enum EventFlow<A: Actor> {
+    /// Resume execution.
+    Resume(A),
+    /// The Actor will completely exit.
     Exit(A::Exit),
 }
 
 /// When an `Actor` is initialized, it can either:
-/// - Initialize itself.
-/// - Exit directly if initialization failed.
+/// - Initialize itself with `Actor`.
+/// - Exit directly, with `A::Exit`.
+#[derive(Debug)]
 pub enum InitFlow<A: Actor> {
+    /// Initialize the actor, and start execution.
     Init(A),
+    /// - Exit execution, and return the value of `A::Exit`.
     Exit(A::Exit),
 }
 
-//------------------------------------------------------------------------------------------------
-//  Signal
-//------------------------------------------------------------------------------------------------
-
-/// Whenever an actor gets into any of the following states, it will be signaled using the
-/// `handle_signal` function. The `Signal` that is received can vary, but in general the
-/// actor is intended to exit it's process when in receives any of these `Signal`s.
-/// todo: if no more things are added, change from Signal<Actor> to Signal<Error> type
+/// An event is anything that the actor should be notified about.
+/// In most cases it is correct to exit for all different event types.
 #[derive(Debug)]
-pub enum Signal<A: Actor> {
-    /// One of the handler functions returned an error.
-    HandlerError(A::Error),
+pub enum Event<A: Actor> {
+    /// A `Signal` signalling something important within actor execution.
+    Signal(Signal),
+    /// A handler method has returned an error.
+    Error(A::Error),
+    /// A handler method halted this actor with `A::Halt`.
+    Halt(A::Halt),
+}
 
-    /// One of the handler functions exited normally.
-    HandlerExit,
-
-    /// This process has been soft-aborted. It will be hard-aborted at the given time.
-    /// The inbox of this process has already been closed, so it will not be receiving
-    /// any new messages.
+/// A signal that the actor should respond to in some way.
+/// In most cases, it's correct to always exit here.
+#[derive(Debug, Clone)]
+pub enum Signal {
+    /// This Actor has been soft-aborted
     SoftAbort,
-
-    /// This process has been isolated. It is not part of any supervision tree, and never
-    /// will be, since it's `Child` has been detached and dropped.
+    /// This Actor has been isoleted. There are no more addresses of this actor, thus the Actor
+    /// will never receive new messages.
     Isolated,
-
-    /// The `Inbox` has been closed and is also empty. No new messages can be received.
-    /// The actor can still continue execution with any `Action`s that have been scheduled.
+    /// This Actor's inbox has been closed and is also empty. This actor will only continue it's
+    /// execution with futures still scheduled on it's scheduler.
     ClosedAndEmpty,
-
-    /// THe `Inbox` is closed and empty. It also does not have any more `Action`s scheduled.
-    ///
-    /// The actor should always exit when this happens. If it doesn't, the
-    /// actor will panic!
+    /// This Actor is dead, and will never do anything anymore. It is ALWAYS correct to exit here,
+    /// and failure to do so will cause the actor to panic.
     Dead,
 }
 
-impl<A: Actor> From<InboxSignal> for Signal<A> {
+impl From<InboxSignal> for Signal {
     fn from(signal: InboxSignal) -> Self {
         match signal {
             InboxSignal::SoftAbort => Signal::SoftAbort,
@@ -297,11 +296,17 @@ impl<A: Actor> From<InboxSignal> for Signal<A> {
     }
 }
 
+impl<A: Actor> From<InboxSignal> for Event<A> {
+    fn from(signal: InboxSignal) -> Self {
+        Event::Signal(signal.into())
+    }
+}
+
 impl<A: Actor> From<InboxMsg<A>> for NextEvent<A> {
     fn from(msg: InboxMsg<A>) -> Self {
         match msg {
             InboxMsg::Action(action) => NextEvent::Action(action),
-            InboxMsg::Signal(signal) => NextEvent::Signal(signal.into()),
+            InboxMsg::Signal(signal) => NextEvent::Event(signal.into()),
         }
     }
 }
@@ -312,8 +317,8 @@ impl<A: Actor> From<Action<A>> for NextEvent<A> {
     }
 }
 
-impl<A: Actor> From<Signal<A>> for NextEvent<A> {
-    fn from(signal: Signal<A>) -> Self {
-        NextEvent::Signal(signal)
+impl<A: Actor> From<Signal> for NextEvent<A> {
+    fn from(signal: Signal) -> Self {
+        NextEvent::Event(Event::Signal(signal))
     }
 }
