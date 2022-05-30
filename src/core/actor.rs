@@ -43,7 +43,7 @@ impl<A> Scheduler for A where A: Stream<Item = Action<Self>> + Unpin {}
 //     )
 // }
 
-pub fn spawn_actor<A: Actor>(init: A::Init) -> (Child<A>, A::Addr<Local>) {
+pub fn spawn_actor<A: Actor>(init: A::Init) -> (Child<A>, A::Addr) {
     // Create the channel through which messages can be sent.
     let (tx, rx) = async_channel::unbounded();
 
@@ -58,7 +58,7 @@ pub fn spawn_actor<A: Actor>(init: A::Init) -> (Child<A>, A::Addr<Local>) {
 
     // Create the local address, and from that the actual address.
     let local_addr = LocalAddr::new(tx, process_id);
-    let addr = <A::Addr<Local> as Addressable<A>>::from_addr(local_addr);
+    let addr = <A::Addr as Addressable<A>>::from_addr(local_addr);
 
     // And the actor inbox.
     let state = State::<A>::new(rx, rx_signal, process_id, exited.clone());
@@ -77,7 +77,7 @@ pub fn spawn_actor<A: Actor>(init: A::Init) -> (Child<A>, A::Addr<Local>) {
     (child, addr)
 }
 
-async fn spawned<A: Actor>(mut state: State<A>, addr: A::Addr<Local>, init: A::Init) -> A::Exit {
+async fn spawned<A: Actor>(mut state: State<A>, addr: A::Addr, init: A::Init) -> A::Exit {
     let mut actor = match A::initialize(init, addr).await {
         InitFlow::Init(actor) => actor,
         InitFlow::Exit(exit) => return exit,
@@ -175,8 +175,8 @@ enum NextEvent<A: Actor> {
 //  Actor
 //------------------------------------------------------------------------------------------------
 
-pub trait ActorFor: Sized + 'static {
-    type Addr<AT: AddrType>: Addressable<Self, AddrType = AT>;
+pub trait ActorFor<AT: AddrType>: Sized + 'static {
+    type Addr: Addressable<Self, AddrType = AT>;
 }
 
 pub trait Process: Send + Sized + 'static {
@@ -192,7 +192,7 @@ pub trait Process: Send + Sized + 'static {
 
 /// The central `Actor` trait, around which `Zestors` revolves.
 #[async_trait]
-pub trait Actor: Send + Sized + 'static + Scheduler + ActorFor {
+pub trait Actor: Send + Sized + 'static + Scheduler + ActorFor<Local> {
     /// The value that this `Actor` is intialized with.
     type Init: Send + 'static;
 
@@ -210,7 +210,7 @@ pub trait Actor: Send + Sized + 'static + Scheduler + ActorFor {
     }
 
     /// After the new task is spawned, this function is called to initialize the `Actor`.
-    async fn initialize(init: Self::Init, addr: Self::Addr<Local>) -> InitFlow<Self>;
+    async fn initialize(init: Self::Init, addr: Self::Addr) -> InitFlow<Self>;
 
     /// Decide what happens when this actor ends up in a state where it should usually
     /// exit.

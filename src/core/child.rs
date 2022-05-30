@@ -1,8 +1,10 @@
+use crate as zestors;
 use crate::core::*;
 use futures::{Future, FutureExt};
 use log::{info, warn};
 use std::{
     any::{Any, TypeId},
+    marker::PhantomData,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -10,11 +12,11 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::task::{JoinError, JoinHandle};
+use zestors_codegen::{Actor, Addr, NoScheduler};
 
 //------------------------------------------------------------------------------------------------
 //  Child
 //------------------------------------------------------------------------------------------------
-
 
 #[derive(Debug)]
 #[must_use = "If the child is dropped, the actor will be aborted."]
@@ -26,6 +28,7 @@ pub struct Child<A: Actor> {
     abort_timeout: Duration,
     exited: Arc<AtomicBool>,
 }
+
 
 impl<A: Actor> Child<A> {
     pub(crate) fn new(
@@ -115,18 +118,23 @@ impl<A: Actor> Drop for Child<A> {
 //  ExitError
 //------------------------------------------------------------------------------------------------
 
-#[derive(Debug)]
+/// An error returned for when an actor exit was not properply handled. This can be either because:
+/// - The actor has been hard-aborted.
+/// - The actor has panicked.
+#[derive(Debug, ThisError)]
+#[error("Unhandled actor exit: {}")]
 pub enum ExitError {
+    #[error("Actor has been hard-aborted.")]
     HardAbort,
+    #[error("Actor has panicked.")]
     Panic(Box<dyn Any + Send>),
 }
 
 impl From<JoinError> for ExitError {
     fn from(e: JoinError) -> Self {
-        if e.is_panic() {
-            ExitError::Panic(e.into_panic())
-        } else {
-            ExitError::HardAbort
+        match e.try_into_panic() {
+            Ok(e) => ExitError::Panic(e),
+            Err(_) => ExitError::HardAbort,
         }
     }
 }

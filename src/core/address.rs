@@ -8,7 +8,7 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
     core::*,
-    distr::distr_addr::{Distr, RemoteMsg, DistrParam},
+    distr::distr_addr::{Distr, DistrParam, RemoteMsg},
     Action,
 };
 
@@ -131,6 +131,8 @@ pub trait AddrType: 'static + Send {
     /// This is LocalMsg<M> for local addresses and RemoteMsg<M> for remote addresses.
     type Msg<M>;
 }
+
+
 
 //------------------------------------------------------------------------------------------------
 //  ParamType

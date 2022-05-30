@@ -8,6 +8,7 @@ pub mod child;
 mod test;
 pub mod local_addr;
 pub mod snd_rcv_2;
+mod messages;
 
 
 pub use actor::*;

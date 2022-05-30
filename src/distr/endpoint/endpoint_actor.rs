@@ -43,7 +43,7 @@ impl Actor for EndpointActor {
     /// before spawning.
     async fn initialize(
         (quinn_endpoint, incoming, node_id): Self::Init,
-        addr: Self::Addr<Local>,
+        addr: Self::Addr,
     ) -> InitFlow<Self> {
         let endpoint = Endpoint::new(addr, quinn_endpoint.clone(), node_id);
         InitFlow::Init(Self {
@@ -106,6 +106,12 @@ impl EndpointActor {
     ) -> FlowResult<Self> {
         let node = system_node.node().clone();
         let system_id = system_node.id();
+
+        let (a, b) = spawn_actor::<EndpointActor>(todo!());
+
+        let b = b.clone();
+
+        
 
         if self.endpoint.id() == system_node.id() {
             let _ = snd.send(Err(NodeRegistrationError::EndpointIdIsOwnId));

@@ -39,7 +39,7 @@ impl<T: Clone + Send + 'static> Actor for MyActor2<T> {
 
     type Exit = zestors::core::Event<Self>;
 
-    async fn initialize(init: Self::Init, addr: Self::Addr<Local>) -> InitFlow<Self> {
+    async fn initialize(init: Self::Init, addr: Self::Addr) -> InitFlow<Self> {
         InitFlow::Init(Self { val: init })
     }
 

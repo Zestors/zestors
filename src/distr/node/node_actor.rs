@@ -2,7 +2,7 @@ use crate::{self as zestors, core::*, distr::*, Fn};
 use async_bincode::tokio::{AsyncBincodeReader, AsyncBincodeWriter};
 use async_trait::async_trait;
 use futures::{Future, FutureExt, SinkExt};
-use log::{info, warn};
+use log::{error, info, warn};
 use quinn::{IdleTimeout, TransportConfig, VarInt};
 use std::{io, pin::Pin, task::Poll, time::Duration};
 use zestors_codegen::{zestors, Addr, NoScheduler};
@@ -22,12 +22,12 @@ pub(crate) struct NodeActor {
 impl Actor for NodeActor {
     type Init = (quinn::Connecting, Endpoint);
     type Error = anyhow::Error;
-    type Halt = ();
+    type Halt = Option<quinn::ConnectionError>;
     type Exit = NodeActorExit;
 
     async fn initialize(
         (connecting, system): Self::Init,
-        addr: Self::Addr<Local>,
+        addr: Self::Addr,
     ) -> InitFlow<Self> {
         match connecting.await {
             Ok(new_conn) => match Self::initialize(new_conn, addr, system).await {
@@ -41,25 +41,33 @@ impl Actor for NodeActor {
         }
     }
 
-    fn handle_event(self, signal: Event<Self>, _state: &mut State<Self>) -> EventFlow<Self> {
+    fn handle_event(self, event: Event<Self>, _state: &mut State<Self>) -> EventFlow<Self> {
         self.connection.close(VarInt::from_u32(0), &[]);
         info!(
-            "[E{}] Node {} is exiting with Signal({:?})",
+            "[E{}] Node {} is exiting with Event({:?})",
             self.endpoint.id(),
             self.node.id(),
-            signal
+            event
         );
-        EventFlow::Exit(NodeActorExit::Signal(signal))
-    }
-}
 
-#[zestors(impl NodeAddr)]
-impl NodeActor {
-    /// After initialization, this will get called once in order to retrieve the `Node`.
-    #[As(pub get_node)]
-    fn handle_get_node(&mut self, _msg: (), snd: Snd<Node>) -> FlowResult<Self> {
-        let _ = snd.send(self.node.clone());
-        Ok(Flow::Cont)
+        match event {
+            Event::Signal(signal) => match signal {
+                Signal::SoftAbort => EventFlow::Exit(NodeActorExit::SoftAbort),
+                Signal::Isolated => unreachable!("Has own address"),
+                Signal::ClosedAndEmpty => unreachable!("Has own address"),
+                Signal::Dead => unreachable!("Has own address"),
+            },
+            Event::Error(e) => {
+                error!(
+                    "[E{}] Node {} has exited with error {}",
+                    self.endpoint.id(),
+                    self.node.id(),
+                    e
+                );
+                EventFlow::Exit(NodeActorExit::Error(e))
+            }
+            Event::Halt(conn_error) => EventFlow::Exit(NodeActorExit::ConnectionFailed(conn_error)),
+        }
     }
 }
 
@@ -80,25 +88,22 @@ impl Stream for NodeActor {
     }
 }
 
+#[zestors(impl NodeAddr)]
+impl NodeActor {
+    /// After initialization, this will get called once in order to retrieve the `Node`.
+    #[As(pub get_node)]
+    fn handle_get_node(&mut self, _msg: (), snd: Snd<Node>) -> FlowResult<Self> {
+        let _ = snd.send(self.node.clone());
+        Ok(Flow::Cont)
+    }
+}
+
 impl NodeActor {
     fn handle_connection_close(
         &mut self,
         error: Option<quinn::ConnectionError>,
     ) -> FlowResult<Self> {
-        match error {
-            Some(e) => warn!(
-                "[E{}] {} - peer closed the connection: {}",
-                self.endpoint.id(),
-                self.node.id(),
-                e
-            ),
-            None => warn!(
-                "[E{}] {} - self closed the connection",
-                self.endpoint.id(),
-                self.node.id()
-            ),
-        }
-        Ok(Flow::Halt(()))
+        Ok(Flow::Halt(error))
     }
 
     /// Spawn a new node from a connection that has not yet been established.
@@ -181,7 +186,9 @@ impl NodeActor {
 #[derive(Debug)]
 pub(crate) enum NodeActorExit {
     InitFailed(NodeSpawnError),
-    Signal(Event<NodeActor>),
+    SoftAbort,
+    ConnectionFailed(Option<quinn::ConnectionError>),
+    Error(anyhow::Error),
 }
 
 //------------------------------------------------------------------------------------------------
