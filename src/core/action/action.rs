@@ -40,6 +40,9 @@ pub struct Action<A: ?Sized> {
     params: Box<dyn Any + Send>,
 }
 
+// This is only for the PhantomData<A>. Everything else is Send.
+unsafe impl<A: ?Sized> Send for Action<A> {}
+
 impl<A> Action<A> {
     /// Handle this action.
     pub async fn handle(self, actor: &mut A, state: &mut State<A>) -> HandlerOutput<A>

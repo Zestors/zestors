@@ -304,8 +304,8 @@ impl<'z, T: Clone + Send + 'static, AT: AddrType> MyActorAddr<T, AT> {
 }
 
 fn test(addr: MyActorAddr<u32>, remote_addr: MyActorAddr<u32, Distr>) {
-    let res: Result<Rcv<String>, LocalAddrError<String>> = addr.man_echo("hi".to_string());
-    let res: Result<Rcv<String>, LocalAddrError<String>> = remote_addr.man_echo(&"hi".to_string());
+    let res: Result<Rcv<String>, AddrSndError<String>> = addr.man_echo("hi".to_string());
+    let res: Result<Rcv<String>, AddrSndError<String>> = remote_addr.man_echo(&"hi".to_string());
 
     let _ = remote_addr.man_echo2(&"hello".to_string(), &"hello".to_string());
     let _ = remote_addr.man_hi2(&"hello".to_string(), &"hello".to_string());
@@ -337,7 +337,7 @@ fn test(addr: MyActorAddr<u32>, remote_addr: MyActorAddr<u32, Distr>) {
     let _ = remote_addr2.trait_echo(&"hi".to_string());
     let _ = addr2.trait_echo("hi".to_string());
 
-    let res: Result<Rcv<String>, LocalAddrError<(String, String)>> = remote_addr.call(
+    let res: Result<Rcv<String>, AddrSndError<(String, String)>> = remote_addr.call(
         Fn!(MyActor::<u32>::handle_echo_double),
         (&"hi".to_string(), &"hello".to_string()),
     );

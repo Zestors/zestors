@@ -15,22 +15,25 @@ pub fn spawn_actor<A: Actor>(init: A::Init) -> (Child<A>, A::Addr) {
     let (tx, rx) = async_channel::unbounded();
     // Generate a unique ProcessId
     let process_id = ProcessId::new_v4();
+    // And from that the shared state
+    let shared = Arc::new(SharedProcessData::new(process_id));
     // Process has not yet exited
     let exited = Arc::new(AtomicBool::new(false));
     // Create a oneshot channel through which a childsignal could be sent.
     let (tx_signal, rx_signal) = new_channel::<ChildMsg>();
     // Create the local address, and from that the actual address.
-    let addr = <A::Addr as Addressable<A>>::from_addr(LocalAddr::new(tx, process_id));
+    let addr = <A::Addr as Addressable<A>>::from_addr(LocalAddr::new(tx, shared.clone()));
     // And the actor inbox.
     let state = State::<A>::new(rx, rx_signal, process_id, exited.clone());
     // Spawn the actor, and create the child from the handle
     let handle = tokio::task::spawn(event_loop(state, addr.clone(), init));
+
+
     let child = Child::new(
         handle,
-        process_id,
         tx_signal,
         Some(Duration::from_millis(1_000)),
-        exited,
+        shared
     );
     // And finally return both the child and the address
     (child, addr)

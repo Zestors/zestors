@@ -1,12 +1,10 @@
 use std::{any::Any, marker::PhantomData};
 
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use std::{
-    io::{Read, Write},
-};
 use crate::core::*;
 use crate::distr::*;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use std::io::{Read, Write};
 
 //------------------------------------------------------------------------------------------------
 //  Distr
@@ -23,11 +21,10 @@ pub struct Distr;
 impl AddrType for Distr {
     type Action<A> = RemoteAction<A>;
     type Addr<A: 'static> = DistrAddr<A>;
-    type CallResult<M, R: RcvPart> = Result<R, LocalAddrError<M>>;
-    type SendResult<A> = Result<(), LocalAddrError<Action<A>>>;
+    type CallResult<M, R: RcvPart> = Result<R, AddrSndError<M>>;
+    type SendResult<A> = Result<(), AddrSndError<Action<A>>>;
     type Msg<M> = RemoteMsg<M>;
 }
-
 
 //------------------------------------------------------------------------------------------------
 //  DistrAddr
@@ -43,7 +40,7 @@ pub struct DistrAddr<A> {
 unsafe impl<A> Send for DistrAddr<A> {}
 
 impl<A> DistrAddr<A> {
-    fn _send(&self, action: RemoteAction<A>) -> Result<(), LocalAddrError<Action<A>>> {
+    fn _send(&self, action: RemoteAction<A>) -> Result<(), AddrSndError<Action<A>>> {
         todo!()
     }
 
@@ -51,7 +48,7 @@ impl<A> DistrAddr<A> {
         &self,
         function: HandlerFn<A, M, R>,
         msg: RemoteMsg<M>,
-    ) -> Result<R, LocalAddrError<M>>
+    ) -> Result<R, AddrSndError<M>>
     where
         M: Send + 'static,
         R: RcvPart,
@@ -67,8 +64,6 @@ where
 {
     type Param = &'a P;
 }
-
-
 
 //------------------------------------------------------------------------------------------------
 //  Address impl
@@ -96,7 +91,7 @@ impl<A: 'static> Addressable<A> for DistrAddr<A> {
     fn from_addr(addr: <Self::AddrType as AddrType>::Addr<A>) -> Self {
         addr
     }
-    fn as_addr(&self) -> &<Self::AddrType as AddrType>::Addr<A> {
+    fn inner(&self) -> &<Self::AddrType as AddrType>::Addr<A> {
         self
     }
 
@@ -110,14 +105,14 @@ impl<A: 'static> Addressable<A> for DistrAddr<A> {
         R: RcvPart,
         M: Send + 'static,
     {
-        self.as_addr()._call_addr(function, params.into())
+        self.inner()._call_addr(function, params.into())
     }
 
     fn send<T>(&self, action: T) -> <Self::AddrType as AddrType>::SendResult<A>
     where
         T: Into<<Self::AddrType as AddrType>::Action<A>>,
     {
-        self.as_addr()._send(action.into())
+        self.inner()._send(action.into())
     }
 }
 
@@ -215,7 +210,6 @@ where
         }
     }
 }
-
 
 //------------------------------------------------------------------------------------------------
 //  RemoteParamType

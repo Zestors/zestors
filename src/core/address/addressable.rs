@@ -14,14 +14,14 @@ pub trait Addressable<A: 'static>: Address + Clone {
     fn from_addr(addr: AddrT<Self::AddrType, A>) -> Self;
 
     /// Return a reference to the core address. (LocalAddr or DistrAddr)
-    fn as_addr(&self) -> &AddrT<Self::AddrType, A>;
+    fn inner(&self) -> &AddrT<Self::AddrType, A>;
 
     /// Send an action to this address.
     fn send<T>(&self, action: T) -> SendResultT<Self::AddrType, A>
     where
         T: Into<ActionT<Self::AddrType, A>>,
     {
-        self.as_addr().send(action)
+        self.inner().send(action)
     }
 
     /// Call a function on this address.
@@ -35,7 +35,7 @@ pub trait Addressable<A: 'static>: Address + Clone {
         MT: Send + 'static,
         R: RcvPart,
     {
-        self.as_addr().call(function, msg)
+        self.inner().call(function, msg)
     }
 }
 

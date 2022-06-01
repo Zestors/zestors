@@ -5,6 +5,7 @@ pub mod inbox;
 pub mod child;
 pub mod event_loop;
 pub mod address;
+pub mod shared_process_data;
 
 pub use event_loop::*;
 pub use actor::*;
@@ -13,6 +14,9 @@ pub use channel::*;
 pub use inbox::*;
 pub use child::*;
 pub use address::*;
+pub use shared_process_data::*;
+
+
 pub use futures::stream::{Stream, StreamExt};
 pub use anyhow::Error as AnyhowError;
 pub use async_trait::async_trait;

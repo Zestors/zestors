@@ -1,4 +1,6 @@
+use crate::core::*;
 use futures::{Future, FutureExt};
+use std::pin::Pin;
 
 /// Creates a new oneshot channel, that allows for sending or receiving a single message.
 pub fn new_channel<T>() -> (Snd<T>, Rcv<T>) {
@@ -17,18 +19,23 @@ pub struct Snd<T>(tokio::sync::oneshot::Sender<T>);
 impl<T> Snd<T> {
     /// Send a message. Consumes the sender.
     ///
-    /// Results in an error if the receiver has been dropped.
+    /// Results in an error if the receiver has been closed.
     pub fn send(self, msg: T) -> Result<(), SndError<T>> {
         self.0.send(msg).map_err(|e| SndError(e))
     }
 
-    /// Cancel this channel. This is the same as dropping it.
-    ///
-    /// The receiver will get an error indicating the channel has been canceled.
-    pub fn canceled(self) {}
+    /// Checks whether the receiver has closed/dropped this channel.
+    pub fn is_closed(&self) -> bool {
+        self.0.is_closed()
+    }
+
+    /// Waits for the receiver to close/drop the sender.
+    pub async fn closed(&mut self) {
+        self.0.closed().await
+    }
 }
 
-/// Couldn't send the message, because the receiver has been canceled or dropped.
+/// Couldn't send the message, because the receiver has been closed/dropped.
 #[derive(Debug)]
 pub struct SndError<R>(pub R);
 
@@ -46,7 +53,7 @@ impl<R> Rcv<R> {
     /// Check if the reply is ready.
     /// * Returns `Ok(Some(R))` if there was a message ready.
     /// * Returns `Ok(None)` if there was no message yet.
-    /// * Returns `Err(RcvError)` if the sender has been dropped or canceled.
+    /// * Returns `Err(RcvError)` if the sender has been dropped.
     pub fn try_recv(&mut self) -> Result<Option<R>, RcvError> {
         match self.0.try_recv() {
             Ok(msg) => Ok(Some(msg)),
@@ -57,13 +64,19 @@ impl<R> Rcv<R> {
         }
     }
 
-    /// Cancel this channel. This is the same as dropping it.
+    /// Blocks the thread to wait for a reply. Can be useful when calling from a synchronous context,
+    /// however this is heavily discouraged to be called from an asynchronous context. Instead,
+    /// await the `Rcv` directly.
+    pub fn recv_blocking(self) -> Result<R, RcvError> {
+        Ok(self.0.blocking_recv()?)
+    }
+
+    /// Closes the channel to prevent a message from being sent.
     ///
-    /// The sender will get an error indicating the channel has been canceled when it tries
-    /// to send a message.
-    ///
-    /// If the sender has already sent a message, the message will be dropped.
-    pub fn cancel(self) {}
+    /// If a message was already sent, then this message can still be received.
+    pub fn close(&mut self) {
+        self.0.close()
+    }
 }
 
 impl<R> Future for Rcv<R> {
@@ -79,6 +92,45 @@ impl<R> Future for Rcv<R> {
 
 impl<R> Unpin for Rcv<R> {}
 
-/// Couldn't receive the `Reply`, because the `Request` has been canceled/dropped.
+/// Couldn't receive the message, because the sender has been dropped.
 #[derive(Debug)]
 pub struct RcvError;
+
+impl From<tokio::sync::oneshot::error::RecvError> for RcvError {
+    fn from(_: tokio::sync::oneshot::error::RecvError) -> Self {
+        Self
+    }
+}
+
+//------------------------------------------------------------------------------------------------
+//  IntoRcv
+//------------------------------------------------------------------------------------------------
+
+/// Converts a `Result<Rcv<R>, LocalAddrError<M>>` into a future which can be awaited. The send
+/// and receive errors will be combined in this case.
+///
+/// The output of the new future is `Result<R, SndRcvError<M>>`.
+pub trait IntoRcv {
+    type Output;
+    fn into_rcv(self) -> Self::Output;
+}
+
+impl<M: Send + 'static, R: Send + 'static> IntoRcv for Result<Rcv<R>, AddrSndError<M>> {
+    type Output = Pin<Box<dyn Future<Output = Result<R, SndRcvError<M>>> + Send + 'static>>;
+
+    /// Converts a `Result<Rcv<R>, LocalAddrError<M>>` into a future which can be awaited. The send
+    /// and receive errors will be combined in this case.
+    ///
+    /// The output of the new future is `Result<R, SndRcvError<M>>`.
+    fn into_rcv(self) -> Pin<Box<dyn Future<Output = Result<R, SndRcvError<M>>> + Send + 'static>> {
+        Box::pin(async move {
+            match self {
+                Ok(rcv) => match rcv.await {
+                    Ok(r) => Ok(r),
+                    Err(_e) => Err(SndRcvError::RcvFailure),
+                },
+                Err(e) => Err(SndRcvError::SndFailure(e.0)),
+            }
+        })
+    }
+}

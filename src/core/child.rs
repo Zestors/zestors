@@ -12,6 +12,8 @@ use std::{
 };
 use tokio::task::{JoinError, JoinHandle};
 
+
+
 //------------------------------------------------------------------------------------------------
 //  Child
 //------------------------------------------------------------------------------------------------
@@ -30,28 +32,25 @@ use tokio::task::{JoinError, JoinHandle};
 #[must_use = "If the child is dropped, the actor will be aborted."]
 pub struct Child<A: Actor> {
     handle: Option<JoinHandle<A::Exit>>,
-    process_id: ProcessId,
     signal_sender: Option<Snd<ChildMsg>>,
     to_abort: bool,
     abort_timeout: Option<Duration>,
-    exited: Arc<AtomicBool>,
+    shared: Arc<SharedProcessData>
 }
 
 impl<A: Actor> Child<A> {
     pub(crate) fn new(
         handle: JoinHandle<A::Exit>,
-        process_id: ProcessId,
         signal_sender: Snd<ChildMsg>,
         abort_timeout: Option<Duration>,
-        exited: Arc<AtomicBool>,
+        shared: Arc<SharedProcessData>
     ) -> Self {
         Self {
             handle: Some(handle),
-            process_id,
             signal_sender: Some(signal_sender),
             to_abort: true,
             abort_timeout,
-            exited,
+            shared
         }
     }
 
@@ -71,12 +70,12 @@ impl<A: Actor> Child<A> {
 
     /// Returns whether the process has already exited.
     pub fn has_exited(&self) -> bool {
-        self.exited.load(Ordering::Relaxed)
+        self.shared.has_exited()
     }
 
     /// Get the process_id of this actor.
     pub fn process_id(&self) -> ProcessId {
-        self.process_id
+        self.shared.process_id()
     }
 
     /// Sets the amount of time this child has to exit before a hard-abort will
@@ -127,7 +126,7 @@ impl<A: Actor> Unpin for Child<A> {}
 impl<A: Actor> Drop for Child<A> {
     fn drop(&mut self) {
         // If we should not abort, or if the child has already exited, don't do anything
-        let exited = self.exited.load(Ordering::Relaxed);
+        let exited = self.shared.has_exited();
         if !self.to_abort || exited {
             return;
         }
@@ -140,11 +139,11 @@ impl<A: Actor> Drop for Child<A> {
         if let Some(timeout) = self.abort_timeout.take() {
             // Then spawn a task which will hard abort the process after the timeout
             let handle = self.handle.take().unwrap();
-            let exited_arc = self.exited.clone();
+            let shared_arc = self.shared.clone();
             tokio::task::spawn(async move {
                 let instant = tokio::time::Instant::now().checked_add(timeout).unwrap();
                 tokio::time::sleep_until(instant).await;
-                if !exited_arc.load(Ordering::Relaxed) {
+                if !shared_arc.has_exited() {
                     warn!("Child dropped, hard aborting!");
                     handle.abort()
                 }
