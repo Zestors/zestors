@@ -21,7 +21,7 @@ pub struct State<A> {
     rcv_signal: Option<Rcv<ChildMsg>>,
     process_id: ProcessId,
     actor_scheduler_enabled: bool,
-    exited: Arc<AtomicBool>,
+    shared: Arc<SharedProcessData>,
 }
 
 impl<A> Stream for State<A> {
@@ -69,14 +69,14 @@ impl<A> State<A> {
         receiver: async_channel::Receiver<InternalMsg<A>>,
         rcv_signal: Rcv<ChildMsg>,
         process_id: ProcessId,
-        exited: Arc<AtomicBool>,
+        shared: Arc<SharedProcessData>,
     ) -> Self {
         Self {
             actor_scheduler_enabled: true,
             process_id,
             receiver,
             rcv_signal: Some(rcv_signal),
-            exited,
+            shared,
         }
     }
 
@@ -144,7 +144,7 @@ impl<A> Drop for State<A> {
         self.receiver.close();
 
         // Set exited to true.
-        self.exited.store(true, Ordering::Relaxed);
+        self.shared.exit();
 
         // And empty the inbox
         while self.try_recv().is_ok() {}

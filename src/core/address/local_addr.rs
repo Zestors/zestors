@@ -58,6 +58,13 @@ impl<A> LocalAddr<A> {
         self.sender.sender_count()
     }
 
+    /// Wait for the process to exit.
+    /// 
+    /// If the process has already exited, this returns immeadeately.
+    pub async fn await_exit(&self) {
+        self.shared.await_exit().await
+    }
+
     /// Call this address with a function.
     pub fn call<M, R>(
         &self,

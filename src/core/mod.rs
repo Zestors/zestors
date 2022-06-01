@@ -1,7 +1,7 @@
 pub mod channel;
 pub mod actor;
 pub mod action;
-pub mod inbox;
+pub mod state;
 pub mod child;
 pub mod event_loop;
 pub mod address;
@@ -11,7 +11,7 @@ pub use event_loop::*;
 pub use actor::*;
 pub use action::*;
 pub use channel::*;
-pub use inbox::*;
+pub use state::*;
 pub use child::*;
 pub use address::*;
 pub use shared_process_data::*;
