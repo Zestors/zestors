@@ -1,5 +1,10 @@
 use std::{any::Any, marker::PhantomData};
 
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use std::{
+    io::{Read, Write},
+};
 use crate::core::*;
 use crate::distr::*;
 
@@ -20,8 +25,6 @@ impl AddrType for Distr {
     type Addr<A: 'static> = DistrAddr<A>;
     type CallResult<M, R: RcvPart> = Result<R, LocalAddrError<M>>;
     type SendResult<A> = Result<(), LocalAddrError<Action<A>>>;
-    type Param<'a, P: 'a> = DistrParam<'a, P> where
-    P: ParamType<'a, Self>;
     type Msg<M> = RemoteMsg<M>;
 }
 
@@ -55,6 +58,14 @@ impl<A> DistrAddr<A> {
     {
         todo!()
     }
+}
+
+/// The ParamType `P` of a Remote address is `&P` whenever `P` is serializable
+impl<'a, P> ParamType<'a, Distr> for P
+where
+    P: 'a + Serialize + DeserializeOwned + Clone + DistrParamType<'a>,
+{
+    type Param = &'a P;
 }
 
 
@@ -134,11 +145,11 @@ impl<A> Clone for DistrAddr<A> {
 //  DistrParam
 //------------------------------------------------------------------------------------------------
 
-pub enum DistrParam<'a, P: ParamType<'a, Distr>> {
-    Msg(P::Param),
-    Rcv(P::Param),
-    Snd(P::Param),
-}
+// pub enum DistrParam<'a, P> {
+//     Msg(P::Param),
+//     Rcv(P::Param),
+//     Snd(P::Param),
+// }
 
 //------------------------------------------------------------------------------------------------
 //  RemoteMsg
@@ -183,7 +194,7 @@ where
     }
 }
 
-impl<'a, P1, P2> From<(Param<'a, P1, Distr>, Param<'a, P2, Distr>)> for RemoteMsg<(P1, P2)>
+impl<'a, P1, P2> From<(ParamT<'a, P1, Distr>, ParamT<'a, P2, Distr>)> for RemoteMsg<(P1, P2)>
 where
     P1: DistrParamType<'a>,
     P2: DistrParamType<'a>,
@@ -202,5 +213,42 @@ where
             phantom_data: PhantomData,
             serialized: buf,
         }
+    }
+}
+
+
+//------------------------------------------------------------------------------------------------
+//  RemoteParamType
+//------------------------------------------------------------------------------------------------
+
+/// For a type to be a distributed parameter, it must also implement the following methods:
+pub trait DistrParamType<'a>: ParamType<'a, Distr> {
+    /// The size this will have once serialized.
+    fn serialized_size(param: &Self::Param) -> u64;
+    /// Serializing the message into the buffer.
+    fn serialize_into(param: Self::Param, buf: impl Write);
+    /// Deserializing the paramter from the message
+    fn deserialize_from(buf: impl Read) -> Self;
+    fn into_local_param(param: Self::Param) -> Self;
+}
+
+impl<'a, P> DistrParamType<'a> for P
+where
+    P: 'a + Serialize + DeserializeOwned + Clone,
+{
+    fn serialize_into(param: Self::Param, buf: impl Write) {
+        bincode::serialize_into(buf, param).unwrap()
+    }
+
+    fn deserialize_from(buf: impl Read) -> P {
+        bincode::deserialize_from(buf).unwrap()
+    }
+
+    fn serialized_size(param: &Self::Param) -> u64 {
+        bincode::serialized_size(*param).unwrap()
+    }
+
+    fn into_local_param(param: Self::Param) -> P {
+        param.clone()
     }
 }

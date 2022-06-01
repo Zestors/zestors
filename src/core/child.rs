@@ -23,7 +23,7 @@ use zestors_codegen::{Actor, Addr, NoScheduler};
 pub struct Child<A: Actor> {
     handle: Option<JoinHandle<A::Exit>>,
     process_id: ProcessId,
-    signal_sender: Option<Snd<ChildSignal>>,
+    signal_sender: Option<Snd<ChildMsg>>,
     to_abort: bool,
     abort_timeout: Duration,
     exited: Arc<AtomicBool>,
@@ -34,7 +34,7 @@ impl<A: Actor> Child<A> {
     pub(crate) fn new(
         handle: JoinHandle<A::Exit>,
         process_id: ProcessId,
-        signal_sender: Snd<ChildSignal>,
+        signal_sender: Snd<ChildMsg>,
         abort_timeout: Duration,
         exited: Arc<AtomicBool>,
     ) -> Self {
@@ -51,7 +51,7 @@ impl<A: Actor> Child<A> {
     pub fn soft_abort(&mut self) -> bool {
         match self.signal_sender.take() {
             Some(signal_sender) => {
-                let _ = signal_sender.send(ChildSignal::SoftAbort);
+                let _ = signal_sender.send(ChildMsg::SoftAbort);
                 true
             }
             None => false,
@@ -95,7 +95,7 @@ impl<A: Actor> Drop for Child<A> {
 
         // If there is still a signal sender, send a soft abort message first
         if let Some(signal_sender) = self.signal_sender.take() {
-            let _ = signal_sender.send(ChildSignal::SoftAbort);
+            let _ = signal_sender.send(ChildMsg::SoftAbort);
         }
 
         // Then spawn a task which will hard abort the process in 1000 ms

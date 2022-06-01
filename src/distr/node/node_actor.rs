@@ -41,32 +41,32 @@ impl Actor for NodeActor {
         }
     }
 
-    fn handle_event(self, event: Event<Self>, _state: &mut State<Self>) -> EventFlow<Self> {
+    async fn handle_signal(self, signal: Signal<Self>, _state: &mut State<Self>) -> SignalFlow<Self> {
         self.connection.close(VarInt::from_u32(0), &[]);
         info!(
             "[E{}] Node {} is exiting with Event({:?})",
             self.endpoint.id(),
             self.node.id(),
-            event
+            signal
         );
 
-        match event {
-            Event::Signal(signal) => match signal {
-                Signal::SoftAbort => EventFlow::Exit(NodeActorExit::SoftAbort),
-                Signal::Isolated => unreachable!("Has own address"),
-                Signal::ClosedAndEmpty => unreachable!("Has own address"),
-                Signal::Dead => unreachable!("Has own address"),
+        match signal {
+            Signal::Actor(signal) => match signal {
+                ActorSignal::SoftAbort => SignalFlow::Exit(NodeActorExit::SoftAbort),
+                ActorSignal::Isolated => unreachable!("Has own address"),
+                ActorSignal::ClosedAndEmpty => unreachable!("Has own address"),
+                ActorSignal::Dead => unreachable!("Has own address"),
             },
-            Event::Error(e) => {
+            Signal::Error(e) => {
                 error!(
                     "[E{}] Node {} has exited with error {}",
                     self.endpoint.id(),
                     self.node.id(),
                     e
                 );
-                EventFlow::Exit(NodeActorExit::Error(e))
+                SignalFlow::Exit(NodeActorExit::Error(e))
             }
-            Event::Halt(conn_error) => EventFlow::Exit(NodeActorExit::ConnectionFailed(conn_error)),
+            Signal::Halt(conn_error) => SignalFlow::Exit(NodeActorExit::ConnectionFailed(conn_error)),
         }
     }
 }
@@ -81,9 +81,9 @@ impl Stream for NodeActor {
         self.streams.poll_next_unpin(cx).map(|val| match val {
             Some(s) => match s {
                 Ok(new_stream) => todo!("New stream accepted"),
-                Err(e) => Some(Action::new(Fn!(Self::handle_connection_close), Some(e)).0),
+                Err(e) => Some(Action::new_split(Fn!(Self::handle_connection_close), Some(e)).0),
             },
-            None => Some(Action::new(Fn!(Self::handle_connection_close), None).0),
+            None => Some(Action::new_split(Fn!(Self::handle_connection_close), None).0),
         })
     }
 }

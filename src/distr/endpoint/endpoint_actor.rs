@@ -37,7 +37,7 @@ impl Actor for EndpointActor {
     type Init = (quinn::Endpoint, quinn::Incoming, NodeId);
     type Error = anyhow::Error;
     type Halt = ();
-    type Exit = (Self, Event<Self>);
+    type Exit = (Self, Signal<Self>);
 
     /// Initializing the SystemActor should never fail!. Anything that can fail should be done
     /// before spawning.
@@ -54,14 +54,14 @@ impl Actor for EndpointActor {
         })
     }
 
-    fn handle_event(self, signal: Event<Self>, _state: &mut State<Self>) -> EventFlow<Self> {
+    async fn handle_signal(self, signal: Signal<Self>, _state: &mut State<Self>) -> SignalFlow<Self> {
         self.quinn_endpoint.close(VarInt::from_u32(0), &[]);
         info!(
             "[E{}] exiting with Signal({:?})",
             self.endpoint.id(),
             signal
         );
-        EventFlow::Exit((self, signal))
+        SignalFlow::Exit((self, signal))
     }
 }
 
@@ -76,10 +76,10 @@ impl Stream for EndpointActor {
         {
             if let Poll::Ready(connecting) = self.incoming.poll_next_unpin(cx) {
                 Poll::Ready(Some(
-                    Action!(EndpointActor::handle_incoming_quic_conn, connecting).0,
+                    Action!(EndpointActor::handle_incoming_quic_conn, connecting),
                 ))
             } else if let Poll::Ready(node_exit) = self.nodes.poll_next_unpin(cx) {
-                Poll::Ready(Some(Action!(Self::handle_system_node_exit, node_exit).0))
+                Poll::Ready(Some(Action!(Self::handle_system_node_exit, node_exit)))
             } else {
                 Poll::Pending
             }

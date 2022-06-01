@@ -12,19 +12,18 @@ pub struct Local;
 
 impl AddrType for Local {
     type Action<A> = Action<A>;
-
     type Addr<A: 'static> = LocalAddr<A>;
-
     type CallResult<M, R: RcvPart> = Result<R, LocalAddrError<M>>;
-
     type SendResult<A> = Result<(), LocalAddrError<Action<A>>>;
-
-    type Param<'a, PT: 'a>
-    where
-        PT: ParamType<'a, Self>,
-    = LocalParam<PT>;
-
     type Msg<MT> = LocalMsg<MT>;
+}
+
+/// The ParamType `P` of a Local address is always just `P` whenver `P` is Send + 'static
+impl<'a, P> ParamType<'a, Local> for P
+where
+    P: Send + 'static,
+{
+    type Param = P;
 }
 
 //------------------------------------------------------------------------------------------------
@@ -70,7 +69,7 @@ impl<A> LocalAddr<A> {
         Self { sender, process_id }
     }
 
-    fn _send(&self, action: Action<A>) -> Result<(), LocalAddrError<Action<A>>> {
+    pub(crate) fn _send(&self, action: Action<A>) -> Result<(), LocalAddrError<Action<A>>> {
         self.sender
             .try_send(InternalMsg::Action(action))
             .map_err(|e| {
@@ -79,7 +78,7 @@ impl<A> LocalAddr<A> {
             })
     }
 
-    fn _call_addr<M, R>(
+    pub(crate) fn _call_addr<M, R>(
         &self,
         function: HandlerFn<A, Snd<M>, R>,
         msg: LocalMsg<M>,
@@ -88,7 +87,7 @@ impl<A> LocalAddr<A> {
         M: Send + 'static,
         R: RcvPart,
     {
-        let (action, receiver) = Action::new(function, msg.0);
+        let (action, receiver) = Action::new_split(function, msg.0);
         if let Err(LocalAddrError(action)) = self._send(action) {
             let (msg, _snd) = match action.downcast::<M, R>() {
                 Ok(msg) => msg,
@@ -125,7 +124,7 @@ unsafe impl<A> Sync for LocalAddr<A> {}
 //  LocalMsg
 //------------------------------------------------------------------------------------------------
 
-pub struct LocalParam<P>(pub(crate) P);
+pub struct LocalParam<P>(P);
 pub struct LocalMsg<M>(M);
 
 impl<M> From<M> for LocalMsg<M> {

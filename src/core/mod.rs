@@ -1,18 +1,18 @@
 pub mod request;
 pub mod actor;
-pub mod address;
+pub mod addressable;
 pub mod action;
 pub mod handler_fn;
 pub mod inbox;
 pub mod child;
-mod test;
 pub mod local_addr;
-pub mod snd_rcv_2;
-mod messages;
+pub mod event_loop;
+pub mod address_type;
 
-
+pub use address_type::*;
+pub use event_loop::*;
 pub use actor::*;
-pub use address::*;
+pub use addressable::*;
 pub use action::*;
 pub use request::*;
 pub use handler_fn::*;
@@ -24,3 +24,4 @@ pub use anyhow::Error as AnyhowError;
 pub use async_trait::async_trait;
 pub(crate) use derive_more as dm;
 pub(crate) use thiserror::Error as ThisError;
+pub type ProcessId = uuid::Uuid;

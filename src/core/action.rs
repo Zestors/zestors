@@ -1,23 +1,24 @@
-use futures::{Future, Stream};
-
 use crate::core::*;
-use crate::Fn;
-use std::{any::Any, error::Error, marker::PhantomData, mem::transmute, pin::Pin};
+use std::{any::Any, marker::PhantomData, pin::Pin};
 
-//------------------------------------------------------------------------------------------------
-//  Action!
-//------------------------------------------------------------------------------------------------
-
+/// A macro to more easily create an `Action`. See `Action::new` for docs.
+///
+/// ## Examples:
+/// ```ignore
+/// let action1 = Action!(MyActor::handle_fn, msg);
+/// let action2 = Action::new(Fn!(MyActor::handle_fn), msg);
+/// assert_eq!(action1, action2);
+///
+/// let (action1, _rcv) = Action!(MyActor::handle_fn_snd, msg);
+/// let (action2, _rcv) = Action::new(Fn!(MyActor::handle_fn_snd), msg);
+/// assert_eq!(action1, action2);
+/// ```
 #[macro_export]
 macro_rules! Action {
     ($function:expr, $param:expr) => {
         $crate::core::action::Action::new($crate::Fn!($function), $param)
     };
 }
-
-//------------------------------------------------------------------------------------------------
-//  Action
-//------------------------------------------------------------------------------------------------
 
 /// An `Action` is one of the central primitives within zestors.
 ///
@@ -40,6 +41,7 @@ pub struct Action<A: ?Sized> {
 }
 
 impl<A> Action<A> {
+    /// Handle this action.
     pub async fn handle(self, actor: &mut A, state: &mut State<A>) -> HandlerOutput<A>
     where
         A: Actor,
@@ -47,15 +49,31 @@ impl<A> Action<A> {
         unsafe { self.handler_fn.call(actor, state, self.params).await }
     }
 
-    pub fn new<M, R>(actor_fn: HandlerFn<A, Snd<M>, R>, msg: M) -> (Self, R)
+    /// Create a new action. If the `HandlerFn` sends back a value, this will return a tuple
+    /// of `(Action<A>, Rcv<R>)`, otherwise this will just return `Action<A>`.
+    pub fn new<M, R>(fun: HandlerFn<A, Snd<M>, R>, msg: M) -> R::NewActionType<A>
     where
         M: Send + 'static,
         R: RcvPart,
     {
-        R::new_action(actor_fn, msg)
+        R::new_action(fun, msg)
     }
 
-    pub fn downcast<M: 'static, R: RcvPart + 'static>(self) -> Result<(M, R::SndPart), Self> {
+    /// Same as `new`, except this will always return a tuple.
+    pub fn new_split<M, R>(fun: HandlerFn<A, Snd<M>, R>, msg: M) -> (Self, R)
+    where
+        M: Send + 'static,
+        R: RcvPart,
+    {
+        R::new_split_action(fun, msg)
+    }
+
+    /// Attempt to downcast this back into the message kept inside.
+    pub fn downcast<M, R>(self) -> Result<(M, R::SndPart), Self>
+    where
+        M: 'static,
+        R: RcvPart + 'static,
+    {
         match self.params.downcast::<(M, R::SndPart)>() {
             Ok(msg) => Ok(*msg),
             Err(params) => Err(Self {
@@ -67,46 +85,60 @@ impl<A> Action<A> {
     }
 }
 
-//------------------------------------------------------------------------------------------------
-//  IntoAction
-//------------------------------------------------------------------------------------------------
-
-impl<A, M: Send + 'static, R: RcvPart> HandlerFn<A, Snd<M>, R> {
-    fn into_action(self, msg: M) -> (Action<A>, R) {
-        R::new_action(self, msg)
-    }
-}
-
+/// Anything that can be received by an actor as it's second argument.
+/// 
+/// Currently this is either `Snd<T>` or `()`, but more might be added in the future.
 pub trait RcvPart: Sized + Send + 'static {
+    /// The part that is returned when a new action is created.
     type SndPart;
 
-    fn new_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> (Action<A>, Self)
+    /// The full type returned when creating a new action for actor A.
+    type NewActionType<A>;
+
+    fn new_split_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> (Action<A>, Self)
+    where
+        M: Send + 'static;
+
+    fn new_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> Self::NewActionType<A>
     where
         M: Send + 'static;
 }
 
 impl RcvPart for () {
     type SndPart = ();
+    type NewActionType<A> = Action<A>;
 
-    fn new_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> (Action<A>, Self)
+    fn new_split_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> (Action<A>, ())
     where
         M: Send + 'static,
     {
-        (
-            Action {
-                phantom_data: PhantomData,
-                handler_fn: fun.into_any(),
-                params: Box::new((msg, ())),
-            },
-            (),
-        )
+        (Self::new_action(fun, msg), ())
+    }
+
+    fn new_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> Self::NewActionType<A>
+    where
+        M: Send + 'static,
+    {
+        Action {
+            phantom_data: PhantomData,
+            handler_fn: fun.into_any(),
+            params: Box::new((msg, ())),
+        }
     }
 }
 
 impl<R: Send + 'static> RcvPart for Rcv<R> {
     type SndPart = Snd<R>;
+    type NewActionType<A> = (Action<A>, Rcv<R>);
 
-    fn new_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> (Action<A>, Self)
+    fn new_split_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> (Action<A>, Rcv<R>)
+    where
+        M: Send + 'static,
+    {
+        Self::new_action(fun, msg)
+    }
+
+    fn new_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> Self::NewActionType<A>
     where
         M: Send + 'static,
     {
@@ -119,58 +151,3 @@ impl<R: Send + 'static> RcvPart for Rcv<R> {
         (action, reply)
     }
 }
-
-// pub trait IntoAction<A>: Sized {
-//     type Msg: Send;
-//     type Out;
-//     type Receiver;
-//     fn into_action(self, msg: Self::Msg) -> Self::Out;
-//     fn into_split_action(self, msg: Self::Msg) -> (Action<A>, Self::Receiver);
-// }
-
-// impl<A, M> IntoAction<A> for ActorFn<A, Snd<M>, ()>
-// where
-//     A: Actor,
-//     M: Send + 'static,
-// {
-//     type Out = Action<A>;
-//     type Msg = M;
-//     type Receiver = ();
-
-//     fn into_action(self, msg: M) -> Self::Out {
-//         Action {
-//             phantom_data: PhantomData,
-//             handler_fn: self.into_any(),
-//             params: Box::new((msg, ())),
-//         }
-//     }
-
-//     fn into_split_action(self, msg: Self::Msg) -> (Action<A>, Self::Receiver) {
-//         (self.into_action(msg), ())
-//     }
-// }
-
-// impl<A, M, R> IntoAction<A> for ActorFn<A, Snd<M>, Rcv<R>>
-// where
-//     A: Actor,
-//     M: Send + 'static,
-//     R: Send + 'static,
-// {
-//     type Out = (Action<A>, Rcv<R>);
-//     type Msg = M;
-//     type Receiver = Rcv<R>;
-
-//     fn into_action(self, msg: M) -> Self::Out {
-//         let (req, reply) = Snd::new();
-//         let action = Action {
-//             phantom_data: PhantomData,
-//             handler_fn: self.into_any(),
-//             params: Box::new((msg, req)),
-//         };
-//         (action, reply)
-//     }
-
-//     fn into_split_action(self, msg: Self::Msg) -> (Action<A>, Self::Receiver) {
-//         self.into_action(msg)
-//     }
-// }

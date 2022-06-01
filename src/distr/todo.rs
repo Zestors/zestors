@@ -2,7 +2,7 @@ use std::io::{Write, Read};
 
 use crate::core::*;
 
-use super::distr_addr::Distr;
+use super::{distr_addr::Distr, DistrParamType};
 
 //-------------------------------------------------
 //  Future work

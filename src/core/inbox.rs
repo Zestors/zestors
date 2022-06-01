@@ -18,7 +18,7 @@ use crate::core::*;
 #[derive(Debug)]
 pub struct State<A> {
     receiver: async_channel::Receiver<InternalMsg<A>>,
-    rcv_signal: Option<Rcv<ChildSignal>>,
+    rcv_signal: Option<Rcv<ChildMsg>>,
     process_id: ProcessId,
     actor_scheduler_enabled: bool,
     exited: Arc<AtomicBool>,
@@ -36,11 +36,11 @@ impl<A> Stream for State<A> {
                 Poll::Ready(signal) => {
                     self.rcv_signal.take().unwrap();
                     match signal.unwrap() {
-                        ChildSignal::SoftAbort => {
+                        ChildMsg::SoftAbort => {
                             self.receiver.close();
                             Poll::Ready(Some(InboxMsg::Signal(InboxSignal::SoftAbort)))
                         }
-                        ChildSignal::Isolated => {
+                        ChildMsg::Isolated => {
                             Poll::Ready(Some(InboxMsg::Signal(InboxSignal::Isolated)))
                         }
                     }
@@ -67,7 +67,7 @@ impl<A> Stream for State<A> {
 impl<A> State<A> {
     pub(crate) fn new(
         receiver: async_channel::Receiver<InternalMsg<A>>,
-        rcv_signal: Rcv<ChildSignal>,
+        rcv_signal: Rcv<ChildMsg>,
         process_id: ProcessId,
         exited: Arc<AtomicBool>,
     ) -> Self {
@@ -106,35 +106,6 @@ impl<A> State<A> {
 
     pub async fn recv(&mut self) -> Result<InboxMsg<A>, InboxRecvError> {
         self.next().await.ok_or(InboxRecvError)
-        // match &mut self.rcv_signal {
-        //     Some(rcv_signal) => {
-        //         tokio::select! {
-        //             biased;
-
-        //             signal = rcv_signal => {
-        //                 self.rcv_signal.take().unwrap();
-        //                 match signal.unwrap() {
-        //                     ChildSignal::SoftAbort => {
-        //                         self.receiver.close();
-        //                         Ok(InboxMsg::Signal(InboxSignal::SoftAbort))
-        //                     },
-        //                     ChildSignal::Isolated => Ok(InboxMsg::Signal(InboxSignal::Isolated)),
-        //                 }
-        //             }
-
-        //             action = self.receiver.recv() => {
-        //                 match action? {
-        //                     ActorMsg::Action(action) => Ok(InboxMsg::Action(action)),
-        //                 }
-        //             }
-
-        //         }
-        //     }
-
-        //     None => match self.receiver.recv().await? {
-        //         ActorMsg::Action(action) => Ok(InboxMsg::Action(action)),
-        //     },
-        // }
     }
 
     pub fn try_recv(&mut self) -> Result<Option<InboxMsg<A>>, InboxRecvError> {
@@ -143,11 +114,11 @@ impl<A> State<A> {
                 Ok(Some(signal)) => {
                     self.rcv_signal.take().unwrap();
                     match signal {
-                        ChildSignal::SoftAbort => {
+                        ChildMsg::SoftAbort => {
                             self.receiver.close();
                             return Ok(Some(InboxMsg::Signal(InboxSignal::SoftAbort)));
                         }
-                        ChildSignal::Isolated => {
+                        ChildMsg::Isolated => {
                             return Ok(Some(InboxMsg::Signal(InboxSignal::Isolated)))
                         }
                     }
@@ -203,7 +174,7 @@ pub(crate) enum InternalMsg<A> {
 //------------------------------------------------------------------------------------------------
 
 #[derive(Debug)]
-pub enum ChildSignal {
+pub enum ChildMsg {
     SoftAbort,
     Isolated,
 }

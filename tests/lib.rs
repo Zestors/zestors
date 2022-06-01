@@ -1,4 +1,3 @@
-#![feature(generic_associated_types)]
 use std::{error::Error, fmt::format, marker::PhantomData, task::Poll};
 use zestors::{core::*, distr::distr_addr::Distr, Action, Fn};
 use zestors_codegen::{zestors, Addr, NoScheduler, Scheduler};
@@ -37,14 +36,14 @@ impl<T: Clone + Send + 'static> Actor for MyActor2<T> {
     type Error = Box<dyn Error + Send>;
     type Halt = ();
 
-    type Exit = zestors::core::Event<Self>;
+    type Exit = zestors::core::Signal<Self>;
 
     async fn initialize(init: Self::Init, addr: Self::Addr) -> InitFlow<Self> {
         InitFlow::Init(Self { val: init })
     }
 
-    fn handle_event(self, event: Event<Self>, state: &mut State<Self>) -> EventFlow<Self> {
-        EventFlow::Exit(event)
+    async fn handle_signal(self, event: Signal<Self>, state: &mut State<Self>) -> SignalFlow<Self> {
+        SignalFlow::Exit(event)
     }
 }
 
@@ -63,7 +62,7 @@ struct MyActor<T: Send + 'static + Clone> {
 impl<T: Clone + Send + 'static> Actor for MyActor<T> {
     type Init = T;
     type Error = Box<dyn Error + Send>;
-    type Exit = Event<Self>;
+    type Exit = Signal<Self>;
     type Halt = ();
 
     async fn initialize(init: Self::Init, addr: MyActorAddr<T>) -> InitFlow<Self> {
@@ -73,8 +72,8 @@ impl<T: Clone + Send + 'static> Actor for MyActor<T> {
         })
     }
 
-    fn handle_event(self, signal: Event<Self>, state: &mut State<Self>) -> EventFlow<Self> {
-        EventFlow::Exit(signal)
+    async fn handle_signal(self, signal: Signal<Self>, state: &mut State<Self>) -> SignalFlow<Self> {
+        SignalFlow::Exit(signal)
     }
 }
 
@@ -106,12 +105,6 @@ where
     }
 }
 
-// #[As(hi)]
-// #[Vis(pub)]
-// #[Inline]
-// #[Ignore]
-
-// #[zestors]
 impl<T: Clone + Send + 'static> MyActor<T> {
     #[doc = "test1"]
     #[doc = "test1"]
@@ -175,11 +168,11 @@ where
 {
     fn trait_echo<'z>(
         &self,
-        message: Param<'z, String, AT>,
+        message: ParamT<'z, String, AT>,
     ) -> <AT as AddrType>::CallResult<String, Rcv<String>>
     where
         String: ParamType<'z, AT>,
-        Param<'z, String, AT>: Into<<AT as AddrType>::Msg<String>>,
+        ParamT<'z, String, AT>: Into<<AT as AddrType>::Msg<String>>,
     {
         self.call(Fn!(MyActor::<T>::handle_echo), message)
     }
@@ -189,10 +182,12 @@ where
 async fn test_basic_actor_works() {
     let (mut child, addr): (_, MyActorAddr<u32>) = spawn_actor::<MyActor<u32>>(10);
 
-    let res = addr.call(
+    let res: u32 = match addr.call(
         Fn!(MyActor::<u32>::handle_echo_double),
         ("hi".to_string(), "hello".to_string()),
-    );
+    ) {
+        Ok(_) | Err(_) => todo!(),
+    };
 
     let res = addr.man_hi("helli".to_string());
     let res = addr.man_hi2("helli".to_string(), "helli2".to_string());
@@ -231,7 +226,7 @@ async fn test_basic_actor_works() {
     child.soft_abort();
     match child.await {
         Ok(res) => match res {
-            Event::Signal(Signal::SoftAbort) => (),
+            Signal::Actor(ActorSignal::SoftAbort) => (),
             _ => panic!(),
         },
         Err(_) => panic!(),
@@ -254,7 +249,7 @@ impl<'z, T: Clone + Send + 'static, AT: AddrType> MyActorAddr<T, AT> {
         &self,
         message1: P1,
         message2: P2,
-    ) -> CallResult<AT, (String, String), ()>
+    ) -> CallResultT<AT, (String, String), ()>
     where
         (P1, P2): Into<AT::Msg<(String, String)>>,
     {
@@ -263,13 +258,13 @@ impl<'z, T: Clone + Send + 'static, AT: AddrType> MyActorAddr<T, AT> {
 
     pub(crate) fn man_rcv_v1(
         &self,
-        rcv: Param<'z, Rcv<u32>, AT>,
-        msg: Param<'z, String, AT>,
-    ) -> CallResult<AT, (Rcv<u32>, String), ()>
+        rcv: ParamT<'z, Rcv<u32>, AT>,
+        msg: ParamT<'z, String, AT>,
+    ) -> CallResultT<AT, (Rcv<u32>, String), ()>
     where
         String: ParamType<'z, AT>,
         Rcv<u32>: ParamType<'z, AT>,
-        (Param<'z, Rcv<u32>, AT>, Param<'z, String, AT>): Into<AT::Msg<(Rcv<u32>, String)>>,
+        (ParamT<'z, Rcv<u32>, AT>, ParamT<'z, String, AT>): Into<AT::Msg<(Rcv<u32>, String)>>,
     {
         self.call(Fn!(MyActor::<T>::handle_rcv), (rcv, msg))
     }
@@ -287,23 +282,23 @@ impl<'z, T: Clone + Send + 'static, AT: AddrType> MyActorAddr<T, AT> {
 
     pub(crate) fn man_echo(
         &self,
-        message: Param<'z, String, AT>,
-    ) -> CallResult<AT, String, Rcv<String>>
+        message: ParamT<'z, String, AT>,
+    ) -> CallResultT<AT, String, Rcv<String>>
     where
         String: ParamType<'z, AT>,
-        Param<'z, String, AT>: Into<AT::Msg<String>>,
+        ParamT<'z, String, AT>: Into<AT::Msg<String>>,
     {
         self.call(Fn!(MyActor::<T>::handle_echo), message)
     }
 
     pub(crate) fn man_echo2(
         &self,
-        message1: Param<'z, String, AT>,
-        message2: Param<'z, String, AT>,
-    ) -> CallResult<AT, (String, String), Rcv<String>>
+        message1: ParamT<'z, String, AT>,
+        message2: ParamT<'z, String, AT>,
+    ) -> CallResultT<AT, (String, String), Rcv<String>>
     where
         String: ParamType<'z, AT>,
-        (Param<'z, String, AT>, Param<'z, String, AT>): Into<AT::Msg<(String, String)>>,
+        (ParamT<'z, String, AT>, ParamT<'z, String, AT>): Into<AT::Msg<(String, String)>>,
     {
         self.call(Fn!(MyActor::<T>::handle_echo_double), (message1, message2))
     }
@@ -351,8 +346,8 @@ fn test(addr: MyActorAddr<u32>, remote_addr: MyActorAddr<u32, Distr>) {
 
 #[test]
 fn test_action_downcasting() {
-    let (action, _rcv) = Action::new(Fn!(MyActor::<u32>::handle_echo), "hi".to_string());
+    let (action, _rcv) = Action::new_split(Fn!(MyActor::<u32>::handle_echo), "hi".to_string());
     action.downcast::<String, Rcv<String>>().unwrap();
-    let (action, ()) = Action::new(Fn!(MyActor::<u32>::handle_hi), "hi".to_string());
+    let (action, ()) = Action::new_split(Fn!(MyActor::<u32>::handle_hi), "hi".to_string());
     action.downcast::<String, ()>().unwrap();
 }
