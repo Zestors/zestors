@@ -178,16 +178,15 @@ where
     }
 }
 
+#[allow(unused)]
 #[tokio::test]
 async fn test_basic_actor_works() {
     let (mut child, addr): (_, MyActorAddr<u32>) = spawn_actor::<MyActor<u32>>(10);
 
-    let res: u32 = match addr.call(
+    let res = addr.call(
         Fn!(MyActor::<u32>::handle_echo_double),
         ("hi".to_string(), "hello".to_string()),
-    ) {
-        Ok(_) | Err(_) => todo!(),
-    };
+    );
 
     let res = addr.man_hi("helli".to_string());
     let res = addr.man_hi2("helli".to_string(), "helli2".to_string());
@@ -311,9 +310,9 @@ fn test(addr: MyActorAddr<u32>, remote_addr: MyActorAddr<u32, Distr>) {
     let _ = remote_addr.man_echo2(&"hello".to_string(), &"hello".to_string());
     let _ = remote_addr.man_hi2(&"hello".to_string(), &"hello".to_string());
 
-    let (snd, rcv) = Snd::new();
+    let (snd, rcv) = new_channel();
     let _ = addr.man_rcv_v1(rcv, "hello".to_string());
-    let (snd, rcv) = Snd::new();
+    let (snd, rcv) = new_channel();
     let _ = remote_addr.man_rcv_v1(rcv, &"hello".to_string());
 
     let res = addr.call(
@@ -326,10 +325,10 @@ fn test(addr: MyActorAddr<u32>, remote_addr: MyActorAddr<u32, Distr>) {
         (&"hi".to_string(), &"hello".to_string()),
     );
 
-    let (snd, rcv) = Snd::new();
+    let (snd, rcv) = new_channel();
     let res = addr.call(Fn!(MyActor::<u32>::handle_rcv), (rcv, "hi".to_string()));
 
-    let (snd, rcv) = Snd::new();
+    let (snd, rcv) = new_channel();
     let res = remote_addr.call(Fn!(MyActor::<u32>::handle_rcv), (rcv, &"hi".to_string()));
 
     let addr2: Box<dyn EchoAddr> = Box::new(addr);

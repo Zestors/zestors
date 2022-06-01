@@ -51,7 +51,7 @@ impl<A> Action<A> {
 
     /// Create a new action. If the `HandlerFn` sends back a value, this will return a tuple
     /// of `(Action<A>, Rcv<R>)`, otherwise this will just return `Action<A>`.
-    pub fn new<M, R>(fun: HandlerFn<A, Snd<M>, R>, msg: M) -> R::NewActionType<A>
+    pub fn new<M, R>(fun: HandlerFn<A, M, R>, msg: M) -> R::NewActionType<A>
     where
         M: Send + 'static,
         R: RcvPart,
@@ -60,7 +60,7 @@ impl<A> Action<A> {
     }
 
     /// Same as `new`, except this will always return a tuple.
-    pub fn new_split<M, R>(fun: HandlerFn<A, Snd<M>, R>, msg: M) -> (Self, R)
+    pub fn new_split<M, R>(fun: HandlerFn<A, M, R>, msg: M) -> (Self, R)
     where
         M: Send + 'static,
         R: RcvPart,
@@ -95,11 +95,11 @@ pub trait RcvPart: Sized + Send + 'static {
     /// The full type returned when creating a new action for actor A.
     type NewActionType<A>;
 
-    fn new_split_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> (Action<A>, Self)
+    fn new_split_action<A, M>(fun: HandlerFn<A, M, Self>, msg: M) -> (Action<A>, Self)
     where
         M: Send + 'static;
 
-    fn new_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> Self::NewActionType<A>
+    fn new_action<A, M>(fun: HandlerFn<A, M, Self>, msg: M) -> Self::NewActionType<A>
     where
         M: Send + 'static;
 }
@@ -108,14 +108,14 @@ impl RcvPart for () {
     type SndPart = ();
     type NewActionType<A> = Action<A>;
 
-    fn new_split_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> (Action<A>, ())
+    fn new_split_action<A, M>(fun: HandlerFn<A, M, Self>, msg: M) -> (Action<A>, ())
     where
         M: Send + 'static,
     {
         (Self::new_action(fun, msg), ())
     }
 
-    fn new_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> Self::NewActionType<A>
+    fn new_action<A, M>(fun: HandlerFn<A, M, Self>, msg: M) -> Self::NewActionType<A>
     where
         M: Send + 'static,
     {
@@ -131,23 +131,23 @@ impl<R: Send + 'static> RcvPart for Rcv<R> {
     type SndPart = Snd<R>;
     type NewActionType<A> = (Action<A>, Rcv<R>);
 
-    fn new_split_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> (Action<A>, Rcv<R>)
+    fn new_split_action<A, M>(fun: HandlerFn<A, M, Self>, msg: M) -> (Action<A>, Rcv<R>)
     where
         M: Send + 'static,
     {
         Self::new_action(fun, msg)
     }
 
-    fn new_action<A, M>(fun: HandlerFn<A, Snd<M>, Self>, msg: M) -> Self::NewActionType<A>
+    fn new_action<A, M>(fun: HandlerFn<A, M, Self>, msg: M) -> Self::NewActionType<A>
     where
         M: Send + 'static,
     {
-        let (req, reply) = Snd::new();
+        let (snd, rcv) = new_channel();
         let action = Action {
             phantom_data: PhantomData,
             handler_fn: fun.into_any(),
-            params: Box::new((msg, req)),
+            params: Box::new((msg, snd)),
         };
-        (action, reply)
+        (action, rcv)
     }
 }

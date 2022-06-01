@@ -1,4 +1,3 @@
-use crate as zestors;
 use crate::core::*;
 use futures::{Future, FutureExt};
 use log::{info, warn};
@@ -12,12 +11,21 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::task::{JoinError, JoinHandle};
-use zestors_codegen::{Actor, Addr, NoScheduler};
 
 //------------------------------------------------------------------------------------------------
 //  Child
 //------------------------------------------------------------------------------------------------
 
+/// A child represents a unique handle to a child-process, used to build supervision trees.
+/// By default, the process is attached to this process, and will be aborted when the `Child` is
+/// dropped.
+/// 
+/// The process will be aborted by first sending a soft-abort message that can be gracefully
+/// handled by the actor. If the actor has not exited before the abort-timeout has passed,
+/// the process will be hard-aborted, by forcefully interrupting the process at a `.await` point.
+/// 
+/// This ensures that, if the processes from a tree, when the root-process is killed, all children
+/// will be able to exit properly.
 #[derive(Debug)]
 #[must_use = "If the child is dropped, the actor will be aborted."]
 pub struct Child<A: Actor> {
@@ -25,17 +33,16 @@ pub struct Child<A: Actor> {
     process_id: ProcessId,
     signal_sender: Option<Snd<ChildMsg>>,
     to_abort: bool,
-    abort_timeout: Duration,
+    abort_timeout: Option<Duration>,
     exited: Arc<AtomicBool>,
 }
-
 
 impl<A: Actor> Child<A> {
     pub(crate) fn new(
         handle: JoinHandle<A::Exit>,
         process_id: ProcessId,
         signal_sender: Snd<ChildMsg>,
-        abort_timeout: Duration,
+        abort_timeout: Option<Duration>,
         exited: Arc<AtomicBool>,
     ) -> Self {
         Self {
@@ -48,6 +55,47 @@ impl<A: Actor> Child<A> {
         }
     }
 
+    /// Detatches the process from the supervision tree.
+    ///
+    /// The process will not be aborted when this child is dropped.
+    pub fn detach(&mut self) {
+        self.to_abort = false;
+    }
+
+    /// Re-attaches the process to the supervision tree.
+    ///
+    /// The process will be aborted when this child is dropped.
+    pub fn re_attach(&mut self) {
+        self.to_abort = true;
+    }
+
+    /// Returns whether the process has already exited.
+    pub fn has_exited(&self) -> bool {
+        self.exited.load(Ordering::Relaxed)
+    }
+
+    /// Get the process_id of this actor.
+    pub fn process_id(&self) -> ProcessId {
+        self.process_id
+    }
+
+    /// Sets the amount of time this child has to exit before a hard-abort will
+    /// be sent.
+    pub fn set_abort_timeout(&mut self, timeout: Duration) {
+        self.abort_timeout = Some(timeout)
+    }
+
+    /// Disables the abort timeout.
+    ///
+    /// When this `Child` is dropped, the process will still receive a soft-abort,
+    /// but will never be hard-aborted.
+    pub fn disable_abort_timeout(&mut self) {
+        self.abort_timeout = None
+    }
+
+    /// Send a soft-abort message to this actor. This can only be done once.
+    ///
+    /// Returns true if the soft-abort was sent, false otherwise.
     pub fn soft_abort(&mut self) -> bool {
         match self.signal_sender.take() {
             Some(signal_sender) => {
@@ -70,16 +118,7 @@ impl<A: Actor> Future for Child<A> {
             .as_mut()
             .unwrap()
             .poll_unpin(cx)
-            .map(|result| match result {
-                Ok(exit) => Ok(exit),
-                Err(e) => {
-                    if e.is_cancelled() {
-                        Err(ExitError::HardAbort)
-                    } else {
-                        Err(ExitError::Panic(e.into_panic()))
-                    }
-                }
-            })
+            .map_err(|e| e.into())
     }
 }
 
@@ -98,19 +137,19 @@ impl<A: Actor> Drop for Child<A> {
             let _ = signal_sender.send(ChildMsg::SoftAbort);
         }
 
-        // Then spawn a task which will hard abort the process in 1000 ms
-        let handle = self.handle.take().unwrap();
-        let exited_arc = self.exited.clone();
-        tokio::task::spawn(async move {
-            let instant = tokio::time::Instant::now()
-                .checked_add(Duration::from_millis(10_000))
-                .unwrap();
-            tokio::time::sleep_until(instant).await;
-            if !exited_arc.load(Ordering::Relaxed) {
-                warn!("Child dropped, hard aborting!");
-                handle.abort()
-            }
-        });
+        if let Some(timeout) = self.abort_timeout.take() {
+            // Then spawn a task which will hard abort the process after the timeout
+            let handle = self.handle.take().unwrap();
+            let exited_arc = self.exited.clone();
+            tokio::task::spawn(async move {
+                let instant = tokio::time::Instant::now().checked_add(timeout).unwrap();
+                tokio::time::sleep_until(instant).await;
+                if !exited_arc.load(Ordering::Relaxed) {
+                    warn!("Child dropped, hard aborting!");
+                    handle.abort()
+                }
+            });
+        }
     }
 }
 

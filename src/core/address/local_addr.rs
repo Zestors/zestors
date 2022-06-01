@@ -80,7 +80,7 @@ impl<A> LocalAddr<A> {
 
     pub(crate) fn _call_addr<M, R>(
         &self,
-        function: HandlerFn<A, Snd<M>, R>,
+        function: HandlerFn<A, M, R>,
         msg: LocalMsg<M>,
     ) -> Result<R, LocalAddrError<M>>
     where
@@ -166,7 +166,7 @@ impl<A: 'static> Addressable<A> for LocalAddr<A> {
 
     fn call<P, M, R>(
         &self,
-        function: HandlerFn<A, Snd<M>, R>,
+        function: HandlerFn<A, M, R>,
         params: P,
     ) -> <Self::AddrType as AddrType>::CallResult<M, R>
     where
@@ -194,7 +194,7 @@ impl<A: 'static> Addressable<A> for LocalAddr<A> {
 #[derive(Debug)]
 pub struct LocalAddrError<T>(T);
 
-impl<A> From<async_channel::TrySendError<InternalMsg<A>>> for SendError<Action<A>> {
+impl<A> From<async_channel::TrySendError<InternalMsg<A>>> for SndError<Action<A>> {
     fn from(e: async_channel::TrySendError<InternalMsg<A>>) -> Self {
         let InternalMsg::Action(action) = e.into_inner();
         Self(action)

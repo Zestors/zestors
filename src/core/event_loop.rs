@@ -18,7 +18,7 @@ pub fn spawn_actor<A: Actor>(init: A::Init) -> (Child<A>, A::Addr) {
     // Process has not yet exited
     let exited = Arc::new(AtomicBool::new(false));
     // Create a oneshot channel through which a childsignal could be sent.
-    let (tx_signal, rx_signal) = Snd::<ChildMsg>::new();
+    let (tx_signal, rx_signal) = new_channel::<ChildMsg>();
     // Create the local address, and from that the actual address.
     let addr = <A::Addr as Addressable<A>>::from_addr(LocalAddr::new(tx, process_id));
     // And the actor inbox.
@@ -29,7 +29,7 @@ pub fn spawn_actor<A: Actor>(init: A::Init) -> (Child<A>, A::Addr) {
         handle,
         process_id,
         tx_signal,
-        Duration::from_millis(1_000),
+        Some(Duration::from_millis(1_000)),
         exited,
     );
     // And finally return both the child and the address

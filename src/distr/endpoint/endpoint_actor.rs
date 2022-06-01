@@ -107,12 +107,6 @@ impl EndpointActor {
         let node = system_node.node().clone();
         let system_id = system_node.id();
 
-        let (a, b) = spawn_actor::<EndpointActor>(todo!());
-
-        let b = b.clone();
-
-        
-
         if self.endpoint.id() == system_node.id() {
             let _ = snd.send(Err(NodeRegistrationError::EndpointIdIsOwnId));
             return Ok(Flow::Cont);

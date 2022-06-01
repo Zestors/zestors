@@ -1,24 +1,18 @@
-pub mod request;
+pub mod channel;
 pub mod actor;
-pub mod addressable;
 pub mod action;
-pub mod handler_fn;
 pub mod inbox;
 pub mod child;
-pub mod local_addr;
 pub mod event_loop;
-pub mod address_type;
+pub mod address;
 
-pub use address_type::*;
 pub use event_loop::*;
 pub use actor::*;
-pub use addressable::*;
 pub use action::*;
-pub use request::*;
-pub use handler_fn::*;
+pub use channel::*;
 pub use inbox::*;
 pub use child::*;
-pub use local_addr::*;
+pub use address::*;
 pub use futures::stream::{Stream, StreamExt};
 pub use anyhow::Error as AnyhowError;
 pub use async_trait::async_trait;

@@ -49,7 +49,7 @@ impl<A> DistrAddr<A> {
 
     fn _call_addr<M, R>(
         &self,
-        function: HandlerFn<A, Snd<M>, R>,
+        function: HandlerFn<A, M, R>,
         msg: RemoteMsg<M>,
     ) -> Result<R, LocalAddrError<M>>
     where
@@ -102,7 +102,7 @@ impl<A: 'static> Addressable<A> for DistrAddr<A> {
 
     fn call<P, M, R>(
         &self,
-        function: HandlerFn<A, Snd<M>, R>,
+        function: HandlerFn<A, M, R>,
         params: P,
     ) -> <Self::AddrType as AddrType>::CallResult<M, R>
     where

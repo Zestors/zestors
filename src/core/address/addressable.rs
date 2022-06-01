@@ -27,7 +27,7 @@ pub trait Addressable<A: 'static>: Address + Clone {
     /// Call a function on this address.
     fn call<M, MT, R>(
         &self,
-        function: HandlerFn<A, Snd<MT>, R>,
+        function: HandlerFn<A, MT, R>,
         msg: M,
     ) -> CallResultT<Self::AddrType, MT, R>
     where
