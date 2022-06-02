@@ -1,4 +1,4 @@
-use std::{error::Error, fmt::format, marker::PhantomData, task::Poll};
+use std::{error::Error, fmt::format, marker::PhantomData, task::Poll, ops::Deref};
 use zestors::{core::*, distr::distr_addr::Distr, Action, Fn};
 use zestors_codegen::{zestors, Addr, NoScheduler, Scheduler};
 
@@ -174,7 +174,7 @@ where
         String: ParamType<'z, AT>,
         ParamT<'z, String, AT>: Into<<AT as AddrType>::Msg<String>>,
     {
-        self.call(Fn!(MyActor::<T>::handle_echo), message)
+        <Self as Addressable<_>>::send(self, Fn!(MyActor::<T>::handle_echo), message)
     }
 }
 
@@ -183,7 +183,7 @@ where
 async fn test_basic_actor_works() {
     let (mut child, addr): (_, MyActorAddr<u32>) = spawn_actor::<MyActor<u32>>(10);
 
-    let res = addr.call(
+    let res = addr.send(
         Fn!(MyActor::<u32>::handle_echo_double),
         ("hi".to_string(), "hello".to_string()),
     );
@@ -241,7 +241,7 @@ impl<'z, T: Clone + Send + 'static, AT: AddrType> MyActorAddr<T, AT> {
     where
         P1: Into<AT::Msg<String>>,
     {
-        self.call(Fn!(MyActor::<T>::handle_hi), message)
+        <Self as Addressable<_>>::send(self, Fn!(MyActor::<T>::handle_hi), message)
     }
 
     pub(crate) fn man_hi2<P1, P2>(
@@ -252,7 +252,7 @@ impl<'z, T: Clone + Send + 'static, AT: AddrType> MyActorAddr<T, AT> {
     where
         (P1, P2): Into<AT::Msg<(String, String)>>,
     {
-        self.call(Fn!(MyActor::<T>::handle_hi_double), (message1, message2))
+        <Self as Addressable<_>>::send(self, Fn!(MyActor::<T>::handle_hi_double), (message1, message2))
     }
 
     pub(crate) fn man_rcv_v1(
@@ -265,7 +265,7 @@ impl<'z, T: Clone + Send + 'static, AT: AddrType> MyActorAddr<T, AT> {
         Rcv<u32>: ParamType<'z, AT>,
         (ParamT<'z, Rcv<u32>, AT>, ParamT<'z, String, AT>): Into<AT::Msg<(Rcv<u32>, String)>>,
     {
-        self.call(Fn!(MyActor::<T>::handle_rcv), (rcv, msg))
+        <Self as Addressable<_>>::send(self, Fn!(MyActor::<T>::handle_rcv), (rcv, msg))
     }
 
     pub(crate) fn man_rcv_v2<P1, P2>(
@@ -276,7 +276,7 @@ impl<'z, T: Clone + Send + 'static, AT: AddrType> MyActorAddr<T, AT> {
     where
         (P1, P2): Into<AT::Msg<(Rcv<u32>, String)>>,
     {
-        self.call(Fn!(MyActor::<T>::handle_rcv), (message1, message2))
+        <Self as Addressable<_>>::send(self, Fn!(MyActor::<T>::handle_rcv), (message1, message2))
     }
 
     pub(crate) fn man_echo(
@@ -287,7 +287,7 @@ impl<'z, T: Clone + Send + 'static, AT: AddrType> MyActorAddr<T, AT> {
         String: ParamType<'z, AT>,
         ParamT<'z, String, AT>: Into<AT::Msg<String>>,
     {
-        self.call(Fn!(MyActor::<T>::handle_echo), message)
+        <Self as Addressable<_>>::send(self, Fn!(MyActor::<T>::handle_echo), message)
     }
 
     pub(crate) fn man_echo2(
@@ -299,9 +299,17 @@ impl<'z, T: Clone + Send + 'static, AT: AddrType> MyActorAddr<T, AT> {
         String: ParamType<'z, AT>,
         (ParamT<'z, String, AT>, ParamT<'z, String, AT>): Into<AT::Msg<(String, String)>>,
     {
-        self.call(Fn!(MyActor::<T>::handle_echo_double), (message1, message2))
+        <Self as Addressable<_>>::send(self, Fn!(MyActor::<T>::handle_echo_double), (message1, message2))
     }
 }
+
+// impl<T: Clone + Send + 'static, AT: AddrType> Deref for MyActorAddr<T, AT> {
+//     type Target = AT::Addr<MyActor<T>>;
+
+//     fn deref(&self) -> &Self::Target {
+//         &self.addr
+//     }
+// }
 
 fn test(addr: MyActorAddr<u32>, remote_addr: MyActorAddr<u32, Distr>) {
     let res: Result<Rcv<String>, AddrSndError<String>> = addr.man_echo("hi".to_string());
@@ -315,21 +323,21 @@ fn test(addr: MyActorAddr<u32>, remote_addr: MyActorAddr<u32, Distr>) {
     let (snd, rcv) = new_channel();
     let _ = remote_addr.man_rcv_v1(rcv, &"hello".to_string());
 
-    let res = addr.call(
+    let res = addr.send(
         Fn!(MyActor::<u32>::handle_echo_double),
         ("hi".to_string(), "hello".to_string()),
     );
 
-    let res = remote_addr.call(
+    let res = remote_addr.send(
         Fn!(MyActor::<u32>::handle_echo_double),
         (&"hi".to_string(), &"hello".to_string()),
     );
 
     let (snd, rcv) = new_channel();
-    let res = addr.call(Fn!(MyActor::<u32>::handle_rcv), (rcv, "hi".to_string()));
+    let res = addr.send(Fn!(MyActor::<u32>::handle_rcv), (rcv, "hi".to_string()));
 
     let (snd, rcv) = new_channel();
-    let res = remote_addr.call(Fn!(MyActor::<u32>::handle_rcv), (rcv, &"hi".to_string()));
+    let res = remote_addr.send(Fn!(MyActor::<u32>::handle_rcv), (rcv, &"hi".to_string()));
 
     let addr2: Box<dyn EchoAddr> = Box::new(addr);
     let remote_addr2: Box<dyn EchoAddr<Distr>> = Box::new(remote_addr.clone());
@@ -337,7 +345,7 @@ fn test(addr: MyActorAddr<u32>, remote_addr: MyActorAddr<u32, Distr>) {
     let _ = remote_addr2.trait_echo(&"hi".to_string());
     let _ = addr2.trait_echo("hi".to_string());
 
-    let res: Result<Rcv<String>, AddrSndError<(String, String)>> = remote_addr.call(
+    let res: Result<Rcv<String>, AddrSndError<(String, String)>> = remote_addr.send(
         Fn!(MyActor::<u32>::handle_echo_double),
         (&"hi".to_string(), &"hello".to_string()),
     );

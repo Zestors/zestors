@@ -18,11 +18,11 @@ pub fn spawn_actor<A: Actor>(init: A::Init) -> (Child<A>, A::Addr) {
     // And from that the shared state
     let shared = Arc::new(SharedProcessData::new(process_id));
     // Create a oneshot channel through which a childsignal could be sent.
-    let (tx_signal, rx_signal) = new_channel::<ChildMsg>();
+    let (tx_signal, rx_signal) = new_channel::<StateSignal>();
     // Create the local address, and from that the actual address.
     let addr = <A::Addr as Addressable<A>>::from_addr(LocalAddr::new(tx, shared.clone()));
     // And the actor inbox.
-    let state = State::<A>::new(rx, rx_signal, process_id, shared.clone());
+    let state = State::<A>::new(rx, rx_signal, shared.clone());
     // Spawn the actor, and create the child from the handle
     let handle = tokio::task::spawn(event_loop(state, addr.clone(), init));
 
@@ -143,11 +143,11 @@ pub(crate) enum Event<A: Actor> {
     Action(Action<A>),
 }
 
-impl<A: Actor> From<InboxMsg<A>> for Event<A> {
-    fn from(msg: InboxMsg<A>) -> Self {
+impl<A: Actor> From<StateMsg<A>> for Event<A> {
+    fn from(msg: StateMsg<A>) -> Self {
         match msg {
-            InboxMsg::Action(action) => Event::Action(action),
-            InboxMsg::Signal(signal) => Event::Signal(signal.into()),
+            StateMsg::Action(action) => Event::Action(action),
+            StateMsg::Signal(signal) => Event::Signal(signal.into()),
         }
     }
 }

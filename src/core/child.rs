@@ -12,8 +12,6 @@ use std::{
 };
 use tokio::task::{JoinError, JoinHandle};
 
-
-
 //------------------------------------------------------------------------------------------------
 //  Child
 //------------------------------------------------------------------------------------------------
@@ -21,36 +19,36 @@ use tokio::task::{JoinError, JoinHandle};
 /// A child represents a unique handle to a child-process, used to build supervision trees.
 /// By default, the process is attached to this process, and will be aborted when the `Child` is
 /// dropped.
-/// 
+///
 /// The process will be aborted by first sending a soft-abort message that can be gracefully
 /// handled by the actor. If the actor has not exited before the abort-timeout has passed,
 /// the process will be hard-aborted, by forcefully interrupting the process at a `.await` point.
-/// 
+///
 /// This ensures that, if the processes from a tree, when the root-process is killed, all children
 /// will be able to exit properly.
 #[derive(Debug)]
 #[must_use = "If the child is dropped, the actor will be aborted."]
 pub struct Child<A: Actor> {
     handle: Option<JoinHandle<A::Exit>>,
-    signal_sender: Option<Snd<ChildMsg>>,
+    signal_sender: Option<Snd<StateSignal>>,
     to_abort: bool,
     abort_timeout: Option<Duration>,
-    shared: Arc<SharedProcessData>
+    shared: Arc<SharedProcessData>,
 }
 
 impl<A: Actor> Child<A> {
     pub(crate) fn new(
         handle: JoinHandle<A::Exit>,
-        signal_sender: Snd<ChildMsg>,
+        signal_sender: Snd<StateSignal>,
         abort_timeout: Option<Duration>,
-        shared: Arc<SharedProcessData>
+        shared: Arc<SharedProcessData>,
     ) -> Self {
         Self {
             handle: Some(handle),
             signal_sender: Some(signal_sender),
             to_abort: true,
             abort_timeout,
-            shared
+            shared,
         }
     }
 
@@ -98,7 +96,7 @@ impl<A: Actor> Child<A> {
     pub fn soft_abort(&mut self) -> bool {
         match self.signal_sender.take() {
             Some(signal_sender) => {
-                let _ = signal_sender.send(ChildMsg::SoftAbort);
+                let _ = signal_sender.send(StateSignal::SoftAbort);
                 true
             }
             None => false,
@@ -126,23 +124,23 @@ impl<A: Actor> Unpin for Child<A> {}
 impl<A: Actor> Drop for Child<A> {
     fn drop(&mut self) {
         // If we should not abort, or if the child has already exited, don't do anything
-        let exited = self.shared.has_exited();
-        if !self.to_abort || exited {
+        if !self.to_abort || self.shared.has_exited() {
             return;
         }
 
         // If there is still a signal sender, send a soft abort message first
         if let Some(signal_sender) = self.signal_sender.take() {
-            let _ = signal_sender.send(ChildMsg::SoftAbort);
+            let _ = signal_sender.send(StateSignal::SoftAbort);
         }
 
+        // If a timeout is set, spawn a task which will hard abort the process after the timeout
         if let Some(timeout) = self.abort_timeout.take() {
-            // Then spawn a task which will hard abort the process after the timeout
             let handle = self.handle.take().unwrap();
             let shared_arc = self.shared.clone();
             tokio::task::spawn(async move {
-                let instant = tokio::time::Instant::now().checked_add(timeout).unwrap();
-                tokio::time::sleep_until(instant).await;
+                tokio::time::sleep_until(tokio::time::Instant::now().checked_add(timeout).unwrap())
+                    .await;
+                // If the child has still not exited, hard-abort it.
                 if !shared_arc.has_exited() {
                     warn!("Child dropped, hard aborting!");
                     handle.abort()

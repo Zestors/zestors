@@ -127,17 +127,17 @@ pub enum ActorSignal {
     Dead,
 }
 
-impl From<InboxSignal> for ActorSignal {
-    fn from(signal: InboxSignal) -> Self {
+impl From<StateSignal> for ActorSignal {
+    fn from(signal: StateSignal) -> Self {
         match signal {
-            InboxSignal::SoftAbort => ActorSignal::SoftAbort,
-            InboxSignal::Isolated => ActorSignal::Isolated,
+            StateSignal::SoftAbort => ActorSignal::SoftAbort,
+            StateSignal::Isolated => ActorSignal::Isolated,
         }
     }
 }
 
-impl<A: Actor> From<InboxSignal> for Signal<A> {
-    fn from(signal: InboxSignal) -> Self {
+impl<A: Actor> From<StateSignal> for Signal<A> {
+    fn from(signal: StateSignal) -> Self {
         Signal::Actor(signal.into())
     }
 }

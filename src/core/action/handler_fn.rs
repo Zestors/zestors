@@ -420,14 +420,14 @@ pub mod test {
 
     #[allow(unused)]
     fn all_function_types_compile_test(addr: MyActorAddr) {
-        let () = addr.call(Fn!(MyActor::msg1), 10).unwrap();
-        let () = addr.call(Fn!(MyActor::msg2), 10).unwrap();
-        let () = addr.call(Fn!(MyActor::async_msg1), 10).unwrap();
-        let () = addr.call(Fn!(MyActor::async_msg2), 10).unwrap();
-        let _: Rcv<u64> = addr.call(Fn!(MyActor::req1), 10).unwrap();
-        let _: Rcv<u64> = addr.call(Fn!(MyActor::req2), 10).unwrap();
-        let _: Rcv<u64> = addr.call(Fn!(MyActor::async_req1), 10).unwrap();
-        let _: Rcv<u64> = addr.call(Fn!(MyActor::async_req2), 10).unwrap();
+        let () = addr.send(Fn!(MyActor::msg1), 10).unwrap();
+        let () = addr.send(Fn!(MyActor::msg2), 10).unwrap();
+        let () = addr.send(Fn!(MyActor::async_msg1), 10).unwrap();
+        let () = addr.send(Fn!(MyActor::async_msg2), 10).unwrap();
+        let _: Rcv<u64> = addr.send(Fn!(MyActor::req1), 10).unwrap();
+        let _: Rcv<u64> = addr.send(Fn!(MyActor::req2), 10).unwrap();
+        let _: Rcv<u64> = addr.send(Fn!(MyActor::async_req1), 10).unwrap();
+        let _: Rcv<u64> = addr.send(Fn!(MyActor::async_req2), 10).unwrap();
 
         Fn!(MyActor::msg1);
         Fn!(MyActor::msg2);

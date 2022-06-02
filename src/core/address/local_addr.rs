@@ -1,9 +1,5 @@
 use crate::core::*;
-use futures::{Future, Stream};
-use std::{
-    any::Any, convert::Infallible, error::Error, marker::PhantomData, pin::Pin, sync::Arc,
-    task::Poll,
-};
+use std::{any::Any, sync::Arc};
 
 /// An address for processes within the same system.
 ///
@@ -21,16 +17,6 @@ impl<A> LocalAddr<A> {
         shared: Arc<SharedProcessData>,
     ) -> Self {
         Self { sender, shared }
-    }
-
-    /// Send an action to this address
-    pub fn send(&self, action: Action<A>) -> Result<(), AddrSndError<Action<A>>> {
-        self.sender
-            .try_send(InternalMsg::Action(action))
-            .map_err(|e| {
-                let InternalMsg::Action(action) = e.into_inner();
-                AddrSndError(action)
-            })
     }
 
     /// Get the amount of messages currently in the inbox.
@@ -59,24 +45,24 @@ impl<A> LocalAddr<A> {
     }
 
     /// Wait for the process to exit.
-    /// 
+    ///
     /// If the process has already exited, this returns immeadeately.
     pub async fn await_exit(&self) {
         self.shared.await_exit().await
     }
 
-    /// Call this address with a function.
-    pub fn call<M, R>(
+    /// Send a message to this address.
+    pub fn send<M, R>(
         &self,
         function: HandlerFn<A, M, R>,
-        msg: LocalMsg<M>,
+        msg: impl Into<LocalMsg<M>>,
     ) -> Result<R, AddrSndError<M>>
     where
         M: Send + 'static,
         R: RcvPart,
     {
-        let (action, receiver) = Action::new_split(function, msg.0);
-        if let Err(AddrSndError(action)) = self.send(action) {
+        let (action, receiver) = Action::new_split(function, msg.into().0);
+        if let Err(AddrSndError(action)) = self.send_action(action) {
             let (msg, _snd) = match action.downcast::<M, R>() {
                 Ok(msg) => msg,
                 Err(_) => unreachable!(),
@@ -84,6 +70,16 @@ impl<A> LocalAddr<A> {
             return Err(AddrSndError(msg));
         }
         Ok(receiver)
+    }
+
+    /// Send an action to this address
+    pub fn send_action(&self, action: impl Into<Action<A>>) -> Result<(), AddrSndError<Action<A>>> {
+        self.sender
+            .try_send(InternalMsg::Action(action.into()))
+            .map_err(|e| {
+                let InternalMsg::Action(action) = e.into_inner();
+                AddrSndError(action)
+            })
     }
 }
 
@@ -167,6 +163,30 @@ impl<A: 'static> Address for LocalAddr<A> {
     }
 
     type AddrType = Local;
+
+    // fn msg_count(&self) -> usize {
+    //     self.msg_count()
+    // }
+
+    // fn is_closed(&self) -> bool {
+    //     self.is_closed()
+    // }
+
+    // fn has_exited(&self) -> bool {
+    //     self.has_exited()
+    // }
+
+    // fn process_id(&self) -> ProcessId {
+    //     self.process_id()
+    // }
+
+    // fn addr_count(&self) -> usize {
+    //     self.
+    // }
+
+    // fn await_exit(&self) -> std::pin::Pin<Box<dyn futures::Future<Output = ()> + Send + 'static>> {
+    //     todo!()
+    // }
 }
 
 //------------------------------------------------------------------------------------------------
@@ -178,12 +198,12 @@ impl<A: 'static> Addressable<A> for LocalAddr<A> {
         addr
     }
 
-    fn inner(&self) -> &LocalAddr<A> {
-        self
+    fn inner(addr: &Self) -> &LocalAddr<A> {
+        addr
     }
 
-    fn call<P, M, R>(
-        &self,
+    fn send<P, M, R>(
+        addr: &Self,
         function: HandlerFn<A, M, R>,
         params: P,
     ) -> <Self::AddrType as AddrType>::CallResult<M, R>
@@ -192,14 +212,14 @@ impl<A: 'static> Addressable<A> for LocalAddr<A> {
         R: RcvPart,
         M: Send + 'static,
     {
-        self.call(function, params.into())
+        addr.send(function, params.into())
     }
 
-    fn send<T>(&self, action: T) -> <Self::AddrType as AddrType>::SendResult<A>
+    fn send_action<T>(addr: &Self, action: T) -> <Self::AddrType as AddrType>::SendResult<A>
     where
         T: Into<<Self::AddrType as AddrType>::Action<A>>,
     {
-        self.send(action.into())
+        addr.send_action(action.into())
     }
 }
 

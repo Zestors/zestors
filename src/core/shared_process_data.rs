@@ -1,9 +1,6 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-
-use futures::{Future, FutureExt};
-use tokio::sync::Notify;
-
 use crate::core::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::Notify;
 
 /// Any data that should be accessable by the Child, Addr and State.
 #[derive(Debug)]

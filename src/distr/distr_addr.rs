@@ -40,14 +40,14 @@ pub struct DistrAddr<A> {
 unsafe impl<A> Send for DistrAddr<A> {}
 
 impl<A> DistrAddr<A> {
-    fn _send(&self, action: RemoteAction<A>) -> Result<(), AddrSndError<Action<A>>> {
+    pub fn send_action(&self, action: impl Into<RemoteAction<A>>) -> Result<(), AddrSndError<Action<A>>> {
         todo!()
     }
 
-    fn _call_addr<M, R>(
+    pub fn send<M, R>(
         &self,
         function: HandlerFn<A, M, R>,
-        msg: RemoteMsg<M>,
+        msg: impl Into<RemoteMsg<M>>,
     ) -> Result<R, AddrSndError<M>>
     where
         M: Send + 'static,
@@ -91,12 +91,12 @@ impl<A: 'static> Addressable<A> for DistrAddr<A> {
     fn from_addr(addr: <Self::AddrType as AddrType>::Addr<A>) -> Self {
         addr
     }
-    fn inner(&self) -> &<Self::AddrType as AddrType>::Addr<A> {
-        self
+    fn inner(addr: &Self) -> &<Self::AddrType as AddrType>::Addr<A> {
+        addr
     }
 
-    fn call<P, M, R>(
-        &self,
+    fn send<P, M, R>(
+        addr: &Self,
         function: HandlerFn<A, M, R>,
         params: P,
     ) -> <Self::AddrType as AddrType>::CallResult<M, R>
@@ -105,14 +105,14 @@ impl<A: 'static> Addressable<A> for DistrAddr<A> {
         R: RcvPart,
         M: Send + 'static,
     {
-        self.inner()._call_addr(function, params.into())
+        addr.send(function, params.into())
     }
 
-    fn send<T>(&self, action: T) -> <Self::AddrType as AddrType>::SendResult<A>
+    fn send_action<T>(addr: &Self, action: T) -> <Self::AddrType as AddrType>::SendResult<A>
     where
         T: Into<<Self::AddrType as AddrType>::Action<A>>,
     {
-        self.inner()._send(action.into())
+        addr.send_action(action.into())
     }
 }
 

@@ -1,10 +1,23 @@
-use crate::core::*;
+use crate::{core::*, distr::Distr};
 use dyn_clone::DynClone;
-use std::any::Any;
+use futures::Future;
+use std::{any::Any, pin::Pin};
 
 //------------------------------------------------------------------------------------------------
 //  Addressable
 //------------------------------------------------------------------------------------------------
+
+pub trait BaseAddr<A> {
+    type Addr;
+}
+
+impl<A> BaseAddr<A> for Local {
+    type Addr = LocalAddr<A>;
+}
+
+impl<A> BaseAddr<A> for Distr {
+    type Addr = LocalAddr<A>;
+}
 
 /// A trait implemented by all addresses.
 ///
@@ -14,19 +27,19 @@ pub trait Addressable<A: 'static>: Address + Clone {
     fn from_addr(addr: AddrT<Self::AddrType, A>) -> Self;
 
     /// Return a reference to the core address. (LocalAddr or DistrAddr)
-    fn inner(&self) -> &AddrT<Self::AddrType, A>;
+    fn inner(addr: &Self) -> &AddrT<Self::AddrType, A>;
 
     /// Send an action to this address.
-    fn send<T>(&self, action: T) -> SendResultT<Self::AddrType, A>
+    fn send_action<T>(addr: &Self, action: T) -> SendResultT<Self::AddrType, A>
     where
         T: Into<ActionT<Self::AddrType, A>>,
     {
-        self.inner().send(action)
+        <AddrT<Self::AddrType, A> as Addressable<A>>::send_action(Self::inner(addr), action)
     }
 
     /// Call a function on this address.
-    fn call<M, MT, R>(
-        &self,
+    fn send<M, MT, R>(
+        addr: &Self,
         function: HandlerFn<A, MT, R>,
         msg: M,
     ) -> CallResultT<Self::AddrType, MT, R>
@@ -35,7 +48,7 @@ pub trait Addressable<A: 'static>: Address + Clone {
         MT: Send + 'static,
         R: RcvPart,
     {
-        self.inner().call(function, msg)
+        <AddrT<Self::AddrType, A> as Addressable<A>>::send(Self::inner(addr), function, msg)
     }
 }
 
@@ -61,6 +74,21 @@ pub trait Address: std::fmt::Debug + Send + DynClone {
     fn as_any(&self) -> &dyn Any;
     /// Get this address as an `&mut dyn ANy`.
     fn as_mut_any(&mut self) -> &mut dyn Any;
+
+    // /// Get the amount of messages currently in the inbox.
+    // fn msg_count(&self) -> usize;
+    // /// Whether this actor still accepts new messages.
+    // fn is_closed(&self) -> bool;
+    // /// Whether the process has exited.
+    // fn has_exited(&self) -> bool;
+    // /// Get the unique process id of this process
+    // fn process_id(&self) -> ProcessId;
+    // /// Get the amount of addresses of this actor.
+    // fn addr_count(&self) -> usize;
+    // /// Wait for the process to exit.
+    // ///
+    // /// If the process has already exited, this returns immeadeately.
+    // fn await_exit(&self) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
 }
 
 //------------------------------------------------------------------------------------------------
