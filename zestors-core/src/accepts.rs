@@ -1,8 +1,5 @@
-use std::marker::PhantomData;
-
-use futures::Future;
-
 use crate::*;
+use std::{any::TypeId, marker::PhantomData};
 
 pub trait Accepts<M: Message>: AddressKind {
     fn try_send(address: &Self::Address, msg: M) -> Result<Returns<M>, TrySendError<M>>;
@@ -11,48 +8,8 @@ pub trait Accepts<M: Message>: AddressKind {
     fn send(address: &Self::Address, msg: M) -> SendFut<M>;
 }
 
-pub enum SendFut<M: Message> {
-    Dynamic(M),
-    Static(M),
-}
-
-impl<M> Future for SendFut<M>
-where
-    M: Message,
-{
-    type Output = Result<Returns<M>, SendError<M>>;
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        todo!()
-    }
-}
-
-impl<M: Message, T> Accepts<M> for T
-where
-    T: AddressKind<Address = StaticAddress<T>> + ProtocolMessage<M>,
-{
-    fn try_send(address: &Self::Address, msg: M) -> Result<Returns<M>, TrySendError<M>> {
-        address.try_send(msg)
-    }
-
-    fn send_now(address: &Self::Address, msg: M) -> Result<Returns<M>, TrySendError<M>> {
-        todo!()
-    }
-
-    fn send_blocking(address: &Self::Address, msg: M) -> Result<Returns<M>, SendError<M>> {
-        todo!()
-    }
-
-    fn send(address: &Self::Address, msg: M) -> SendFut<M> {
-        todo!()
-    }
-}
-
 pub trait AddressKind {
-    type Address: tiny_actor::DynChannel;
+    type Address: tiny_actor::DynChannel + Clone;
 }
 
 impl<P: Protocol> AddressKind for P {
@@ -60,6 +17,19 @@ impl<P: Protocol> AddressKind for P {
 }
 
 pub trait IntoDyn<D: ?Sized> {}
+
+pub struct Dyn<T: ?Sized>(PhantomData<T>);
+
+unsafe impl<T: ?Sized> Send for Dyn<T> {}
+unsafe impl<T: ?Sized> Sync for Dyn<T> {}
+
+impl<T: ?Sized> AddressKind for Dyn<T> {
+    type Address = DynAddress<Dyn<T>>;
+}
+
+pub trait IsDyn {
+    fn message_ids() -> Box<[TypeId]>;
+}
 
 macro_rules! dyn_types {
     ($($ident:ident $(<$( $ty:ident ),*>)?),*) => {
@@ -71,35 +41,14 @@ macro_rules! dyn_types {
             impl<T, $($($ty: Message,)?)*> IntoDyn<Dyn<dyn $ident<$($($ty,)?)*>>> for Dyn<T>
             where
                 T: ?Sized $($( + ProtocolMessage<$ty> )?)* {}
+
+            impl<$($($ty: Message + 'static,)?)*> IsDyn for Dyn<dyn $ident< $($($ty,)?)*>> {
+                fn message_ids() -> Box<[TypeId]> {
+                    Box::new([$($(TypeId::of::<$ty>(),)?)*])
+                }
+            }
         )*
     };
-}
-
-pub struct Dyn<T: ?Sized>(PhantomData<*const T>);
-
-impl<T: ?Sized> AddressKind for Dyn<T> {
-    type Address = DynAddress<Dyn<T>>;
-}
-
-impl<M: Message, T: ?Sized> Accepts<M> for Dyn<T>
-where
-    Self: IntoDyn<Dyn<T>>,
-{
-    fn try_send(address: &Self::Address, msg: M) -> Result<Returns<M>, TrySendError<M>> {
-        todo!()
-    }
-
-    fn send_now(address: &Self::Address, msg: M) -> Result<Returns<M>, TrySendError<M>> {
-        todo!()
-    }
-
-    fn send_blocking(address: &Self::Address, msg: M) -> Result<Returns<M>, SendError<M>> {
-        todo!()
-    }
-
-    fn send(address: &Self::Address, msg: M) -> SendFut<M> {
-        todo!()
-    }
 }
 
 dyn_types! {
@@ -119,25 +68,25 @@ dyn_types! {
 #[macro_export]
 macro_rules! Accepts {
     () => {
-        dyn $crate::AcceptsNone
+        Dyn<dyn $crate::AcceptsNone>
     };
     ($ty1:ty) => {
-        dyn $crate::AcceptsOne<$ty1>
+        Dyn<dyn $crate::AcceptsOne<$ty1>>
     };
     ($ty1:ty, $ty2:ty) => {
-        dyn $crate::AcceptsTwo<$ty1, $ty2>
+        Dyn<dyn $crate::AcceptsTwo<$ty1, $ty2>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty) => {
-        dyn $crate::AcceptsThree<$ty1, $ty2, $ty3>
+        Dyn<dyn $crate::AcceptsThree<$ty1, $ty2, $ty3>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty) => {
-        dyn $crate::AcceptsFour<$ty1, $ty2, $ty3, $ty4>
+        Dyn<dyn $crate::AcceptsFour<$ty1, $ty2, $ty3, $ty4>>
     };
 }
 
 #[macro_export]
 macro_rules! Address {
     ($($ty:ty),*) => {
-        $crate::Address<Dyn<$crate::Accepts![$($ty),*]>>
+        $crate::Address<$crate::Accepts![$($ty),*]>
     };
 }
