@@ -76,6 +76,9 @@ macro_rules! channel_methods {
         pub fn halt_some(&self, n: u32) {
             self.$at.halt_some(n)
         }
+        pub fn halt(&self) {
+            self.$at.halt()
+        }
         pub fn process_count(&self) -> usize {
             self.$at.process_count()
         }
@@ -165,3 +168,41 @@ macro_rules! into_dyn_methods {
 }
 
 pub(crate) use into_dyn_methods;
+
+macro_rules! child_methods {
+    ($at:ident) => {
+        pub fn attach(&mut self, duration: Duration) -> Option<Duration> {
+            self.$at.attach(duration)
+        }
+    
+        pub fn detach(&mut self) -> Option<Duration> {
+            self.$at.detach()
+        }
+    
+        pub fn is_aborted(&self) -> bool {
+            self.$at.is_aborted()
+        }
+    
+        pub fn is_attached(&self) -> bool {
+            self.$at.is_attached()
+        }
+    
+        pub fn link(&self) -> &Link {
+            self.$at.link()
+        }
+
+        pub fn abort(&mut self) -> bool {
+            self.$at.abort()
+        }
+
+        pub fn is_finished(&self) -> bool {
+            self.$at.is_finished()
+        }
+
+        pub fn get_address(&self) -> Address<T> {
+            Address::from_inner(self.inner.get_address())
+        }
+    };
+}
+
+pub(crate) use child_methods;

@@ -1,6 +1,7 @@
-use std::{any::TypeId, fmt::Debug};
+use std::{any::TypeId, fmt::Debug, time::Duration};
 
 use futures::{Future, FutureExt};
+use tokio::task::JoinHandle;
 
 use crate::*;
 
@@ -23,12 +24,30 @@ where
 {
     gen::channel_methods!(inner);
     gen::send_methods!(inner);
+    gen::child_methods!(inner);
 
     pub(crate) fn from_inner(
         inner: tiny_actor::Child<E, <T::Type as ChannelType>::Channel>,
     ) -> Self {
         Self { inner }
     }
+
+    pub fn into_joinhandle(self) -> JoinHandle<E> {
+        self.inner.into_joinhandle()
+    }
+
+    pub fn into_pool(self) -> ChildPool<E, T> {
+        ChildPool::from_inner(self.inner.into_pool())
+    }
+
+    pub fn shutdown(
+        &mut self,
+        timeout: Duration,
+    ) -> Shutdown<'_, E, <T::Type as ChannelType>::Channel> {
+        self.inner.shutdown(timeout)
+    }
+
+
 }
 
 //-------------------------------------------------

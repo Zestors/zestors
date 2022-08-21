@@ -16,5 +16,5 @@ pub use {
 
 pub use tiny_actor::{
     BackPressure, Capacity, Config, DynChannel, ExitError, HaltedError, Inbox, Link, Rcv,
-    RecvError, SendError, Snd as SndRaw, SpawnError, TrySendError, TrySpawnError,
+    RecvError, SendError, Snd as SndRaw, SpawnError, TrySendError, TrySpawnError, Shutdown, ShutdownPool
 };

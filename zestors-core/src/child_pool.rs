@@ -1,6 +1,7 @@
-use std::any::TypeId;
+use std::{any::TypeId, time::Duration};
 
-use futures::{Stream, StreamExt};
+use futures::{Future, Stream, StreamExt};
+use tokio::task::JoinHandle;
 
 use crate::*;
 
@@ -23,11 +24,41 @@ where
 {
     gen::channel_methods!(inner);
     gen::send_methods!(inner);
+    gen::child_methods!(inner);
 
     pub(crate) fn from_inner(
         inner: tiny_actor::ChildPool<E, <T::Type as ChannelType>::Channel>,
     ) -> Self {
         Self { inner }
+    }
+
+    pub fn into_joinhandles(self) -> Vec<JoinHandle<E>> {
+        self.inner.into_joinhandles()
+    }
+
+    pub fn task_count(&self) -> usize {
+        self.inner.task_count()
+    }
+
+    pub fn handle_count(&self) -> usize {
+        self.inner.handle_count()
+    }
+
+    pub fn shutdown(
+        &mut self,
+        timeout: Duration,
+    ) -> ShutdownPool<'_, E, <T::Type as ChannelType>::Channel> {
+        self.inner.shutdown(timeout)
+    }
+
+    pub fn try_spawn<P, Fun, Fut>(&mut self, fun: Fun) -> Result<(), TrySpawnError<Fun>>
+    where
+        Fun: FnOnce(Inbox<P>) -> Fut + Send + 'static,
+        Fut: Future<Output = E> + Send + 'static,
+        P: Protocol,
+        E: Send + 'static,
+    {
+        self.inner.try_spawn(fun)
     }
 }
 
@@ -41,6 +72,16 @@ where
     P: ActorType<Type = Static<P>>,
 {
     gen::into_dyn_methods!(inner, ChildPool<E, T>);
+
+    pub fn spawn<Fun, Fut>(&mut self, fun: Fun) -> Result<(), SpawnError<Fun>>
+    where
+        Fun: FnOnce(Inbox<P>) -> Fut + Send + 'static,
+        Fut: Future<Output = E> + Send + 'static,
+        E: Send + 'static,
+        P: Protocol,
+    {
+        self.inner.spawn(fun)
+    }
 }
 
 //-------------------------------------------------
