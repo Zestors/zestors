@@ -27,7 +27,7 @@ impl BoxedMessage {
         }
     }
 
-    /// Downcast the `BoxedMessage` to the `Sends<M>`, and then return the message
+    /// Downcast the `BoxedMessage` to the `Sends<M>`, and then get `M`.
     pub fn downcast_into_msg<M>(self, returns: Returns<M>) -> Result<M, Self>
     where
         M: Message + Send + 'static,

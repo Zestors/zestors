@@ -1,21 +1,38 @@
 use crate::*;
 use futures::{Future, FutureExt};
 use std::{any::TypeId, pin::Pin};
-use tiny_actor::SendError;
 
 //------------------------------------------------------------------------------------------------
 //  Address
 //------------------------------------------------------------------------------------------------
 
-pub struct Address<T: ActorType = Accepts![]> {
+/// # Types
+/// An `Address` can be of two basic types: Dynamic or static.
+///
+/// ## Static
+/// A static address is typed the [Protocol] of the actor: `Address<P> where P: Protocol`. Any
+/// messages the protocol accepts can be sent to this address.
+///
+/// ## Dynamic
+/// A dynamic address is typed by the messages it accepts: [`Address![u32, u64, ...]`](Address!). Any messages
+/// that appear can be sent to this address. An `Address![]` can also be written as an `Address`.
+///
+/// __Note__: `Address![u32, u64]` == `Address<Accepts![u32, u64]>` ==
+/// `Address<Dyn<dyn AcceptsTwo<u32, u64>>`, it does not matter which of these representations is used.
+/// 
+/// # Awaiting
+/// An `Address` can be awaited and will return once the actor has exited.
+/// 
+/// #### _For more information, please read the [module](crate) documentation._
+pub struct Addr<T: ActorType = DynAccepts![]> {
     inner: tiny_actor::Address<<T::Type as ChannelType>::Channel>,
 }
 
 //-------------------------------------------------
-//  Any address
+//  Implementation
 //-------------------------------------------------
 
-impl<T: ActorType> Address<T> {
+impl<T: ActorType> Addr<T> {
     pub fn from_inner(inner: tiny_actor::Address<<T::Type as ChannelType>::Channel>) -> Self {
         Self { inner }
     }
@@ -24,36 +41,26 @@ impl<T: ActorType> Address<T> {
     gen::send_methods!(inner);
 }
 
-//-------------------------------------------------
-//  Static address
-//-------------------------------------------------
-
-impl<P> Address<P>
+impl<P> Addr<P>
 where
     P: ActorType<Type = Static<P>>,
 {
-    gen::into_dyn_methods!(inner, Address<T>);
+    gen::into_dyn_methods!(inner, Addr<T>);
 }
 
-//-------------------------------------------------
-//  Dynamic address
-//-------------------------------------------------
-
-impl<D> Address<D>
+impl<D> Addr<D>
 where
     D: ActorType<Type = Dynamic>,
 {
     gen::unchecked_send_methods!(inner);
-    gen::transform_methods!(inner, Address<T>);
+    gen::transform_methods!(inner, Addr<T>);
 }
 
 //-------------------------------------------------
-//  Address traits
+//  Traits
 //-------------------------------------------------
 
-impl<T: ActorType> Unpin for Address<T> {}
-
-impl<T: ActorType> Future for Address<T> {
+impl<T: ActorType> Future for Addr<T> {
     type Output = ();
 
     fn poll(
@@ -64,7 +71,9 @@ impl<T: ActorType> Future for Address<T> {
     }
 }
 
-impl<T: ActorType> Clone for Address<T> {
+impl<T: ActorType> Unpin for Addr<T> {}
+
+impl<T: ActorType> Clone for Addr<T> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -72,39 +81,8 @@ impl<T: ActorType> Clone for Address<T> {
     }
 }
 
-impl<T: ActorType> std::fmt::Debug for Address<T> {
+impl<T: ActorType> std::fmt::Debug for Addr<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Address").field(&self.inner).finish()
     }
 }
-
-//------------------------------------------------------------------------------------------------
-//  IntoAddress
-//------------------------------------------------------------------------------------------------
-
-pub trait IntoAddress<T: ActorType> {
-    fn into_address(self) -> Address<T>;
-}
-
-impl<R: ?Sized, T: ?Sized> IntoAddress<Dyn<T>> for Address<Dyn<R>>
-where
-    Dyn<R>: ActorType<Type = Dynamic> + IntoDynamic<Dyn<T>>,
-{
-    fn into_address(self) -> Address<Dyn<T>> {
-        self.transform()
-    }
-}
-
-impl<P, T> IntoAddress<Dyn<T>> for Address<P>
-where
-    P: Protocol + IntoDynamic<Dyn<T>>,
-    T: ?Sized,
-{
-    fn into_address(self) -> Address<Dyn<T>> {
-        self.into_dyn()
-    }
-}
-
-//------------------------------------------------------------------------------------------------
-//  SendFut
-//-----------------------------------------------------------------------------------

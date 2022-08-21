@@ -200,8 +200,8 @@ pub(crate) mod gen {
                 self.$at.is_finished()
             }
     
-            pub fn get_address(&self) -> Address<T> {
-                Address::from_inner(self.inner.get_address())
+            pub fn get_address(&self) -> Addr<T> {
+                Addr::from_inner(self.inner.get_address())
             }
         };
     }

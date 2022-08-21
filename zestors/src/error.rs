@@ -10,13 +10,17 @@ pub use zestors_core::error::{
 };
 
 //------------------------------------------------------------------------------------------------
-//  New errors
+//  TxError 
 //------------------------------------------------------------------------------------------------
 
 /// Error returned when sending a message using a [Tx].
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
 #[error("Failed to send to Tx because it is closed.")]
 pub struct TxError<M>(pub M);
+
+//------------------------------------------------------------------------------------------------
+//  RxError
+//------------------------------------------------------------------------------------------------
 
 /// Error returned when receiving a message using an [Rx].
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
@@ -29,7 +33,11 @@ impl From<oneshot::error::RecvError> for RxError {
     }
 }
 
-/// Error returned when trying to receive a message using an [Rx].
+//------------------------------------------------------------------------------------------------
+//  TryRxError
+//------------------------------------------------------------------------------------------------
+
+/// Error returned when trying to receive a message using an [Rx](crate::request::Rx).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
 pub enum TryRxError {
     #[error("Closed")]

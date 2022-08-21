@@ -1,7 +1,7 @@
 use std::{any::TypeId, time::Duration};
 
 use futures::{Future, Stream, StreamExt};
-use tiny_actor::{ExitError, ShutdownPoolFut, SpawnError, TrySpawnError, Inbox};
+use tiny_actor::{ExitError, Inbox, SpawnError, TrySpawnError};
 use tokio::task::JoinHandle;
 
 use crate::*;
@@ -10,13 +10,19 @@ use crate::*;
 //  ChildPool
 //------------------------------------------------------------------------------------------------
 
-pub struct ChildPool<E: Send + 'static, T: ActorType = Accepts![]> {
+/// # ChildPool<E, T>
+/// The first generic `E` indicates what the `tasks` will exit with, while the second generic
+///  `T` indicates what messages can be sent to the actor. For more information about `T`, please
+/// refer to the docs on [Address].
+/// 
+/// # Streaming
+/// An`Child` can be streamed and will return a stream of `Result<E, ExitError>` when all processes
+/// exit.
+///
+/// #### _For more information, please read the [module](crate) documentation._
+pub struct ChildPool<E: Send + 'static, T: ActorType = DynAccepts![]> {
     inner: tiny_actor::ChildPool<E, <T::Type as ChannelType>::Channel>,
 }
-
-//-------------------------------------------------
-//  Any childpool
-//-------------------------------------------------
 
 impl<E, T> ChildPool<E, T>
 where
@@ -33,25 +39,34 @@ where
         Self { inner }
     }
 
+    /// Get the inner [tokio::task::JoinHandle]s.
+    ///
+    /// Note that this will not run the destructor, and therefore will not halt/abort the actor.
     pub fn into_joinhandles(self) -> Vec<JoinHandle<E>> {
         self.inner.into_joinhandles()
     }
 
+    /// The amount of `tasks` that are running at this moment.
     pub fn task_count(&self) -> usize {
         self.inner.task_count()
     }
 
+    /// The amount of `handles` that this `ChildPool` contains.
     pub fn handle_count(&self) -> usize {
         self.inner.handle_count()
     }
 
-    pub fn shutdown(
-        &mut self,
-        timeout: Duration,
-    ) -> ShutdownPoolFut<'_, E, <T::Type as ChannelType>::Channel> {
-        self.inner.shutdown(timeout)
+    /// Shutdown the actor.
+    ///
+    /// This will first halt the actor. If the actor has not exited before the timeout,
+    /// it will be aborted instead.
+    pub fn shutdown(&mut self, timeout: Duration) -> ShutdownStream<'_, E, T::Type> {
+        ShutdownStream(self.inner.shutdown(timeout))
     }
 
+    /// Attempt to spawn another process onto the actor.
+    /// 
+    /// This can fail if `P` is not the correct [Protocol].
     pub fn try_spawn<P, Fun, Fut>(&mut self, fun: Fun) -> Result<(), TrySpawnError<Fun>>
     where
         Fun: FnOnce(Inbox<P>) -> Fut + Send + 'static,
@@ -63,10 +78,6 @@ where
     }
 }
 
-//-------------------------------------------------
-//  Static childpool
-//-------------------------------------------------
-
 impl<E, P> ChildPool<E, P>
 where
     E: Send + 'static,
@@ -74,6 +85,7 @@ where
 {
     gen::into_dyn_methods!(inner, ChildPool<E, T>);
 
+    /// Spawn another process onto the actor.
     pub fn spawn<Fun, Fut>(&mut self, fun: Fun) -> Result<(), SpawnError<Fun>>
     where
         Fun: FnOnce(Inbox<P>) -> Fut + Send + 'static,
@@ -84,10 +96,6 @@ where
         self.inner.spawn(fun)
     }
 }
-
-//-------------------------------------------------
-//  Dynamic childpool
-//-------------------------------------------------
 
 impl<E, D> ChildPool<E, D>
 where
@@ -131,5 +139,27 @@ where
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         self.inner.poll_next_unpin(cx)
+    }
+}
+
+//------------------------------------------------------------------------------------------------
+//  ShutdownStream
+//------------------------------------------------------------------------------------------------
+
+/// Stream returned when shutting down a `ChildPool`.
+pub struct ShutdownStream<'a, E: Send + 'static, T: ChannelType>(
+    tiny_actor::ShutdownStream<'a, E, T::Channel>,
+);
+
+impl<'a, E: Send + 'static, T: ChannelType> Unpin for ShutdownStream<'a, E, T> {}
+
+impl<'a, E: Send + 'static, T: ChannelType> Stream for ShutdownStream<'a, E, T> {
+    type Item = Result<E, ExitError>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.0.poll_next_unpin(cx)
     }
 }

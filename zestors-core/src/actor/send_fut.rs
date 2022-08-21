@@ -3,6 +3,7 @@ use futures::{Future, FutureExt};
 use std::pin::Pin;
 use tiny_actor::SendError;
 
+/// Future returned when sending a message to an [Address].
 pub struct SendFut<'a, M: Message>(
     pub(crate) Pin<Box<dyn Future<Output = Result<Returns<M>, SendError<M>>> + Send + 'a>>,
 );

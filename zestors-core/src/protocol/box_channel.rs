@@ -1,19 +1,36 @@
 use crate::*;
 use futures::Future;
 use std::{any::TypeId, fmt::Debug, pin::Pin};
-use tiny_actor::{Channel, TrySendError, SendError};
+use tiny_actor::{Channel, SendError, TrySendError};
 
 /// The internal channel-trait used within zestors, which allows for sending messages dynamically.
+///
+/// This never has to be implemented manually.
 pub trait BoxChannel: tiny_actor::AnyChannel + tiny_actor::DynChannel + Debug {
-    fn try_send_boxed(&self, boxed: BoxedMessage) -> Result<(), TrySendUncheckedError<BoxedMessage>>;
-    fn send_now_boxed(&self, boxed: BoxedMessage) -> Result<(), TrySendUncheckedError<BoxedMessage>>;
-    fn send_blocking_boxed(&self, boxed: BoxedMessage) -> Result<(), SendUncheckedError<BoxedMessage>>;
-    fn send_boxed<'a>(&'a self, boxed: BoxedMessage) -> SendBoxedFut<'a>;
+    fn try_send_boxed(
+        &self,
+        boxed: BoxedMessage,
+    ) -> Result<(), TrySendUncheckedError<BoxedMessage>>;
+    fn send_now_boxed(
+        &self,
+        boxed: BoxedMessage,
+    ) -> Result<(), TrySendUncheckedError<BoxedMessage>>;
+    fn send_blocking_boxed(
+        &self,
+        boxed: BoxedMessage,
+    ) -> Result<(), SendUncheckedError<BoxedMessage>>;
+    fn send_boxed<'a>(
+        &'a self,
+        boxed: BoxedMessage,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SendUncheckedError<BoxedMessage>>> + Send + 'a>>;
     fn accepts(&self, id: &TypeId) -> bool;
 }
 
 impl<P: Protocol + Send + 'static> BoxChannel for Channel<P> {
-    fn try_send_boxed(&self, boxed: BoxedMessage) -> Result<(), TrySendUncheckedError<BoxedMessage>> {
+    fn try_send_boxed(
+        &self,
+        boxed: BoxedMessage,
+    ) -> Result<(), TrySendUncheckedError<BoxedMessage>> {
         match P::try_from_boxed(boxed) {
             Ok(prot) => self.try_send(prot).map_err(|e| match e {
                 TrySendError::Full(prot) => TrySendUncheckedError::Full(prot.into_boxed()),
@@ -23,7 +40,10 @@ impl<P: Protocol + Send + 'static> BoxChannel for Channel<P> {
         }
     }
 
-    fn send_now_boxed(&self, boxed: BoxedMessage) -> Result<(), TrySendUncheckedError<BoxedMessage>> {
+    fn send_now_boxed(
+        &self,
+        boxed: BoxedMessage,
+    ) -> Result<(), TrySendUncheckedError<BoxedMessage>> {
         match P::try_from_boxed(boxed) {
             Ok(prot) => self.send_now(prot).map_err(|e| match e {
                 TrySendError::Full(prot) => TrySendUncheckedError::Full(prot.into_boxed()),
@@ -33,7 +53,10 @@ impl<P: Protocol + Send + 'static> BoxChannel for Channel<P> {
         }
     }
 
-    fn send_blocking_boxed(&self, boxed: BoxedMessage) -> Result<(), SendUncheckedError<BoxedMessage>> {
+    fn send_blocking_boxed(
+        &self,
+        boxed: BoxedMessage,
+    ) -> Result<(), SendUncheckedError<BoxedMessage>> {
         match P::try_from_boxed(boxed) {
             Ok(prot) => self
                 .send_blocking(prot)
@@ -42,7 +65,11 @@ impl<P: Protocol + Send + 'static> BoxChannel for Channel<P> {
         }
     }
 
-    fn send_boxed<'a>(&'a self, boxed: BoxedMessage) -> SendBoxedFut<'a> {
+    fn send_boxed<'a>(
+        &'a self,
+        boxed: BoxedMessage,
+    ) -> Pin<Box<dyn Future<Output = Result<(), SendUncheckedError<BoxedMessage>>> + Send + 'a>>
+    {
         Box::pin(async move {
             match P::try_from_boxed(boxed) {
                 Ok(prot) => self
@@ -60,7 +87,10 @@ impl<P: Protocol + Send + 'static> BoxChannel for Channel<P> {
 }
 
 impl dyn BoxChannel {
-    pub(crate) fn try_send_unchecked<M>(&self, msg: M) -> Result<Returns<M>, TrySendUncheckedError<M>>
+    pub(crate) fn try_send_unchecked<M>(
+        &self,
+        msg: M,
+    ) -> Result<Returns<M>, TrySendUncheckedError<M>>
     where
         M: Message + Send + 'static,
         Sends<M>: Send + 'static,
@@ -77,14 +107,17 @@ impl dyn BoxChannel {
                 TrySendUncheckedError::Closed(boxed) => Err(TrySendUncheckedError::Closed(
                     boxed.downcast_into_msg(returns).unwrap(),
                 )),
-                TrySendUncheckedError::NotAccepted(boxed) => Err(TrySendUncheckedError::NotAccepted(
-                    boxed.downcast_into_msg(returns).unwrap(),
-                )),
+                TrySendUncheckedError::NotAccepted(boxed) => Err(
+                    TrySendUncheckedError::NotAccepted(boxed.downcast_into_msg(returns).unwrap()),
+                ),
             },
         }
     }
 
-    pub(crate) fn send_now_unchecked<M>(&self, msg: M) -> Result<Returns<M>, TrySendUncheckedError<M>>
+    pub(crate) fn send_now_unchecked<M>(
+        &self,
+        msg: M,
+    ) -> Result<Returns<M>, TrySendUncheckedError<M>>
     where
         M: Message + Send + 'static,
         Sends<M>: Send + 'static,
@@ -101,14 +134,17 @@ impl dyn BoxChannel {
                 TrySendUncheckedError::Closed(boxed) => Err(TrySendUncheckedError::Closed(
                     boxed.downcast_into_msg(returns).unwrap(),
                 )),
-                TrySendUncheckedError::NotAccepted(boxed) => Err(TrySendUncheckedError::NotAccepted(
-                    boxed.downcast_into_msg(returns).unwrap(),
-                )),
+                TrySendUncheckedError::NotAccepted(boxed) => Err(
+                    TrySendUncheckedError::NotAccepted(boxed.downcast_into_msg(returns).unwrap()),
+                ),
             },
         }
     }
 
-    pub(crate) fn send_blocking_unchecked<M>(&self, msg: M) -> Result<Returns<M>, SendUncheckedError<M>>
+    pub(crate) fn send_blocking_unchecked<M>(
+        &self,
+        msg: M,
+    ) -> Result<Returns<M>, SendUncheckedError<M>>
     where
         M: Message + Send + 'static,
         Sends<M>: Send + 'static,
@@ -129,7 +165,10 @@ impl dyn BoxChannel {
         }
     }
 
-    pub(crate) async fn send_unchecked<M>(&self, msg: M) -> Result<Returns<M>, SendUncheckedError<M>>
+    pub(crate) async fn send_unchecked<M>(
+        &self,
+        msg: M,
+    ) -> Result<Returns<M>, SendUncheckedError<M>>
     where
         M: Message + Send + 'static,
         Sends<M>: Send + 'static,
@@ -150,6 +189,3 @@ impl dyn BoxChannel {
         }
     }
 }
-
-type SendBoxedFut<'a> =
-    Pin<Box<dyn Future<Output = Result<(), SendUncheckedError<BoxedMessage>>> + Send + 'a>>;

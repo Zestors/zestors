@@ -1,13 +1,3 @@
-# Under development
-This is currently undergoing heavy development, and is not ready for use.
-
-# Zestors
-
-Zestors is a fully-featured actor-framework for tokio. It builds on top of [tiny-actor](https://github.com/jvdwrf/tiny-actor), and adds a layer of abstractions which allows for building more complex systems. The [README](https://github.com/jvdwrf/tiny-actor/blob/main/README.md) of `tiny-actor` describes in detail the basis of the actor-system, and it is recommended to read that first. The following readme explains what is added on top.
-
-# Getting started
-
-```rust
 #[macro_use]
 extern crate zestors;
 
@@ -214,4 +204,3 @@ async fn main() {
         },
     }
 }
-```

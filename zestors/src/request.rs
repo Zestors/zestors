@@ -1,3 +1,4 @@
+use crate::error::{RxError, TryRxError, TxError};
 use futures::{Future, FutureExt};
 use std::{
     marker::PhantomData,
@@ -7,7 +8,9 @@ use std::{
 use tokio::sync::oneshot;
 use zestors_core::protocol::MsgType;
 
-use crate::error::{RxError, TryRxError, TxError};
+//------------------------------------------------------------------------------------------------
+//  Request
+//------------------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy)]
 pub struct Request<T>(PhantomData<T>);
@@ -33,6 +36,10 @@ impl<M, R> MsgType<M> for Request<R> {
     }
 }
 
+//------------------------------------------------------------------------------------------------
+//  Tx
+//------------------------------------------------------------------------------------------------
+
 #[derive(Debug)]
 pub struct Tx<M>(oneshot::Sender<M>);
 
@@ -52,6 +59,10 @@ impl<M> Tx<M> {
         self.0.closed().await
     }
 }
+
+//------------------------------------------------------------------------------------------------
+//  Rx
+//------------------------------------------------------------------------------------------------
 
 #[derive(Debug)]
 pub struct Rx<M>(oneshot::Receiver<M>);

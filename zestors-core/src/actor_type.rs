@@ -257,6 +257,33 @@ dyn_types! {
 }
 
 //------------------------------------------------------------------------------------------------
+//  IntoAddress
+//------------------------------------------------------------------------------------------------
+
+pub trait IntoAddress<T: ActorType> {
+    fn into_address(self) -> Addr<T>;
+}
+
+impl<R: ?Sized, T: ?Sized> IntoAddress<Dyn<T>> for Addr<Dyn<R>>
+where
+    Dyn<R>: ActorType<Type = Dynamic> + IntoDynamic<Dyn<T>>,
+{
+    fn into_address(self) -> Addr<Dyn<T>> {
+        self.transform()
+    }
+}
+
+impl<P, T> IntoAddress<Dyn<T>> for Addr<P>
+where
+    P: Protocol + IntoDynamic<Dyn<T>>,
+    T: ?Sized,
+{
+    fn into_address(self) -> Addr<Dyn<T>> {
+        self.into_dyn()
+    }
+}
+
+//------------------------------------------------------------------------------------------------
 //  Address
 //------------------------------------------------------------------------------------------------
 
@@ -268,9 +295,9 @@ dyn_types! {
 /// * `Address![]` == `Address<Dyn<dyn AcceptsNone>>`
 /// * `Address![u32, u64]` == `Address<Dyn<dyn AcceptsTwo<u32, u64>>>`
 #[macro_export]
-macro_rules! Address {
+macro_rules! DynAddress {
     ($($ty:ty),*) => {
-        $crate::actor::Address<$crate::Accepts![$($ty),*]>
+        $crate::actor::Addr<$crate::DynAccepts![$($ty),*]>
     };
 }
 
@@ -287,7 +314,7 @@ macro_rules! Address {
 /// * `Address<Accepts![]>` == `Address<Dyn<dyn AcceptsNone>>`
 /// * `Address<Accepts![u32, u64]>` == `Address<Dyn<dyn AcceptsTwo<u32, u64>>>`
 #[macro_export]
-macro_rules! Accepts {
+macro_rules! DynAccepts {
     () => {
         $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsNone>
     };
@@ -331,33 +358,33 @@ mod test {
 
     #[test]
     fn address_macro_compiles() {
-        let _a: Address![];
-        let _a: Address![u8];
-        let _a: Address![u8, u16];
-        let _a: Address![u8, u16, u32];
-        let _a: Address![u8, u16, u32, u64];
-        let _a: Address![u8, u16, u32, u64, u128];
-        let _a: Address![u8, u16, u32, u64, u128, i8];
-        let _a: Address![u8, u16, u32, u64, u128, i8, i16];
-        let _a: Address![u8, u16, u32, u64, u128, i8, i16, i32];
-        let _a: Address![u8, u16, u32, u64, u128, i8, i16, i32, i64];
-        let _a: Address![u8, u16, u32, u64, u128, i8, i16, i32, i64, i128];
+        let _a: DynAddress![];
+        let _a: DynAddress![u8];
+        let _a: DynAddress![u8, u16];
+        let _a: DynAddress![u8, u16, u32];
+        let _a: DynAddress![u8, u16, u32, u64];
+        let _a: DynAddress![u8, u16, u32, u64, u128];
+        let _a: DynAddress![u8, u16, u32, u64, u128, i8];
+        let _a: DynAddress![u8, u16, u32, u64, u128, i8, i16];
+        let _a: DynAddress![u8, u16, u32, u64, u128, i8, i16, i32];
+        let _a: DynAddress![u8, u16, u32, u64, u128, i8, i16, i32, i64];
+        let _a: DynAddress![u8, u16, u32, u64, u128, i8, i16, i32, i64, i128];
     }
 
     #[test]
     fn message_ids() {
         assert_eq!(
-            <Accepts![] as IsDynamic>::message_ids(),
+            <DynAccepts![] as IsDynamic>::message_ids(),
             Box::new([]) as Box<[TypeId]>
         );
 
         assert_eq!(
-            <Accepts![u32, u64] as IsDynamic>::message_ids(),
+            <DynAccepts![u32, u64] as IsDynamic>::message_ids(),
             Box::new([TypeId::of::<u32>(), TypeId::of::<u64>()]) as Box<[TypeId]>
         );
 
         assert_eq!(
-            <Accepts![u32, u64, i8] as IsDynamic>::message_ids(),
+            <DynAccepts![u32, u64, i8] as IsDynamic>::message_ids(),
             Box::new([TypeId::of::<u32>(), TypeId::of::<u64>(), TypeId::of::<i8>()])
                 as Box<[TypeId]>
         );

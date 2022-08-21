@@ -1,20 +1,22 @@
+#![doc = include_str!("../../README.md")]
+
 //------------------------------------------------------------------------------------------------
 //  Public modules
 //------------------------------------------------------------------------------------------------
 
-pub mod request;
 pub mod actor;
 pub mod actor_type;
-pub mod protocol;
-pub mod error;
 pub mod config;
+pub mod error;
+pub mod protocol;
+pub mod request;
 
 //------------------------------------------------------------------------------------------------
-//  Root exports
+//  Exports
 //------------------------------------------------------------------------------------------------
 
 pub use zestors_codegen::{protocol, Message};
-pub use zestors_core::{Accepts, Address};
+pub use zestors_core::{DynAccepts, DynAddress};
 
 //------------------------------------------------------------------------------------------------
 //  Prelude
@@ -22,10 +24,8 @@ pub use zestors_core::{Accepts, Address};
 
 mod prelude {
     pub use crate::{
-        actor::{spawn, spawn_many, spawn_one, Address, Child, ChildPool},
+        actor::{spawn, spawn_many, spawn_one, Addr, Child, ChildPool},
         actor_type::{Accepts, ActorType},
-        Accepts, Address,
+        DynAccepts, DynAddress,
     };
 }
-
-
