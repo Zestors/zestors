@@ -104,3 +104,64 @@ macro_rules! channel_methods {
 }
 
 pub(crate) use channel_methods;
+
+macro_rules! transform_methods {
+    ($at:ident, $ty:ty) => {
+        pub fn transform_unchecked<T>(self) -> $ty
+        where
+            T: ActorType<Type = Dynamic>,
+        {
+            <$ty>::from_inner(self.$at)
+        }
+    
+        pub fn transform<T>(self) -> $ty
+        where
+            D: IntoDynamic<T>,
+            T: ActorType<Type = Dynamic>,
+        {
+            self.transform_unchecked()
+        }
+    
+        pub fn try_transform<T>(self) -> Result<$ty, Self>
+        where
+            T: IsDynamic,
+            T: ActorType<Type = Dynamic>,
+        {
+            if T::message_ids().iter().all(|id| self.accepts(id)) {
+                Ok(self.transform_unchecked())
+            } else {
+                Err(self)
+            }
+        }
+    
+        pub fn accepts(&self, id: &TypeId) -> bool {
+            self.$at.channel_ref().accepts(id)
+        }
+    
+        pub fn downcast<T>(self) -> Result<$ty, Self>
+        where
+            T: Protocol,
+        {
+            match self.$at.downcast::<T>() {
+                Ok($at) => Ok(<$ty>::from_inner($at)),
+                Err($at) => Err(Self { $at }),
+            }
+        }
+    };
+}
+
+pub(crate) use transform_methods;
+
+macro_rules! into_dyn_methods {
+    ($at:ident, $ty:ty) => {
+        pub fn into_dyn<T>(self) -> $ty
+        where
+            P: Protocol + IntoDynamic<T>,
+            T: ActorType<Type = Dynamic>,
+        {
+            <$ty>::from_inner(self.$at.transform_channel(|c| c))
+        }
+    };
+}
+
+pub(crate) use into_dyn_methods;

@@ -1,16 +1,17 @@
-mod address;
 mod actor_type;
+mod address;
 mod box_channel;
 mod boxed_msg;
 mod child;
+mod child_pool;
 mod errors;
 pub(crate) mod gen;
 mod protocol;
 mod spawning;
 
 pub use {
-    address::*, actor_type::*, box_channel::*, boxed_msg::*, child::*, errors::*, protocol::*,
-    spawning::*,
+    actor_type::*, address::*, box_channel::*, boxed_msg::*, child::*, child_pool::*, errors::*,
+    protocol::*, spawning::*,
 };
 
 pub use tiny_actor::{

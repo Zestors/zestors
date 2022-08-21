@@ -77,7 +77,7 @@ pub trait Accepts<M: Message>: ActorType {
 
 impl<M, T> Accepts<M> for Dyn<T>
 where
-    Self: IntoDyn<Dyn<dyn AcceptsOne<M>>>,
+    Self: IntoDynamic<Dyn<dyn AcceptsOne<M>>>,
     M: Message + Send + 'static,
     Sends<M>: Send + 'static,
     Returns<M>: Send,
@@ -203,10 +203,10 @@ where
 //------------------------------------------------------------------------------------------------
 
 /// Marker trait that signifies whether an address can be converted to a dynamic [AddressType] `T`.
-pub trait IntoDyn<T> {}
+pub trait IntoDynamic<T> {}
 
 /// Trait implemented for all dynamic [AddressType]s.
-pub trait IsDyn {
+pub trait IsDynamic {
     /// Get all message-ids that are accepted by this [AddressType].
     fn message_ids() -> Box<[TypeId]>;
 }
@@ -224,19 +224,19 @@ macro_rules! dyn_types {
             pub trait $ident< $($($ty: Message,)?)*>: $($( ProtocolMessage<$ty> + )?)* {}
 
             // Implement `IsDyn` for it
-            impl<$($($ty: Message + 'static,)?)*> IsDyn for Dyn<dyn $ident< $($($ty,)?)*>> {
+            impl<$($($ty: Message + 'static,)?)*> IsDynamic for Dyn<dyn $ident< $($($ty,)?)*>> {
                 fn message_ids() -> Box<[TypeId]> {
                     Box::new([$($(TypeId::of::<$ty>(),)?)*])
                 }
             }
 
             // Implement `IntoDyn` for all dynamic address-types
-            impl<T, $($($ty: Message,)?)*> IntoDyn<Dyn<dyn $ident<$($($ty,)?)*>>> for Dyn<T>
+            impl<T, $($($ty: Message,)?)*> IntoDynamic<Dyn<dyn $ident<$($($ty,)?)*>>> for Dyn<T>
             where
                 T: ?Sized $($( + ProtocolMessage<$ty> )?)* {}
 
             // Implement `IntoDyn` for all static address-types
-            impl<T, $($($ty: Message,)?)*> IntoDyn<Dyn<dyn $ident<$($($ty,)?)*>>> for T
+            impl<T, $($($ty: Message,)?)*> IntoDynamic<Dyn<dyn $ident<$($($ty,)?)*>>> for T
             where
                 T: Protocol $($( + ProtocolMessage<$ty> )?)* {}
         )*
@@ -328,7 +328,7 @@ macro_rules! Accepts {
 mod test {
     use std::any::TypeId;
 
-    use crate::IsDyn;
+    use crate::IsDynamic;
 
     #[test]
     fn address_macro_compiles() {
@@ -348,17 +348,17 @@ mod test {
     #[test]
     fn message_ids() {
         assert_eq!(
-            <Accepts![] as IsDyn>::message_ids(),
+            <Accepts![] as IsDynamic>::message_ids(),
             Box::new([]) as Box<[TypeId]>
         );
 
         assert_eq!(
-            <Accepts![u32, u64] as IsDyn>::message_ids(),
+            <Accepts![u32, u64] as IsDynamic>::message_ids(),
             Box::new([TypeId::of::<u32>(), TypeId::of::<u64>()]) as Box<[TypeId]>
         );
 
         assert_eq!(
-            <Accepts![u32, u64, i8] as IsDyn>::message_ids(),
+            <Accepts![u32, u64, i8] as IsDynamic>::message_ids(),
             Box::new([TypeId::of::<u32>(), TypeId::of::<u64>(), TypeId::of::<i8>()])
                 as Box<[TypeId]>
         );

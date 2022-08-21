@@ -1,22 +1,22 @@
-use std::{any::TypeId, fmt::Debug};
+use std::any::TypeId;
 
-use futures::{Future, FutureExt};
+use futures::{Stream, StreamExt};
 
 use crate::*;
 
 //------------------------------------------------------------------------------------------------
-//  Child
+//  ChildPool
 //------------------------------------------------------------------------------------------------
 
-pub struct Child<E: Send + 'static, T: ActorType = Accepts![]> {
-    inner: tiny_actor::Child<E, <T::Type as ChannelType>::Channel>,
+pub struct ChildPool<E: Send + 'static, T: ActorType = Accepts![]> {
+    inner: tiny_actor::ChildPool<E, <T::Type as ChannelType>::Channel>,
 }
 
 //------------------------------------------------------------------------------------------------
-//  Any child
+//  Any child-pool
 //------------------------------------------------------------------------------------------------
 
-impl<E, T> Child<E, T>
+impl<E, T> ChildPool<E, T>
 where
     E: Send + 'static,
     T: ActorType,
@@ -25,44 +25,44 @@ where
     gen::send_methods!(inner);
 
     pub(crate) fn from_inner(
-        inner: tiny_actor::Child<E, <T::Type as ChannelType>::Channel>,
+        inner: tiny_actor::ChildPool<E, <T::Type as ChannelType>::Channel>,
     ) -> Self {
         Self { inner }
     }
 }
 
 //-------------------------------------------------
-//  Static child
+//  Static child-pool
 //-------------------------------------------------
 
-impl<E, P> Child<E, P>
+impl<E, P> ChildPool<E, P>
 where
     E: Send + 'static,
     P: ActorType<Type = Static<P>>,
 {
-    gen::into_dyn_methods!(inner, Child<E, T>);
+    gen::into_dyn_methods!(inner, ChildPool<E, T>);
 }
 
 //-------------------------------------------------
-//  Dynamic child
+//  Dynamic child-pool
 //-------------------------------------------------
 
-impl<E, D> Child<E, D>
+impl<E, D> ChildPool<E, D>
 where
     E: Send + 'static,
     D: ActorType<Type = Dynamic>,
 {
     gen::unchecked_send_methods!(inner);
-    gen::transform_methods!(inner, Child<E, T>);
+    gen::transform_methods!(inner, ChildPool<E, T>);
 }
 
 //-------------------------------------------------
 //  Trait implementations
 //-------------------------------------------------
 
-impl<E, T> std::fmt::Debug for Child<E, T>
+impl<E, T> std::fmt::Debug for ChildPool<E, T>
 where
-    E: Send + 'static + Debug,
+    E: Send + 'static + std::fmt::Debug,
     T: ActorType,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -70,24 +70,24 @@ where
     }
 }
 
-impl<E, T> Unpin for Child<E, T>
+impl<E, T> Unpin for ChildPool<E, T>
 where
     E: Send + 'static,
     T: ActorType,
 {
 }
 
-impl<E, T> Future for Child<E, T>
+impl<E, T> Stream for ChildPool<E, T>
 where
     E: Send + 'static,
     T: ActorType,
 {
-    type Output = Result<E, ExitError>;
+    type Item = Result<E, ExitError>;
 
-    fn poll(
+    fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        self.inner.poll_unpin(cx)
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.inner.poll_next_unpin(cx)
     }
 }

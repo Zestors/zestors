@@ -1,5 +1,5 @@
 use crate::*;
-use futures::Future;
+use futures::{Future, FutureExt};
 use std::{any::TypeId, pin::Pin};
 
 //------------------------------------------------------------------------------------------------
@@ -7,7 +7,7 @@ use std::{any::TypeId, pin::Pin};
 //------------------------------------------------------------------------------------------------
 
 pub struct Address<T: ActorType = Accepts![]> {
-    address: tiny_actor::Address<<T::Type as ChannelType>::Channel>,
+    inner: tiny_actor::Address<<T::Type as ChannelType>::Channel>,
 }
 
 //-------------------------------------------------
@@ -15,12 +15,12 @@ pub struct Address<T: ActorType = Accepts![]> {
 //-------------------------------------------------
 
 impl<T: ActorType> Address<T> {
-    pub fn from_inner(address: tiny_actor::Address<<T::Type as ChannelType>::Channel>) -> Self {
-        Self { address }
+    pub fn from_inner(inner: tiny_actor::Address<<T::Type as ChannelType>::Channel>) -> Self {
+        Self { inner }
     }
 
-    gen::channel_methods!(address);
-    gen::send_methods!(address);
+    gen::channel_methods!(inner);
+    gen::send_methods!(inner);
 }
 
 //-------------------------------------------------
@@ -31,15 +31,7 @@ impl<P> Address<P>
 where
     P: ActorType<Type = Static<P>>,
 {
-    pub fn into_dyn<D>(self) -> Address<D>
-    where
-        P: Protocol + IntoDyn<D>,
-        D: ActorType<Type = Dynamic>,
-    {
-        Address {
-            address: self.address.transform_channel(|c| c),
-        }
-    }
+    gen::into_dyn_methods!(inner, Address<T>);
 }
 
 //-------------------------------------------------
@@ -50,67 +42,38 @@ impl<D> Address<D>
 where
     D: ActorType<Type = Dynamic>,
 {
-    gen::unchecked_send_methods!(address);
-
-    pub fn transform_unchecked<T>(self) -> Address<T>
-    where
-        T: ActorType<Type = Dynamic>,
-    {
-        Address {
-            address: self.address,
-        }
-    }
-
-    pub fn transform<T>(self) -> Address<T>
-    where
-        D: IntoDyn<T>,
-        T: ActorType<Type = Dynamic>,
-    {
-        self.transform_unchecked()
-    }
-
-    pub fn try_transform<T>(self) -> Result<Address<T>, Self>
-    where
-        T: IsDyn,
-        T: ActorType<Type = Dynamic>,
-    {
-        if T::message_ids().iter().all(|id| self.accepts(id)) {
-            Ok(self.transform_unchecked())
-        } else {
-            Err(self)
-        }
-    }
-
-    pub fn accepts(&self, id: &TypeId) -> bool {
-        self.address.channel_ref().accepts(id)
-    }
-
-    pub fn downcast<P>(self) -> Result<Address<P>, Self>
-    where
-        P: Protocol,
-    {
-        match self.address.downcast::<P>() {
-            Ok(address) => Ok(Address { address }),
-            Err(address) => Err(Self { address }),
-        }
-    }
+    gen::unchecked_send_methods!(inner);
+    gen::transform_methods!(inner, Address<T>);
 }
 
 //-------------------------------------------------
 //  Address traits
 //-------------------------------------------------
 
+impl<T: ActorType> Unpin for Address<T> {}
+
+impl<T: ActorType> Future for Address<T> {
+    type Output = ();
+
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        self.inner.poll_unpin(cx)
+    }
+}
+
 impl<T: ActorType> Clone for Address<T> {
     fn clone(&self) -> Self {
         Self {
-            address: self.address.clone(),
+            inner: self.inner.clone(),
         }
     }
 }
 
 impl<T: ActorType> std::fmt::Debug for Address<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Address").field(&self.address).finish()
+        f.debug_tuple("Address").field(&self.inner).finish()
     }
 }
 
@@ -124,7 +87,7 @@ pub trait IntoAddress<T: ActorType> {
 
 impl<R: ?Sized, T: ?Sized> IntoAddress<Dyn<T>> for Address<Dyn<R>>
 where
-    Dyn<R>: ActorType<Type = Dynamic> + IntoDyn<Dyn<T>>,
+    Dyn<R>: ActorType<Type = Dynamic> + IntoDynamic<Dyn<T>>,
 {
     fn into_address(self) -> Address<Dyn<T>> {
         self.transform()
@@ -133,7 +96,7 @@ where
 
 impl<P, T> IntoAddress<Dyn<T>> for Address<P>
 where
-    P: Protocol + IntoDyn<Dyn<T>>,
+    P: Protocol + IntoDynamic<Dyn<T>>,
     T: ?Sized,
 {
     fn into_address(self) -> Address<Dyn<T>> {
