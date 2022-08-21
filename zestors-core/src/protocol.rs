@@ -107,8 +107,6 @@ pub type Sends<M> = <<M as Message>::Type as MsgType<M>>::Sends;
 /// returner-part of a message.
 pub type Returns<M> = <<M as Message>::Type as MsgType<M>>::Returns;
 
-
-
 macro_rules! impl_message {
     ($($ty:ty),*) => {
         $(

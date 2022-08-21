@@ -1,28 +1,19 @@
-mod boxed_msg;
+mod address;
+mod address_type;
 mod box_channel;
-mod protocol;
-mod parts;
-mod spawning;
+mod boxed_msg;
+mod errors;
 pub(crate) mod gen;
-pub mod accepts;
-pub mod test;
-pub mod address;
+mod child;
+mod protocol;
+mod spawning;
 
 pub use {
-    boxed_msg::*,
-    box_channel::*,
-    protocol::*,
-    parts::*,
+    address::*, address_type::*, box_channel::*, boxed_msg::*, errors::*, child::*, protocol::*,
     spawning::*,
-    accepts::*,
-    address::*,
-    tiny_actor::{
-        AnyChannel, BackPressure, Capacity, Channel, Config, DynChannel, ExitError, Growth,
-        HaltedError, Inbox, Link, Rcv, RecvError, SendError, Snd as SndRaw, SpawnError,
-        TrySendError, TrySpawnError,
-    },
 };
 
-pub(crate) use tiny_actor::{
-    Address as InnerAddress, Child as InnerChild, ChildPool as InnerChildPool
+pub use tiny_actor::{
+    BackPressure, Capacity, Config, DynChannel, ExitError, Growth, HaltedError, Inbox, Link, Rcv,
+    RecvError, SendError, Snd as SndRaw, SpawnError, TrySendError, TrySpawnError,
 };

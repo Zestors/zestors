@@ -1,4 +1,5 @@
 use futures::Future;
+use tiny_actor::Channel;
 
 use crate::*;
 

@@ -1,13 +1,16 @@
 use crate::*;
 use futures::Future;
-use std::{pin::Pin, any::TypeId};
+use std::{any::TypeId, fmt::Debug, pin::Pin};
 use tiny_actor::{Channel, TrySendError};
 
-pub trait BoxChannel: tiny_actor::AnyChannel + tiny_actor::DynChannel {
+/// The internal channel-trait used within zestors, which allows for sending messages dynamically.
+pub(crate) trait BoxChannel:
+    tiny_actor::AnyChannel + tiny_actor::DynChannel + Debug
+{
     fn try_send_boxed(&self, boxed: BoxedMessage) -> Result<(), TrySendDynError<BoxedMessage>>;
     fn send_now_boxed(&self, boxed: BoxedMessage) -> Result<(), TrySendDynError<BoxedMessage>>;
     fn send_blocking_boxed(&self, boxed: BoxedMessage) -> Result<(), SendDynError<BoxedMessage>>;
-    fn send_boxed<'a>(&'a self, boxed: BoxedMessage) -> SndBoxed<'a>;
+    fn send_boxed<'a>(&'a self, boxed: BoxedMessage) -> SendBoxedFut<'a>;
     fn accepts(&self, id: &TypeId) -> bool;
 }
 
@@ -41,7 +44,7 @@ impl<P: Protocol + Send + 'static> BoxChannel for Channel<P> {
         }
     }
 
-    fn send_boxed<'a>(&'a self, boxed: BoxedMessage) -> SndBoxed<'a> {
+    fn send_boxed<'a>(&'a self, boxed: BoxedMessage) -> SendBoxedFut<'a> {
         Box::pin(async move {
             match P::try_from_boxed(boxed) {
                 Ok(prot) => self
@@ -58,18 +61,5 @@ impl<P: Protocol + Send + 'static> BoxChannel for Channel<P> {
     }
 }
 
-pub(crate) type SndBoxed<'a> =
+pub(crate) type SendBoxedFut<'a> =
     Pin<Box<dyn Future<Output = Result<(), SendDynError<BoxedMessage>>> + Send + 'a>>;
-
-#[derive(Debug)]
-pub enum TrySendDynError<M> {
-    Full(M),
-    Closed(M),
-    NotAccepted(M),
-}
-
-#[derive(Debug)]
-pub enum SendDynError<M> {
-    Closed(M),
-    NotAccepted(M),
-}

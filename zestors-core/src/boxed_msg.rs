@@ -1,7 +1,8 @@
 use crate::*;
 use std::any::Any;
 
-/// A type-erased message.
+/// A simple wrapper around a `Box<dyn Any + Send + 'static>`, which only allows
+/// the `Sends<M>` to be stored inside.
 #[derive(Debug)]
 pub struct BoxedMessage(Box<dyn Any + Send + 'static>);
 
@@ -40,7 +41,6 @@ impl BoxedMessage {
 
 #[cfg(test)]
 mod test {
-    use crate as zestors;
     use crate::*;
 
     #[test]

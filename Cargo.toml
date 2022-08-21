@@ -1,2 +1,2 @@
 [workspace]
-members = ["zestors", "zestors-codegen", "zestors-core"]
+members = ["zestors", "zestors-codegen", "zestors-core", "zestors-distributed"]

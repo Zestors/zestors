@@ -1,5 +1,6 @@
-use crate::*;
 use event_listener::EventListener;
+use tiny_actor::Channel;
+use crate::*;
 
 pub struct StaticAddress<P> {
     address: tiny_actor::Address<Channel<P>>,
@@ -62,7 +63,7 @@ impl<P> tiny_actor::DynChannel for StaticAddress<P> {
 
 impl<M, P> Accepts<M> for P
 where
-    P: AddressKind<Address = StaticAddress<P>> + ProtocolMessage<M>,
+    P: AddressType<Address = StaticAddress<P>> + ProtocolMessage<M>,
     Returns<M>: Send + 'static,
     Sends<M>: Send + 'static,
     M: Message + Send + 'static,

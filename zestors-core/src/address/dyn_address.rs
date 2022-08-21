@@ -31,7 +31,7 @@ impl<D> DynAddress<D> {
         self.address.channel_ref().accepts(id)
     }
 
-    pub(crate) fn from_inner(address: InnerAddress<dyn BoxChannel>) -> Self {
+    pub(crate) fn from_inner(address: tiny_actor::Address<dyn BoxChannel>) -> Self {
         Self {
             address,
             phantom_data: PhantomData,
