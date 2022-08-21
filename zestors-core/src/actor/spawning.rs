@@ -1,5 +1,6 @@
 use crate::*;
 use futures::Future;
+use tiny_actor::{Config, Inbox};
 
 pub fn spawn<P, E, Fun, Fut>(config: Config, fun: Fun) -> (Child<E, P>, Address<P>)
 where

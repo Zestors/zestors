@@ -3,8 +3,29 @@ use std::{
     any::TypeId,
     error::Error,
     io::{Read, Write},
+    marker::PhantomData,
 };
-use zestors_core::*;
+use zestors_core::{
+    actor::Address,
+    actor_type::{Accepts, ActorType},
+    protocol::{BoxedMessage, Message, Protocol, ProtocolMessage, Sends},
+    *,
+};
+
+pub trait RemoteActorType: ActorType
+where
+    Self::Type: RemoteChannelType,
+{
+}
+
+pub trait RemoteChannelType {}
+
+struct RemoteAddress<T: ActorType>
+where
+    T::Type: RemoteChannelType,
+{
+    address: PhantomData<T>,
+}
 
 pub fn try_send_remote<T, RM>(t: &Address<T>, msg: RM) -> ()
 where

@@ -1,5 +1,10 @@
-use zestors_core::*;
 use std::any::TypeId;
+use zestors_core::{
+    actor::{Address, IntoAddress},
+    actor_type::Accepts,
+    protocol::{BoxedMessage, Protocol, ProtocolMessage, Sends},
+    Accepts, Address,
+};
 
 pub(crate) struct TestProt;
 impl Protocol for TestProt {

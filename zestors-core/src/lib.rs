@@ -1,20 +1,23 @@
-mod actor_type;
-mod address;
-mod box_channel;
-mod boxed_msg;
-mod child;
-mod child_pool;
-mod errors;
-pub(crate) mod gen;
-mod protocol;
-mod spawning;
+#![doc = include_str!("../../README.md")]
 
-pub use {
-    actor_type::*, address::*, box_channel::*, boxed_msg::*, child::*, child_pool::*, errors::*,
-    protocol::*, spawning::*,
-};
+//------------------------------------------------------------------------------------------------
+//  Private modules
+//------------------------------------------------------------------------------------------------
 
-pub use tiny_actor::{
-    BackPressure, Capacity, Config, DynChannel, ExitError, HaltedError, Inbox, Link, Rcv,
-    RecvError, SendError, Snd as SndRaw, SpawnError, TrySendError, TrySpawnError, Shutdown, ShutdownPool
-};
+mod _priv;
+
+//------------------------------------------------------------------------------------------------
+//  Public modules
+//------------------------------------------------------------------------------------------------
+
+pub mod actor;
+pub mod actor_type;
+pub mod config;
+pub mod error;
+pub mod protocol;
+
+//------------------------------------------------------------------------------------------------
+//  Export for crate
+//------------------------------------------------------------------------------------------------
+
+pub(crate) use {_priv::*, actor::*, actor_type::*, error::*, protocol::*};

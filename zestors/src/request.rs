@@ -1,4 +1,3 @@
-use crate::*;
 use futures::{Future, FutureExt};
 use std::{
     marker::PhantomData,
@@ -6,6 +5,9 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
+use zestors_core::protocol::MsgType;
+
+use crate::error::{RxError, TryRxError, TxError};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Request<T>(PhantomData<T>);
@@ -78,39 +80,5 @@ impl<M> Future for Rx<M> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.0.poll_unpin(cx).map_err(|_| RxError)
-    }
-}
-
-/// Error returned when sending a message using a [Tx].
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
-#[error("Failed to send to Tx because it is closed.")]
-pub struct TxError<M>(pub M);
-
-/// Error returned when receiving a message using an [Rx].
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
-#[error("Failed to receive from Rx because it is closed.")]
-pub struct RxError;
-
-impl From<oneshot::error::RecvError> for RxError {
-    fn from(_: oneshot::error::RecvError) -> Self {
-        Self
-    }
-}
-
-/// Error returned when trying to receive a message using an [Rx].
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
-pub enum TryRxError {
-    #[error("Closed")]
-    Closed,
-    #[error("Empty")]
-    Empty,
-}
-
-impl From<oneshot::error::TryRecvError> for TryRxError {
-    fn from(e: oneshot::error::TryRecvError) -> Self {
-        match e {
-            oneshot::error::TryRecvError::Empty => Self::Empty,
-            oneshot::error::TryRecvError::Closed => Self::Closed,
-        }
     }
 }

@@ -1,6 +1,7 @@
 use std::{any::TypeId, fmt::Debug, time::Duration};
 
 use futures::{Future, FutureExt};
+use tiny_actor::{ShutdownFut, ExitError};
 use tokio::task::JoinHandle;
 
 use crate::*;
@@ -43,11 +44,9 @@ where
     pub fn shutdown(
         &mut self,
         timeout: Duration,
-    ) -> Shutdown<'_, E, <T::Type as ChannelType>::Channel> {
+    ) -> ShutdownFut<'_, E, <T::Type as ChannelType>::Channel> {
         self.inner.shutdown(timeout)
     }
-
-
 }
 
 //-------------------------------------------------

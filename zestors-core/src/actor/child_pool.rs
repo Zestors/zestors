@@ -1,6 +1,7 @@
 use std::{any::TypeId, time::Duration};
 
 use futures::{Future, Stream, StreamExt};
+use tiny_actor::{ExitError, ShutdownPoolFut, SpawnError, TrySpawnError, Inbox};
 use tokio::task::JoinHandle;
 
 use crate::*;
@@ -47,7 +48,7 @@ where
     pub fn shutdown(
         &mut self,
         timeout: Duration,
-    ) -> ShutdownPool<'_, E, <T::Type as ChannelType>::Channel> {
+    ) -> ShutdownPoolFut<'_, E, <T::Type as ChannelType>::Channel> {
         self.inner.shutdown(timeout)
     }
 

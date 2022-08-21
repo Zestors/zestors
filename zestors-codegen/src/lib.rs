@@ -68,7 +68,7 @@ mod derive_message {
         };
 
         Ok(quote! {
-            impl #impl_generics zestors::Message for #ident #ty_generics #where_clause {
+            impl #impl_generics zestors::protocol::Message for #ident #ty_generics #where_clause {
                 type Type = #returns;
             }
         })
@@ -142,15 +142,15 @@ mod protocol {
             let variant_ty = &variant.ty;
             let variant_ident = &variant.ident;
             quote! {
-                impl #impl_generics zestors::ProtocolMessage<#variant_ty> for #ident #ty_generics #where_clause {
+                impl #impl_generics zestors::protocol::ProtocolMessage<#variant_ty> for #ident #ty_generics #where_clause {
                     fn from_sends(
-                        msg: <<#variant_ty as zestors::Message>::Type as zestors::MsgType<#variant_ty>>::Sends
+                        msg: zestors::protocol::Sends<#variant_ty>
                     ) -> Self {
                         Self::#variant_ident(msg)
                     }
 
                     fn try_into_sends(self) -> Result<
-                        <<#variant_ty as zestors::Message>::Type as zestors::MsgType<#variant_ty>>::Sends,
+                        zestors::protocol::Sends<#variant_ty>,
                         Self
                     > {
                         match self {
@@ -209,16 +209,16 @@ mod protocol {
                 let variant_ty = &variant.ty;
                 quote! {
                     Self::#variant_ident(msg) => {
-                        zestors::BoxedMessage::new::<#variant_ty>(msg)
+                        zestors::protocol::BoxedMessage::new::<#variant_ty>(msg)
                     }
                 }
             })
             .collect::<Vec<_>>();
 
         Ok(quote! {
-            impl #impl_generics zestors::Protocol for #ident #ty_generics #where_clause {
+            impl #impl_generics zestors::protocol::Protocol for #ident #ty_generics #where_clause {
 
-                fn try_from_boxed(boxed: zestors::BoxedMessage) -> Result<Self, zestors::BoxedMessage> {
+                fn try_from_boxed(boxed: zestors::protocol::BoxedMessage) -> Result<Self, zestors::protocol::BoxedMessage> {
                     #(#downcasts)*
                     Err(boxed)
                 }
@@ -228,7 +228,7 @@ mod protocol {
                     false
                 }
 
-                fn into_boxed(self) -> zestors::BoxedMessage {
+                fn into_boxed(self) -> zestors::protocol::BoxedMessage {
                     match self {
                         #(#matches)*
                     }
@@ -253,7 +253,7 @@ mod protocol {
                             ident: None,
                             colon_token: None,
                             ty: parse_quote! {
-                                <<#ty as zestors::Message>::Type as zestors::MsgType<#ty>>::Sends
+                                zestors::protocol::Sends<#ty>
                             },
                         });
 

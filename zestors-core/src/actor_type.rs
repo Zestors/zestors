@@ -1,7 +1,6 @@
-use tiny_actor::Channel;
-
 use crate::*;
 use std::{any::TypeId, marker::PhantomData};
+use tiny_actor::{Channel, SendError, TrySendError};
 
 //------------------------------------------------------------------------------------------------
 //  ActorType
@@ -72,7 +71,7 @@ pub trait Accepts<M: Message>: ActorType {
         address: &<Self::Type as ChannelType>::Channel,
         msg: M,
     ) -> Result<Returns<M>, SendError<M>>;
-    fn send(address: &<Self::Type as ChannelType>::Channel, msg: M) -> SendFut<M>;
+    fn send(address: &<Self::Type as ChannelType>::Channel, msg: M) -> SendFut<'_, M>;
 }
 
 impl<M, T> Accepts<M> for Dyn<T>
@@ -88,9 +87,9 @@ where
         msg: M,
     ) -> Result<Returns<M>, TrySendError<M>> {
         address.try_send_unchecked(msg).map_err(|e| match e {
-            TrySendDynError::Full(msg) => TrySendError::Full(msg),
-            TrySendDynError::Closed(msg) => TrySendError::Closed(msg),
-            TrySendDynError::NotAccepted(_) => {
+            TrySendUncheckedError::Full(msg) => TrySendError::Full(msg),
+            TrySendUncheckedError::Closed(msg) => TrySendError::Closed(msg),
+            TrySendUncheckedError::NotAccepted(_) => {
                 panic!("Sent message which was not accepted by actor")
             }
         })
@@ -101,9 +100,9 @@ where
         msg: M,
     ) -> Result<Returns<M>, TrySendError<M>> {
         address.send_now_unchecked(msg).map_err(|e| match e {
-            TrySendDynError::Full(msg) => TrySendError::Full(msg),
-            TrySendDynError::Closed(msg) => TrySendError::Closed(msg),
-            TrySendDynError::NotAccepted(_) => {
+            TrySendUncheckedError::Full(msg) => TrySendError::Full(msg),
+            TrySendUncheckedError::Closed(msg) => TrySendError::Closed(msg),
+            TrySendUncheckedError::NotAccepted(_) => {
                 panic!("Sent message which was not accepted by actor")
             }
         })
@@ -114,22 +113,22 @@ where
         msg: M,
     ) -> Result<Returns<M>, SendError<M>> {
         address.send_blocking_unchecked(msg).map_err(|e| match e {
-            SendDynError::Closed(msg) => SendError(msg),
-            SendDynError::NotAccepted(_) => {
+            SendUncheckedError::Closed(msg) => SendError(msg),
+            SendUncheckedError::NotAccepted(_) => {
                 panic!("Sent message which was not accepted by actor")
             }
         })
     }
 
-    fn send(address: &<Self::Type as ChannelType>::Channel, msg: M) -> SendFut<M> {
-        Box::pin(async move {
+    fn send(address: &<Self::Type as ChannelType>::Channel, msg: M) -> SendFut<'_, M> {
+        SendFut(Box::pin(async move {
             address.send_unchecked(msg).await.map_err(|e| match e {
-                SendDynError::Closed(msg) => SendError(msg),
-                SendDynError::NotAccepted(_) => {
+                SendUncheckedError::Closed(msg) => SendError(msg),
+                SendUncheckedError::NotAccepted(_) => {
                     panic!("Sent message which was not accepted by actor")
                 }
             })
-        })
+        }))
     }
 }
 
@@ -187,14 +186,14 @@ where
     }
 
     fn send(address: &<Self::Type as ChannelType>::Channel, msg: M) -> SendFut<'_, M> {
-        Box::pin(async move {
+        SendFut(Box::pin(async move {
             let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
 
             match address.send(P::from_sends(sends)).await {
                 Ok(()) => Ok(returns),
                 Err(SendError(prot)) => Err(SendError(prot.unwrap_into_msg(returns))),
             }
-        })
+        }))
     }
 }
 
@@ -271,7 +270,7 @@ dyn_types! {
 #[macro_export]
 macro_rules! Address {
     ($($ty:ty),*) => {
-        $crate::Address<$crate::Accepts![$($ty),*]>
+        $crate::actor::Address<$crate::Accepts![$($ty),*]>
     };
 }
 
@@ -290,37 +289,37 @@ macro_rules! Address {
 #[macro_export]
 macro_rules! Accepts {
     () => {
-        $crate::Dyn<dyn $crate::AcceptsNone>
+        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsNone>
     };
     ($ty1:ty) => {
-        $crate::Dyn<dyn $crate::AcceptsOne<$ty1>>
+        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsOne<$ty1>>
     };
     ($ty1:ty, $ty2:ty) => {
-        $crate::Dyn<dyn $crate::AcceptsTwo<$ty1, $ty2>>
+        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsTwo<$ty1, $ty2>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty) => {
-        $crate::Dyn<dyn $crate::AcceptsThree<$ty1, $ty2, $ty3>>
+        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsThree<$ty1, $ty2, $ty3>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty) => {
-        $crate::Dyn<dyn $crate::AcceptsFour<$ty1, $ty2, $ty3, $ty4>>
+        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsFour<$ty1, $ty2, $ty3, $ty4>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty) => {
-        $crate::Dyn<dyn $crate::AcceptsFive<$ty1, $ty2, $ty3, $ty4, $ty5>>
+        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsFive<$ty1, $ty2, $ty3, $ty4, $ty5>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty) => {
-        $crate::Dyn<dyn $crate::AcceptsSix<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6>>
+        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsSix<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty, $ty7:ty) => {
-        $crate::Dyn<dyn $crate::AcceptsSeven<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7>>
+        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsSeven<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty, $ty7:ty, $ty8:ty) => {
-        $crate::Dyn<dyn $crate::AcceptsEight<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8>>
+        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsEight<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty, $ty7:ty, $ty8:ty, $ty9:ty) => {
-        $crate::Dyn<dyn $crate::AcceptsNine<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8, $ty9>>
+        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsNine<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8, $ty9>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty, $ty7:ty, $ty8:ty, $ty9:ty, $ty10:ty) => {
-        $crate::Dyn<dyn $crate::AcceptsTen<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8, $ty9, $ty10>>
+        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsTen<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8, $ty9, $ty10>>
     };
 }
 

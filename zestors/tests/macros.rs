@@ -1,32 +1,27 @@
 #[cfg(test)]
 mod test {
-    use crate as zestors;
-    use crate::*;
     use std::any::TypeId;
+    use zestors::{request::Request, *};
+    use zestors_core::protocol::{BoxedMessage, Protocol, ProtocolMessage};
 
     #[test]
     fn basic_macros() {
-        use msg::*;
-        mod msg {
-            use super::*;
+        #[derive(Message, Debug, Clone)]
+        #[msg(Request<()>)]
+        pub struct Msg1;
 
-            #[derive(Message, Debug, Clone)]
-            #[msg(Request<()>)]
-            pub struct Msg1;
+        #[derive(Message)]
+        pub struct Msg2;
 
-            #[derive(Message)]
-            pub struct Msg2;
+        #[derive(Message)]
+        #[msg(Request<u32>)]
+        pub enum Msg3 {
+            Variant,
+        }
 
-            #[derive(Message)]
-            #[msg(Request<u32>)]
-            pub enum Msg3 {
-                Variant,
-            }
-
-            #[derive(Message)]
-            pub enum Msg4 {
-                Variant,
-            }
+        #[derive(Message)]
+        pub enum Msg4 {
+            Variant,
         }
 
         #[protocol]
