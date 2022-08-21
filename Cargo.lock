@@ -322,16 +322,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spin_sleep"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cafa7900db085f4354dbc7025e25d7a839a14360ea13b5fc4fd717f2d3b23134"
-dependencies = [
- "once_cell",
- "winapi",
-]
-
-[[package]]
 name = "syn"
 version = "1.0.99"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -364,15 +354,11 @@ dependencies = [
 
 [[package]]
 name = "tiny-actor"
-version = "0.2.0-beta.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d4b74bebbac7ed62af1cda1253ec0cf263c7de90f38159f3da9fdff5e654900"
+version = "0.2.0-beta.1"
 dependencies = [
  "concurrent-queue",
  "event-listener",
  "futures",
- "once_cell",
- "spin_sleep",
  "thiserror",
  "tokio",
 ]

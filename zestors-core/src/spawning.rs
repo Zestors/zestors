@@ -3,15 +3,15 @@ use tiny_actor::Channel;
 
 use crate::*;
 
-pub fn spawn<P, E, Fun, Fut>(config: Config, fun: Fun) -> (Child<E, Channel<P>>, StaticAddress<P>)
+pub fn spawn<P, E, Fun, Fut>(config: Config, fun: Fun) -> (Child<E, P>, Address<P>)
 where
     Fun: FnOnce(Inbox<P>) -> Fut + Send + 'static,
     Fut: Future<Output = E> + Send + 'static,
     E: Send + 'static,
-    P: Send + 'static,
+    P: Protocol,
 {
     let (child, addr) = tiny_actor::spawn(config, fun);
-    (Child::from_tiny_child(child), StaticAddress::from_inner(addr))
+    (Child::from_inner(child), Address::from_inner(addr))
 }
 
 // pub fn spawn_one<M, E, Fun, Fut>(

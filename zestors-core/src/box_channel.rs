@@ -4,9 +4,7 @@ use std::{any::TypeId, fmt::Debug, pin::Pin};
 use tiny_actor::{Channel, TrySendError};
 
 /// The internal channel-trait used within zestors, which allows for sending messages dynamically.
-pub(crate) trait BoxChannel:
-    tiny_actor::AnyChannel + tiny_actor::DynChannel + Debug
-{
+pub trait BoxChannel: tiny_actor::AnyChannel + tiny_actor::DynChannel + Debug {
     fn try_send_boxed(&self, boxed: BoxedMessage) -> Result<(), TrySendDynError<BoxedMessage>>;
     fn send_now_boxed(&self, boxed: BoxedMessage) -> Result<(), TrySendDynError<BoxedMessage>>;
     fn send_blocking_boxed(&self, boxed: BoxedMessage) -> Result<(), SendDynError<BoxedMessage>>;
@@ -61,5 +59,97 @@ impl<P: Protocol + Send + 'static> BoxChannel for Channel<P> {
     }
 }
 
-pub(crate) type SendBoxedFut<'a> =
+impl dyn BoxChannel {
+    pub(crate) fn try_send_unchecked<M>(&self, msg: M) -> Result<Returns<M>, TrySendDynError<M>>
+    where
+        M: Message + Send + 'static,
+        Sends<M>: Send + 'static,
+    {
+        let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+        let res = self.try_send_boxed(BoxedMessage::new::<M>(sends));
+
+        match res {
+            Ok(()) => Ok(returns),
+            Err(e) => match e {
+                TrySendDynError::Full(boxed) => Err(TrySendDynError::Full(
+                    boxed.downcast_into_msg(returns).unwrap(),
+                )),
+                TrySendDynError::Closed(boxed) => Err(TrySendDynError::Closed(
+                    boxed.downcast_into_msg(returns).unwrap(),
+                )),
+                TrySendDynError::NotAccepted(boxed) => Err(TrySendDynError::NotAccepted(
+                    boxed.downcast_into_msg(returns).unwrap(),
+                )),
+            },
+        }
+    }
+
+    pub(crate) fn send_now_unchecked<M>(&self, msg: M) -> Result<Returns<M>, TrySendDynError<M>>
+    where
+        M: Message + Send + 'static,
+        Sends<M>: Send + 'static,
+    {
+        let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+        let res = self.send_now_boxed(BoxedMessage::new::<M>(sends));
+
+        match res {
+            Ok(()) => Ok(returns),
+            Err(e) => match e {
+                TrySendDynError::Full(boxed) => Err(TrySendDynError::Full(
+                    boxed.downcast_into_msg(returns).unwrap(),
+                )),
+                TrySendDynError::Closed(boxed) => Err(TrySendDynError::Closed(
+                    boxed.downcast_into_msg(returns).unwrap(),
+                )),
+                TrySendDynError::NotAccepted(boxed) => Err(TrySendDynError::NotAccepted(
+                    boxed.downcast_into_msg(returns).unwrap(),
+                )),
+            },
+        }
+    }
+
+    pub(crate) fn send_blocking_unchecked<M>(&self, msg: M) -> Result<Returns<M>, SendDynError<M>>
+    where
+        M: Message + Send + 'static,
+        Sends<M>: Send + 'static,
+    {
+        let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+        let res = self.send_blocking_boxed(BoxedMessage::new::<M>(sends));
+
+        match res {
+            Ok(()) => Ok(returns),
+            Err(e) => match e {
+                SendDynError::Closed(boxed) => Err(SendDynError::Closed(
+                    boxed.downcast_into_msg(returns).unwrap(),
+                )),
+                SendDynError::NotAccepted(boxed) => Err(SendDynError::NotAccepted(
+                    boxed.downcast_into_msg(returns).unwrap(),
+                )),
+            },
+        }
+    }
+
+    pub(crate) async fn send_unchecked<M>(&self, msg: M) -> Result<Returns<M>, SendDynError<M>>
+    where
+        M: Message + Send + 'static,
+        Sends<M>: Send + 'static,
+    {
+        let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+        let res = self.send_boxed(BoxedMessage::new::<M>(sends)).await;
+
+        match res {
+            Ok(()) => Ok(returns),
+            Err(e) => match e {
+                SendDynError::Closed(boxed) => Err(SendDynError::Closed(
+                    boxed.downcast_into_msg(returns).unwrap(),
+                )),
+                SendDynError::NotAccepted(boxed) => Err(SendDynError::NotAccepted(
+                    boxed.downcast_into_msg(returns).unwrap(),
+                )),
+            },
+        }
+    }
+}
+
+type SendBoxedFut<'a> =
     Pin<Box<dyn Future<Output = Result<(), SendDynError<BoxedMessage>>> + Send + 'a>>;

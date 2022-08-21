@@ -1,22 +1,46 @@
+use tiny_actor::Channel;
+
 use crate::*;
 use std::{any::TypeId, marker::PhantomData};
 
 //------------------------------------------------------------------------------------------------
-//  AddressType
+//  ActorType
 //------------------------------------------------------------------------------------------------
 
 /// An `AddressType` signifies the type that an address can be. The type of an address can be either
 /// a [Protocol] or a [Dyn<_>] type.
-pub trait AddressType {
-    type Address: tiny_actor::DynChannel + Clone;
+pub trait ActorType {
+    type Type: ChannelType;
 }
 
-impl<T: Protocol> AddressType for T {
-    type Address = StaticAddress<T>;
+impl<P: Protocol> ActorType for P {
+    type Type = Static<P>;
 }
 
-impl<T: ?Sized> AddressType for Dyn<T> {
-    type Address = DynAddress<Dyn<T>>;
+impl<D: ?Sized> ActorType for Dyn<D> {
+    type Type = Dynamic;
+}
+
+//------------------------------------------------------------------------------------------------
+//  ChannelType
+//------------------------------------------------------------------------------------------------
+
+pub trait ChannelType {
+    type Channel: BoxChannel + ?Sized;
+}
+
+pub struct Static<P>(PhantomData<*const P>);
+unsafe impl<P> Send for Static<P> {}
+unsafe impl<P> Sync for Static<P> {}
+
+impl<P: Protocol> ChannelType for Static<P> {
+    type Channel = Channel<P>;
+}
+
+pub struct Dynamic;
+
+impl ChannelType for Dynamic {
+    type Channel = dyn BoxChannel;
 }
 
 //------------------------------------------------------------------------------------------------
@@ -35,23 +59,151 @@ unsafe impl<D: ?Sized> Sync for Dyn<D> {}
 
 /// Whether an actor accepts messages of a certain kind. If this is implemented for the
 /// [AddressType] then messages of type `M` can be sent to it's address.
-pub trait Accepts<M: Message>: AddressType {
-    fn try_send(address: &Self::Address, msg: M) -> Result<Returns<M>, TrySendError<M>>;
-    fn send_now(address: &Self::Address, msg: M) -> Result<Returns<M>, TrySendError<M>>;
-    fn send_blocking(address: &Self::Address, msg: M) -> Result<Returns<M>, SendError<M>>;
-    fn send(address: &Self::Address, msg: M) -> SendFut<M>;
+pub trait Accepts<M: Message>: ActorType {
+    fn try_send(
+        address: &<Self::Type as ChannelType>::Channel,
+        msg: M,
+    ) -> Result<Returns<M>, TrySendError<M>>;
+    fn send_now(
+        address: &<Self::Type as ChannelType>::Channel,
+        msg: M,
+    ) -> Result<Returns<M>, TrySendError<M>>;
+    fn send_blocking(
+        address: &<Self::Type as ChannelType>::Channel,
+        msg: M,
+    ) -> Result<Returns<M>, SendError<M>>;
+    fn send(address: &<Self::Type as ChannelType>::Channel, msg: M) -> SendFut<M>;
+}
+
+impl<M, T> Accepts<M> for Dyn<T>
+where
+    Self: IntoDyn<Dyn<dyn AcceptsOne<M>>>,
+    M: Message + Send + 'static,
+    Sends<M>: Send + 'static,
+    Returns<M>: Send,
+    T: ?Sized,
+{
+    fn try_send(
+        address: &<Self::Type as ChannelType>::Channel,
+        msg: M,
+    ) -> Result<Returns<M>, TrySendError<M>> {
+        address.try_send_unchecked(msg).map_err(|e| match e {
+            TrySendDynError::Full(msg) => TrySendError::Full(msg),
+            TrySendDynError::Closed(msg) => TrySendError::Closed(msg),
+            TrySendDynError::NotAccepted(_) => {
+                panic!("Sent message which was not accepted by actor")
+            }
+        })
+    }
+
+    fn send_now(
+        address: &<Self::Type as ChannelType>::Channel,
+        msg: M,
+    ) -> Result<Returns<M>, TrySendError<M>> {
+        address.send_now_unchecked(msg).map_err(|e| match e {
+            TrySendDynError::Full(msg) => TrySendError::Full(msg),
+            TrySendDynError::Closed(msg) => TrySendError::Closed(msg),
+            TrySendDynError::NotAccepted(_) => {
+                panic!("Sent message which was not accepted by actor")
+            }
+        })
+    }
+
+    fn send_blocking(
+        address: &<Self::Type as ChannelType>::Channel,
+        msg: M,
+    ) -> Result<Returns<M>, SendError<M>> {
+        address.send_blocking_unchecked(msg).map_err(|e| match e {
+            SendDynError::Closed(msg) => SendError(msg),
+            SendDynError::NotAccepted(_) => {
+                panic!("Sent message which was not accepted by actor")
+            }
+        })
+    }
+
+    fn send(address: &<Self::Type as ChannelType>::Channel, msg: M) -> SendFut<M> {
+        Box::pin(async move {
+            address.send_unchecked(msg).await.map_err(|e| match e {
+                SendDynError::Closed(msg) => SendError(msg),
+                SendDynError::NotAccepted(_) => {
+                    panic!("Sent message which was not accepted by actor")
+                }
+            })
+        })
+    }
+}
+
+impl<M, P> Accepts<M> for P
+where
+    P: Protocol + ProtocolMessage<M>,
+    Returns<M>: Send,
+    Sends<M>: Send + 'static,
+    M: Message + Send + 'static,
+{
+    fn try_send(
+        address: &<Self::Type as ChannelType>::Channel,
+        msg: M,
+    ) -> Result<Returns<M>, TrySendError<M>> {
+        let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+
+        match address.try_send(P::from_sends(sends)) {
+            Ok(()) => Ok(returns),
+            Err(e) => match e {
+                TrySendError::Closed(prot) => {
+                    Err(TrySendError::Closed(prot.unwrap_into_msg(returns)))
+                }
+                TrySendError::Full(prot) => Err(TrySendError::Full(prot.unwrap_into_msg(returns))),
+            },
+        }
+    }
+
+    fn send_now(
+        address: &<Self::Type as ChannelType>::Channel,
+        msg: M,
+    ) -> Result<Returns<M>, TrySendError<M>> {
+        let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+
+        match address.send_now(P::from_sends(sends)) {
+            Ok(()) => Ok(returns),
+            Err(e) => match e {
+                TrySendError::Closed(prot) => {
+                    Err(TrySendError::Closed(prot.unwrap_into_msg(returns)))
+                }
+                TrySendError::Full(prot) => Err(TrySendError::Full(prot.unwrap_into_msg(returns))),
+            },
+        }
+    }
+
+    fn send_blocking(
+        address: &<Self::Type as ChannelType>::Channel,
+        msg: M,
+    ) -> Result<Returns<M>, SendError<M>> {
+        let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+
+        match address.send_blocking(P::from_sends(sends)) {
+            Ok(()) => Ok(returns),
+            Err(SendError(prot)) => Err(SendError(prot.unwrap_into_msg(returns))),
+        }
+    }
+
+    fn send(address: &<Self::Type as ChannelType>::Channel, msg: M) -> SendFut<'_, M> {
+        Box::pin(async move {
+            let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+
+            match address.send(P::from_sends(sends)).await {
+                Ok(()) => Ok(returns),
+                Err(SendError(prot)) => Err(SendError(prot.unwrap_into_msg(returns))),
+            }
+        })
+    }
 }
 
 //------------------------------------------------------------------------------------------------
-//  IntoDyn
+//  IntoDyn + IsDyn
 //------------------------------------------------------------------------------------------------
 
 /// Marker trait that signifies whether an address can be converted to a dynamic [AddressType] `T`.
 pub trait IntoDyn<T> {}
-
-//------------------------------------------------------------------------------------------------
-//  IsDyn
-//------------------------------------------------------------------------------------------------
 
 /// Trait implemented for all dynamic [AddressType]s.
 pub trait IsDyn {
