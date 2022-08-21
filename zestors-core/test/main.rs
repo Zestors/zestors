@@ -3,7 +3,7 @@ use std::any::TypeId;
 
 pub(crate) struct TestProt;
 impl Protocol for TestProt {
-    fn try_from_boxed(boxed: BoxedMessage) -> Result<Self, BoxedMessage> {
+    fn try_from_boxed(_boxed: BoxedMessage) -> Result<Self, BoxedMessage> {
         todo!()
     }
 
@@ -11,13 +11,13 @@ impl Protocol for TestProt {
         todo!()
     }
 
-    fn accepts(id: &TypeId) -> bool {
+    fn accepts(_id: &TypeId) -> bool {
         todo!()
     }
 }
 
 impl ProtocolMessage<u32> for TestProt {
-    fn from_sends(msg: Sends<u32>) -> Self
+    fn from_sends(_msg: Sends<u32>) -> Self
     where
         Self: Sized,
     {
@@ -33,7 +33,7 @@ impl ProtocolMessage<u32> for TestProt {
 }
 
 impl ProtocolMessage<u64> for TestProt {
-    fn from_sends(msg: Sends<u64>) -> Self
+    fn from_sends(_msg: Sends<u64>) -> Self
     where
         Self: Sized,
     {
@@ -47,7 +47,6 @@ impl ProtocolMessage<u64> for TestProt {
         todo!()
     }
 }
-
 
 fn test1(address: Address<TestProt>, address2: Address![u32, u64]) {
     address.try_send(10 as u32).unwrap();

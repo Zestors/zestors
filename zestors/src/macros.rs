@@ -1,6 +1,3 @@
-use crate::*;
-use std::any::TypeId;
-
 #[cfg(test)]
 mod test {
     use crate as zestors;

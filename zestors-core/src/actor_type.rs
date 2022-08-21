@@ -332,17 +332,17 @@ mod test {
 
     #[test]
     fn address_macro_compiles() {
-        let a: Address![];
-        let a: Address![u8];
-        let a: Address![u8, u16];
-        let a: Address![u8, u16, u32];
-        let a: Address![u8, u16, u32, u64];
-        let a: Address![u8, u16, u32, u64, u128];
-        let a: Address![u8, u16, u32, u64, u128, i8];
-        let a: Address![u8, u16, u32, u64, u128, i8, i16];
-        let a: Address![u8, u16, u32, u64, u128, i8, i16, i32];
-        let a: Address![u8, u16, u32, u64, u128, i8, i16, i32, i64];
-        let a: Address![u8, u16, u32, u64, u128, i8, i16, i32, i64, i128];
+        let _a: Address![];
+        let _a: Address![u8];
+        let _a: Address![u8, u16];
+        let _a: Address![u8, u16, u32];
+        let _a: Address![u8, u16, u32, u64];
+        let _a: Address![u8, u16, u32, u64, u128];
+        let _a: Address![u8, u16, u32, u64, u128, i8];
+        let _a: Address![u8, u16, u32, u64, u128, i8, i16];
+        let _a: Address![u8, u16, u32, u64, u128, i8, i16, i32];
+        let _a: Address![u8, u16, u32, u64, u128, i8, i16, i32, i64];
+        let _a: Address![u8, u16, u32, u64, u128, i8, i16, i32, i64, i128];
     }
 
     #[test]
