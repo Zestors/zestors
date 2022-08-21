@@ -1,6 +1,6 @@
 use std::any::TypeId;
 use zestors_core::{
-    actor::{Addr},
+    process::{Address},
     actor_type::{Accepts, IntoAddress},
     protocol::{BoxedMessage, Protocol, ProtocolMessage, Sends},
     DynAccepts, DynAddress,
@@ -53,7 +53,7 @@ impl ProtocolMessage<u64> for TestProt {
     }
 }
 
-fn test1(address: Addr<TestProt>, address2: DynAddress![u32, u64]) {
+fn test1(address: Address<TestProt>, address2: DynAddress![u32, u64]) {
     address.try_send(10 as u32).unwrap();
     // address.try_send_remote(&(10 as u32));
     // address.try_send_remote(&(10 as u64));
@@ -70,7 +70,7 @@ fn test2(addr: DynAddress![u32, u64]) {
     // addr.clone().transform::<Dyn<dyn AcceptsTwo<(), u32>>>();
 }
 
-fn test3(a1: DynAddress![u32, u64], a2: Addr<TestProt>, a3: DynAddress![u32]) {
+fn test3(a1: DynAddress![u32, u64], a2: Address<TestProt>, a3: DynAddress![u32]) {
     test4(&a1);
     test4(&a2);
     test5(a1);
@@ -78,7 +78,7 @@ fn test3(a1: DynAddress![u32, u64], a2: Addr<TestProt>, a3: DynAddress![u32]) {
     // test4(a3);
 }
 
-fn test4(a: &Addr<impl Accepts<u32> + Accepts<u64>>) {
+fn test4(a: &Address<impl Accepts<u32> + Accepts<u64>>) {
     a.try_send(10 as u32).unwrap();
     a.try_send(10 as u64).unwrap();
     // a.try_send(10 as u128).unwrap();

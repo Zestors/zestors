@@ -4,12 +4,13 @@
 //  Public modules
 //------------------------------------------------------------------------------------------------
 
-pub mod actor;
+pub mod process;
 pub mod actor_type;
 pub mod config;
 pub mod error;
 pub mod protocol;
 pub mod request;
+pub mod actor;
 
 //------------------------------------------------------------------------------------------------
 //  Exports
@@ -24,7 +25,7 @@ pub use zestors_core::{DynAccepts, DynAddress};
 
 mod prelude {
     pub use crate::{
-        actor::{spawn, spawn_many, spawn_one, Addr, Child, ChildPool},
+        process::{spawn, spawn_many, spawn_one, Address, Child, ChildPool},
         actor_type::{Accepts, ActorType},
         DynAccepts, DynAddress,
     };

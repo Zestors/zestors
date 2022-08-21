@@ -261,24 +261,24 @@ dyn_types! {
 //------------------------------------------------------------------------------------------------
 
 pub trait IntoAddress<T: ActorType> {
-    fn into_address(self) -> Addr<T>;
+    fn into_address(self) -> Address<T>;
 }
 
-impl<R: ?Sized, T: ?Sized> IntoAddress<Dyn<T>> for Addr<Dyn<R>>
+impl<R: ?Sized, T: ?Sized> IntoAddress<Dyn<T>> for Address<Dyn<R>>
 where
     Dyn<R>: ActorType<Type = Dynamic> + IntoDynamic<Dyn<T>>,
 {
-    fn into_address(self) -> Addr<Dyn<T>> {
+    fn into_address(self) -> Address<Dyn<T>> {
         self.transform()
     }
 }
 
-impl<P, T> IntoAddress<Dyn<T>> for Addr<P>
+impl<P, T> IntoAddress<Dyn<T>> for Address<P>
 where
     P: Protocol + IntoDynamic<Dyn<T>>,
     T: ?Sized,
 {
-    fn into_address(self) -> Addr<Dyn<T>> {
+    fn into_address(self) -> Address<Dyn<T>> {
         self.into_dyn()
     }
 }
@@ -297,7 +297,7 @@ where
 #[macro_export]
 macro_rules! DynAddress {
     ($($ty:ty),*) => {
-        $crate::actor::Addr<$crate::DynAccepts![$($ty),*]>
+        $crate::process::Address<$crate::DynAccepts![$($ty),*]>
     };
 }
 

@@ -6,7 +6,7 @@ use std::{
     marker::PhantomData,
 };
 use zestors_core::{
-    actor::Addr,
+    process::Address,
     actor_type::{Accepts, ActorType},
     protocol::{BoxedMessage, Message, Protocol, ProtocolMessage, Sends},
     *,
@@ -27,7 +27,7 @@ where
     address: PhantomData<T>,
 }
 
-pub fn try_send_remote<T, RM>(t: &Addr<T>, msg: RM) -> ()
+pub fn try_send_remote<T, RM>(t: &Address<T>, msg: RM) -> ()
 where
     RM: RemoteMessage,
     T: Accepts<RM::Message>,
@@ -113,7 +113,7 @@ where
     }
 }
 
-fn test1(address: Addr<TestProt>, address2: DynAddress![u32, u64]) {
+fn test1(address: Address<TestProt>, address2: DynAddress![u32, u64]) {
     address.try_send(10 as u32).unwrap();
     try_send_remote(&address, &(10 as u32));
     try_send_remote(&address, &(10 as u64));

@@ -6,7 +6,7 @@ use tokio::sync::oneshot;
 
 pub use zestors_core::error::{
     ExitError, HaltedError, RecvError, SendError, SendUncheckedError, SpawnError, TryRecvError,
-    TrySendError, TrySendUncheckedError, TrySpawnError,
+    TrySendError, TrySendUncheckedError, TrySpawnError
 };
 
 //------------------------------------------------------------------------------------------------

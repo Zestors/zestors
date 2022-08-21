@@ -9,7 +9,7 @@ mod _priv;
 //  Public modules
 //------------------------------------------------------------------------------------------------
 
-pub mod actor;
+pub mod process;
 pub mod actor_type;
 pub mod config;
 pub mod error;
@@ -19,4 +19,4 @@ pub mod protocol;
 //  Export for crate
 //------------------------------------------------------------------------------------------------
 
-pub(crate) use {_priv::*, actor::*, actor_type::*, error::*, protocol::*};
+pub(crate) use {_priv::*, process::*, actor_type::*, error::*, protocol::*};

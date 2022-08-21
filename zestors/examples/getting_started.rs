@@ -3,7 +3,7 @@ extern crate zestors;
 
 use std::time::Duration;
 use zestors::{
-    actor::{spawn, Addr, Inbox},
+    process::{spawn, Address, Inbox},
     actor_type::{Accepts, IntoAddress},
     config::Config,
     error::{ExitError, RecvError},
@@ -102,7 +102,7 @@ async fn main() {
         .await
         .unwrap();
 
-    // We can await the `Tx` to get it back:
+    // We can await the `Rx` to get it back:
     let reply = rx.await.unwrap();
     assert_eq!(reply, "Hi there".to_string());
 
@@ -113,7 +113,7 @@ async fn main() {
     // (Just skip to Step 5 if the readme is getting to long ;))
 
     // Now you might be wondering, what is the use of all these complicated traits?
-    // Well, we can convert our `Address<MyProtocol>` into an `Address![i64, Echo]`.
+    // Well, we can convert our `Address<MyProtocol>` into an `DynAddress![i64, Echo]`.
     // This conversion is checked at compile-time, so it is impossible for errors to
     // occur at runtime.
 
@@ -132,7 +132,7 @@ async fn main() {
 
     // And it can finally be converted back into our original address:
 
-    let address: Addr<MyProtocol> = address.downcast().unwrap();
+    let address: Address<MyProtocol> = address.downcast().unwrap();
     address.send(10 as i64).await.unwrap();
 
     //-------------------------------------------------
@@ -143,7 +143,7 @@ async fn main() {
     //
     // We can now transform addresses with different types into the same ones.
     // As long as an address accepts the message `u32`, it can be transformed into
-    // an `Address![u32]`. 2 examples of this usage:
+    // an `Address![u32]`. Some examples of this usage:
 
     async fn accepts_u32_v1(address: DynAddress![i64, Echo]) {
         address.send(10 as i64).await.unwrap();
@@ -157,7 +157,7 @@ async fn main() {
         address.send(10 as i64).await.unwrap();
     }
 
-    async fn accepts_u32_v3<T>(address: Addr<T>)
+    async fn accepts_u32_v3<T>(address: Address<T>)
     where
         T: Accepts<i64> + Accepts<Echo>,
     {
