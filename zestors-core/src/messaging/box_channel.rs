@@ -92,10 +92,10 @@ impl dyn BoxChannel {
         msg: M,
     ) -> Result<Returns<M>, TrySendUncheckedError<M>>
     where
-        M: Message + Send + 'static,
+        M: Message,
         Sends<M>: Send + 'static,
     {
-        let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+        let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
         let res = self.try_send_boxed(BoxedMessage::new::<M>(sends));
 
         match res {
@@ -119,10 +119,10 @@ impl dyn BoxChannel {
         msg: M,
     ) -> Result<Returns<M>, TrySendUncheckedError<M>>
     where
-        M: Message + Send + 'static,
+        M: Message,
         Sends<M>: Send + 'static,
     {
-        let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+        let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
         let res = self.send_now_boxed(BoxedMessage::new::<M>(sends));
 
         match res {
@@ -146,10 +146,10 @@ impl dyn BoxChannel {
         msg: M,
     ) -> Result<Returns<M>, SendUncheckedError<M>>
     where
-        M: Message + Send + 'static,
+        M: Message,
         Sends<M>: Send + 'static,
     {
-        let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+        let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
         let res = self.send_blocking_boxed(BoxedMessage::new::<M>(sends));
 
         match res {
@@ -170,10 +170,10 @@ impl dyn BoxChannel {
         msg: M,
     ) -> Result<Returns<M>, SendUncheckedError<M>>
     where
-        M: Message + Send + 'static,
+        M: Message,
         Sends<M>: Send + 'static,
     {
-        let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+        let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
         let res = self.send_boxed(BoxedMessage::new::<M>(sends)).await;
 
         match res {

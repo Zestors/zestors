@@ -1,24 +1,25 @@
 use crate::*;
 use futures::{Future, FutureExt};
 use std::{any::TypeId, fmt::Debug, time::Duration};
-use tiny_actor::ExitError;
+use tiny_actor::{Channel, ExitError};
 use tokio::task::JoinHandle;
 
 //------------------------------------------------------------------------------------------------
 //  Child
 //------------------------------------------------------------------------------------------------
 
+
 /// # Child<E, T>
 /// The first generic `E` indicates what the `task` will exit with, while the second generic
 ///  `T` indicates what messages can be sent to the actor. For more information about `T`, please
 /// refer to the docs on [Address].
-/// 
+///
 /// # Awaiting
 /// An`Child` can be awaited and will return a `Result<E, ExitError>` once the actor has exited.
 ///
 /// #### _For more information, please read the [module](crate) documentation._
 pub struct Child<E: Send + 'static, T: ActorType = DynAccepts![]> {
-    inner: tiny_actor::Child<E, <T::Type as ChannelType>::Channel>,
+    inner: tiny_actor::Child<E, T::Channel>,
 }
 
 //------------------------------------------------------------------------------------------------
@@ -30,12 +31,12 @@ where
     E: Send + 'static,
     T: ActorType,
 {
-    gen::channel_methods!(inner);
-    gen::send_methods!(inner);
-    gen::child_methods!(inner);
+    _gen::channel_methods!(inner);
+    _gen::send_methods!(inner);
+    _gen::child_methods!(inner);
 
     pub(crate) fn from_inner(
-        inner: tiny_actor::Child<E, <T::Type as ChannelType>::Channel>,
+        inner: tiny_actor::Child<E, T::Channel>,
     ) -> Self {
         Self { inner }
     }
@@ -56,7 +57,7 @@ where
     ///
     /// This will first halt the actor. If the actor has not exited before the timeout,
     /// it will be aborted instead.
-    pub fn shutdown(&mut self, timeout: Duration) -> ShutdownFut<'_, E, T::Type> {
+    pub fn shutdown(&mut self, timeout: Duration) -> ShutdownFut<'_, E, T::Channel> {
         ShutdownFut(self.inner.shutdown(timeout))
     }
 }
@@ -64,18 +65,18 @@ where
 impl<E, P> Child<E, P>
 where
     E: Send + 'static,
-    P: ActorType<Type = Static<P>>,
+    P: ActorType<Channel = Channel<P>>,
 {
-    gen::into_dyn_methods!(inner, Child<E, T>);
+    _gen::into_dyn_methods!(inner, Child<E, T>);
 }
 
 impl<E, D> Child<E, D>
 where
     E: Send + 'static,
-    D: ActorType<Type = Dynamic>,
+    D: ActorType<Channel = dyn BoxChannel>,
 {
-    gen::unchecked_send_methods!(inner);
-    gen::transform_methods!(inner, Child<E, T>);
+    _gen::unchecked_send_methods!(inner);
+    _gen::transform_methods!(inner, Child<E, T>);
 }
 
 //-------------------------------------------------
@@ -119,11 +120,11 @@ where
 //------------------------------------------------------------------------------------------------
 
 /// Future returned when shutting down a [Child].
-pub struct ShutdownFut<'a, E: Send + 'static, T: ChannelType>(
-    tiny_actor::ShutdownFut<'a, E, T::Channel>,
+pub struct ShutdownFut<'a, E: Send + 'static, T: BoxChannel + ?Sized>(
+    tiny_actor::ShutdownFut<'a, E, T>,
 );
 
-impl<'a, E: Send + 'static, T: ChannelType> Future for ShutdownFut<'a, E, T> {
+impl<'a, E: Send + 'static, T: BoxChannel + ?Sized> Future for ShutdownFut<'a, E, T> {
     type Output = Result<E, ExitError>;
 
     fn poll(
@@ -134,4 +135,4 @@ impl<'a, E: Send + 'static, T: ChannelType> Future for ShutdownFut<'a, E, T> {
     }
 }
 
-impl<'a, E: Send + 'static, T: ChannelType> Unpin for ShutdownFut<'a, E, T> {}
+impl<'a, E: Send + 'static, T: BoxChannel + ?Sized> Unpin for ShutdownFut<'a, E, T> {}

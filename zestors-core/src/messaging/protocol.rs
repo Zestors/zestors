@@ -1,10 +1,6 @@
 use crate::*;
 use std::any::TypeId;
 
-//------------------------------------------------------------------------------------------------
-//  Protocol
-//------------------------------------------------------------------------------------------------
-
 /// In order for an actor to receive any messages, it must first define a [Protocol].
 /// This protocol defines exactly which [Messages](Message) the actor can receive, and how
 /// to convert these messages into the [Protocol] that is received by the [Inbox].
@@ -34,10 +30,6 @@ pub trait Protocol: Send + 'static {
         Self: Sized;
 }
 
-//------------------------------------------------------------------------------------------------
-//  ProtocolMessage
-//------------------------------------------------------------------------------------------------
-
 /// In order to send message `M` to an actor, it's protocol must implement `ProtocolMessage<M>`.
 ///
 /// This is normally derived using the [protocol] macro, but may be implemented manually.
@@ -56,10 +48,6 @@ pub trait ProtocolMessage<M: Message>: Protocol {
         Self: Sized;
 }
 
-//------------------------------------------------------------------------------------------------
-//  ProtocolMessageExt
-//------------------------------------------------------------------------------------------------
-
 /// A helper trait
 pub(crate) trait ProtocolMessageExt<M: Message>: ProtocolMessage<M> {
     fn unwrap_into_msg(self, returns: Returns<M>) -> M;
@@ -71,32 +59,24 @@ where
 {
     fn unwrap_into_msg(self, returns: Returns<M>) -> M {
         match self.try_into_sends() {
-            Ok(sends) => <M::Type as MsgType<M>>::into_msg(sends, returns),
+            Ok(sends) => <M::Type as MessageType<M>>::into_msg(sends, returns),
             Err(_) => panic!(),
         }
     }
 }
-
-//------------------------------------------------------------------------------------------------
-//  Message
-//------------------------------------------------------------------------------------------------
 
 /// To use a message withing `zestors`, it must implement [Message].
 ///
 /// This is normally derived using [Message](crate::Message).
 /// ```
 pub trait Message: Sized {
-    type Type: MsgType<Self>;
+    type Type: MessageType<Self>;
 }
-
-//------------------------------------------------------------------------------------------------
-//  MsgType
-//------------------------------------------------------------------------------------------------
 
 /// Every message has a type: It's `MsgType`, which decides what kind of message it is.
 ///
 /// Normally, it is not necessary to implement this, but it may be used for custom message-types.
-pub trait MsgType<M> {
+pub trait MessageType<M> {
     /// This is the message that is actually sent to the actor.
     ///
     /// It is called the sender-part of the message, or `Sends<M>`.
@@ -114,7 +94,7 @@ pub trait MsgType<M> {
     fn into_msg(sends: Self::Sends, returns: Self::Returns) -> M;
 }
 
-impl<M> MsgType<M> for () {
+impl<M> MessageType<M> for () {
     type Sends = M;
     type Returns = ();
 
@@ -127,17 +107,13 @@ impl<M> MsgType<M> for () {
     }
 }
 
-//------------------------------------------------------------------------------------------------
-//  Sends + Returns
-//------------------------------------------------------------------------------------------------
-
 /// A shorthand for writing `<<M as Message>::Type as MsgType<M>>::Sends`, the
 /// sender-part of a message.
-pub type Sends<M> = <<M as Message>::Type as MsgType<M>>::Sends;
+pub type Sends<M> = <<M as Message>::Type as MessageType<M>>::Sends;
 
 /// A shorthand for writing `<<M as Message>::Type as MsgType<M>>::Returns`, the
 /// returner-part of a message.
-pub type Returns<M> = <<M as Message>::Type as MsgType<M>>::Returns;
+pub type Returns<M> = <<M as Message>::Type as MessageType<M>>::Returns;
 
 mod default_messages {
     use crate::*;

@@ -1,8 +1,8 @@
 use std::any::TypeId;
 use zestors_core::{
-    process::{Address},
     actor_type::{Accepts, IntoAddress},
-    protocol::{BoxedMessage, Protocol, ProtocolMessage, Sends},
+    process::Address,
+    messaging::{BoxedMessage, Message, Protocol, ProtocolMessage, Sends},
     DynAccepts, DynAddress,
 };
 

@@ -1,27 +1,21 @@
 use std::{any::TypeId, time::Duration};
 
 use futures::{Future, Stream, StreamExt};
-use tiny_actor::{ExitError, Inbox, SpawnError, TrySpawnError};
+use tiny_actor::{Channel, ExitError, Inbox, SpawnError, TrySpawnError};
 use tokio::task::JoinHandle;
 
 use crate::*;
 
-//------------------------------------------------------------------------------------------------
-//  ChildPool
-//------------------------------------------------------------------------------------------------
-
-/// # ChildPool<E, T>
-/// The first generic `E` indicates what the `tasks` will exit with, while the second generic
-///  `T` indicates what messages can be sent to the actor. For more information about `T`, please
-/// refer to the docs on [Address].
-/// 
+/// A `ChildPool` is very similar to a [Child], except that this supervises an actor with multiple
+/// processes.
+///
 /// # Streaming
 /// An`Child` can be streamed and will return a stream of `Result<E, ExitError>` when all processes
 /// exit.
 ///
 /// #### _For more information, please read the [module](crate) documentation._
 pub struct ChildPool<E: Send + 'static, T: ActorType = DynAccepts![]> {
-    inner: tiny_actor::ChildPool<E, <T::Type as ChannelType>::Channel>,
+    inner: tiny_actor::ChildPool<E, T::Channel>,
 }
 
 impl<E, T> ChildPool<E, T>
@@ -29,13 +23,11 @@ where
     E: Send + 'static,
     T: ActorType,
 {
-    gen::channel_methods!(inner);
-    gen::send_methods!(inner);
-    gen::child_methods!(inner);
+    _gen::channel_methods!(inner);
+    _gen::send_methods!(inner);
+    _gen::child_methods!(inner);
 
-    pub(crate) fn from_inner(
-        inner: tiny_actor::ChildPool<E, <T::Type as ChannelType>::Channel>,
-    ) -> Self {
+    pub(crate) fn from_inner(inner: tiny_actor::ChildPool<E, T::Channel>) -> Self {
         Self { inner }
     }
 
@@ -60,12 +52,12 @@ where
     ///
     /// This will first halt the actor. If the actor has not exited before the timeout,
     /// it will be aborted instead.
-    pub fn shutdown(&mut self, timeout: Duration) -> ShutdownStream<'_, E, T::Type> {
+    pub fn shutdown(&mut self, timeout: Duration) -> ShutdownStream<'_, E, T::Channel> {
         ShutdownStream(self.inner.shutdown(timeout))
     }
 
     /// Attempt to spawn another process onto the actor.
-    /// 
+    ///
     /// This can fail if `P` is not the correct [Protocol].
     pub fn try_spawn<P, Fun, Fut>(&mut self, fun: Fun) -> Result<(), TrySpawnError<Fun>>
     where
@@ -81,9 +73,9 @@ where
 impl<E, P> ChildPool<E, P>
 where
     E: Send + 'static,
-    P: ActorType<Type = Static<P>>,
+    P: ActorType<Channel = Channel<P>>,
 {
-    gen::into_dyn_methods!(inner, ChildPool<E, T>);
+    _gen::into_dyn_methods!(inner, ChildPool<E, T>);
 
     /// Spawn another process onto the actor.
     pub fn spawn<Fun, Fut>(&mut self, fun: Fun) -> Result<(), SpawnError<Fun>>
@@ -100,10 +92,10 @@ where
 impl<E, D> ChildPool<E, D>
 where
     E: Send + 'static,
-    D: ActorType<Type = Dynamic>,
+    D: ActorType<Channel = dyn BoxChannel>,
 {
-    gen::unchecked_send_methods!(inner);
-    gen::transform_methods!(inner, ChildPool<E, T>);
+    _gen::unchecked_send_methods!(inner);
+    _gen::transform_methods!(inner, ChildPool<E, T>);
 }
 
 //-------------------------------------------------
@@ -147,13 +139,13 @@ where
 //------------------------------------------------------------------------------------------------
 
 /// Stream returned when shutting down a `ChildPool`.
-pub struct ShutdownStream<'a, E: Send + 'static, T: ChannelType>(
-    tiny_actor::ShutdownStream<'a, E, T::Channel>,
+pub struct ShutdownStream<'a, E: Send + 'static, T: BoxChannel + ?Sized>(
+    tiny_actor::ShutdownStream<'a, E, T>,
 );
 
-impl<'a, E: Send + 'static, T: ChannelType> Unpin for ShutdownStream<'a, E, T> {}
+impl<'a, E: Send + 'static, T: BoxChannel + ?Sized> Unpin for ShutdownStream<'a, E, T> {}
 
-impl<'a, E: Send + 'static, T: ChannelType> Stream for ShutdownStream<'a, E, T> {
+impl<'a, E: Send + 'static, T: BoxChannel + ?Sized> Stream for ShutdownStream<'a, E, T> {
     type Item = Result<E, ExitError>;
 
     fn poll_next(

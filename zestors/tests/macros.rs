@@ -2,7 +2,7 @@
 mod test {
     use std::any::TypeId;
     use zestors::{request::Request, *};
-    use zestors_core::protocol::{BoxedMessage, Protocol, ProtocolMessage};
+    use zestors_core::messaging::{BoxedMessage, Protocol, ProtocolMessage};
 
     #[test]
     fn basic_macros() {

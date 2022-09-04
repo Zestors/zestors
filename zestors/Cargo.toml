@@ -8,7 +8,9 @@ edition = "2021"
 [dependencies]
 zestors-codegen = { path = "../zestors-codegen" }
 zestors-core = { path = "../zestors-core" }
-zestors-actor = { path = "../zestors-actor" }
-futures = "0.3.0"
+zestors-extra = { path = "../zestors-extra" }
+
+[dev-dependencies]
+async-trait = "0.1.57"
+futures = "^0.3.0"
 tokio = { version = "1.18", features = ["full"] }
-thiserror = "1.0"

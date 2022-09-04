@@ -1,64 +1,47 @@
 use crate::*;
 use futures::{Future, FutureExt};
 use std::{any::TypeId, pin::Pin};
-
-//------------------------------------------------------------------------------------------------
-//  Address
-//------------------------------------------------------------------------------------------------
+use tiny_actor::Channel;
 
 /// # Types
 /// An `Address` can be of two basic types: Dynamic or static.
 ///
 /// ## Static
-/// A static address is typed the [Protocol] of the actor: `Address<P> where P: Protocol`. Any
+/// A static address is typed the [Protocol] of the actor: `Address<P>`. Any
 /// messages the protocol accepts can be sent to this address.
 ///
 /// ## Dynamic
-/// A dynamic address is typed by the messages it accepts: [`Address![u32, u64, ...]`](Address!). Any messages
-/// that appear can be sent to this address. An `Address![]` can also be written as an `Address`.
+/// A dynamic address is typed by the messages it accepts: [`DynAddress![u32, u64, ...]`](DynAddress!). Any messages
+/// that appear can be sent to this address.
 ///
-/// __Note__: `Address![u32, u64]` == `Address<Accepts![u32, u64]>` ==
-/// `Address<Dyn<dyn AcceptsTwo<u32, u64>>`, it does not matter which of these representations is used.
-/// 
-/// # Awaiting
-/// An `Address` can be awaited and will return once the actor has exited.
-/// 
 /// #### _For more information, please read the [module](crate) documentation._
 pub struct Address<T: ActorType = DynAccepts![]> {
-    inner: tiny_actor::Address<<T::Type as ChannelType>::Channel>,
+    inner: tiny_actor::Address<T::Channel>,
 }
 
-//-------------------------------------------------
-//  Implementation
-//-------------------------------------------------
-
 impl<T: ActorType> Address<T> {
-    pub fn from_inner(inner: tiny_actor::Address<<T::Type as ChannelType>::Channel>) -> Self {
+    pub(crate) fn from_inner(inner: tiny_actor::Address<T::Channel>) -> Self {
         Self { inner }
     }
 
-    gen::channel_methods!(inner);
-    gen::send_methods!(inner);
+    _gen::channel_methods!(inner);
+    _gen::send_methods!(inner);
 }
 
 impl<P> Address<P>
 where
-    P: ActorType<Type = Static<P>>,
+    P: ActorType<Channel = Channel<P>>,
 {
-    gen::into_dyn_methods!(inner, Address<T>);
+    _gen::into_dyn_methods!(inner, Address<T>);
 }
 
 impl<D> Address<D>
 where
-    D: ActorType<Type = Dynamic>,
+    D: ActorType<Channel = dyn BoxChannel>,
 {
-    gen::unchecked_send_methods!(inner);
-    gen::transform_methods!(inner, Address<T>);
+    _gen::unchecked_send_methods!(inner);
+    _gen::transform_methods!(inner, Address<T>);
 }
-
-//-------------------------------------------------
-//  Traits
-//-------------------------------------------------
 
 impl<T: ActorType> Future for Address<T> {
     type Output = ();

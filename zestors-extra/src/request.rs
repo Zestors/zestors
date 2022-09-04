@@ -1,4 +1,5 @@
-use crate::error::{RxError, TryRxError, TxError};
+#![doc = include_str!("../../docs/request.md")]
+
 use futures::{Future, FutureExt};
 use std::{
     marker::PhantomData,
@@ -6,7 +7,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
-use zestors_core::protocol::MsgType;
+use zestors_core::messaging::MessageType;
 
 //------------------------------------------------------------------------------------------------
 //  Request
@@ -22,7 +23,7 @@ impl<T> Request<T> {
     }
 }
 
-impl<M, R> MsgType<M> for Request<R> {
+impl<M, R> MessageType<M> for Request<R> {
     type Sends = (M, Tx<R>);
     type Returns = Rx<R>;
 
@@ -93,3 +94,49 @@ impl<M> Future for Rx<M> {
         self.0.poll_unpin(cx).map_err(|_| RxError)
     }
 }
+
+//------------------------------------------------------------------------------------------------
+//  RxError
+//------------------------------------------------------------------------------------------------
+
+/// Error returned when receiving a message using an [Rx].
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
+#[error("Failed to receive from Rx because it is closed.")]
+pub struct RxError;
+
+impl From<oneshot::error::RecvError> for RxError {
+    fn from(_: oneshot::error::RecvError) -> Self {
+        Self
+    }
+}
+
+//------------------------------------------------------------------------------------------------
+//  TryRxError
+//------------------------------------------------------------------------------------------------
+
+/// Error returned when trying to receive a message using an [Rx](crate::request::Rx).
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
+pub enum TryRxError {
+    #[error("Closed")]
+    Closed,
+    #[error("Empty")]
+    Empty,
+}
+
+impl From<oneshot::error::TryRecvError> for TryRxError {
+    fn from(e: oneshot::error::TryRecvError) -> Self {
+        match e {
+            oneshot::error::TryRecvError::Empty => Self::Empty,
+            oneshot::error::TryRecvError::Closed => Self::Closed,
+        }
+    }
+}
+
+//------------------------------------------------------------------------------------------------
+//  TxError
+//------------------------------------------------------------------------------------------------
+
+/// Error returned when sending a message using a [Tx].
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
+#[error("Failed to send to Tx because it is closed.")]
+pub struct TxError<M>(pub M);

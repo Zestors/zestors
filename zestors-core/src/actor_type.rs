@@ -1,3 +1,5 @@
+#![doc = include_str!("../../docs/actor_type.md")]
+
 use crate::*;
 use std::{any::TypeId, marker::PhantomData};
 use tiny_actor::{Channel, SendError, TrySendError};
@@ -6,39 +8,20 @@ use tiny_actor::{Channel, SendError, TrySendError};
 //  ActorType
 //------------------------------------------------------------------------------------------------
 
-/// An `AddressType` signifies the type that an address can be. The type of an address can be either
+/// An `ActorType` signifies the type that an actor can be. This can be either
 /// a [Protocol] or a [Dyn<_>] type.
 pub trait ActorType {
-    type Type: ChannelType;
-}
-
-impl<P: Protocol> ActorType for P {
-    type Type = Static<P>;
-}
-
-impl<D: ?Sized> ActorType for Dyn<D> {
-    type Type = Dynamic;
-}
-
-//------------------------------------------------------------------------------------------------
-//  ChannelType
-//------------------------------------------------------------------------------------------------
-
-pub trait ChannelType {
     type Channel: BoxChannel + ?Sized;
 }
 
-pub struct Static<P>(PhantomData<*const P>);
-unsafe impl<P> Send for Static<P> {}
-unsafe impl<P> Sync for Static<P> {}
-
-impl<P: Protocol> ChannelType for Static<P> {
+impl<P> ActorType for P
+where
+    P: Protocol,
+{
     type Channel = Channel<P>;
 }
 
-pub struct Dynamic;
-
-impl ChannelType for Dynamic {
+impl<D: ?Sized> ActorType for Dyn<D> {
     type Channel = dyn BoxChannel;
 }
 
@@ -46,7 +29,7 @@ impl ChannelType for Dynamic {
 //  Dyn
 //------------------------------------------------------------------------------------------------
 
-/// The dynamic [AddressType].
+/// A dynamic [ActorType], typed by the messages it accepts.
 pub struct Dyn<D: ?Sized>(PhantomData<*const D>);
 
 unsafe impl<D: ?Sized> Send for Dyn<D> {}
@@ -57,21 +40,12 @@ unsafe impl<D: ?Sized> Sync for Dyn<D> {}
 //------------------------------------------------------------------------------------------------
 
 /// Whether an actor accepts messages of a certain kind. If this is implemented for the
-/// [AddressType] then messages of type `M` can be sent to it's address.
+/// [ActorType] then messages of type `M` can be sent to it's address.
 pub trait Accepts<M: Message>: ActorType {
-    fn try_send(
-        address: &<Self::Type as ChannelType>::Channel,
-        msg: M,
-    ) -> Result<Returns<M>, TrySendError<M>>;
-    fn send_now(
-        address: &<Self::Type as ChannelType>::Channel,
-        msg: M,
-    ) -> Result<Returns<M>, TrySendError<M>>;
-    fn send_blocking(
-        address: &<Self::Type as ChannelType>::Channel,
-        msg: M,
-    ) -> Result<Returns<M>, SendError<M>>;
-    fn send(address: &<Self::Type as ChannelType>::Channel, msg: M) -> SendFut<'_, M>;
+    fn try_send(address: &Self::Channel, msg: M) -> Result<Returns<M>, TrySendError<M>>;
+    fn send_now(address: &Self::Channel, msg: M) -> Result<Returns<M>, TrySendError<M>>;
+    fn send_blocking(address: &Self::Channel, msg: M) -> Result<Returns<M>, SendError<M>>;
+    fn send(address: &Self::Channel, msg: M) -> SendFut<'_, M>;
 }
 
 impl<M, T> Accepts<M> for Dyn<T>
@@ -82,10 +56,7 @@ where
     Returns<M>: Send,
     T: ?Sized,
 {
-    fn try_send(
-        address: &<Self::Type as ChannelType>::Channel,
-        msg: M,
-    ) -> Result<Returns<M>, TrySendError<M>> {
+    fn try_send(address: &Self::Channel, msg: M) -> Result<Returns<M>, TrySendError<M>> {
         address.try_send_unchecked(msg).map_err(|e| match e {
             TrySendUncheckedError::Full(msg) => TrySendError::Full(msg),
             TrySendUncheckedError::Closed(msg) => TrySendError::Closed(msg),
@@ -95,10 +66,7 @@ where
         })
     }
 
-    fn send_now(
-        address: &<Self::Type as ChannelType>::Channel,
-        msg: M,
-    ) -> Result<Returns<M>, TrySendError<M>> {
+    fn send_now(address: &Self::Channel, msg: M) -> Result<Returns<M>, TrySendError<M>> {
         address.send_now_unchecked(msg).map_err(|e| match e {
             TrySendUncheckedError::Full(msg) => TrySendError::Full(msg),
             TrySendUncheckedError::Closed(msg) => TrySendError::Closed(msg),
@@ -108,10 +76,7 @@ where
         })
     }
 
-    fn send_blocking(
-        address: &<Self::Type as ChannelType>::Channel,
-        msg: M,
-    ) -> Result<Returns<M>, SendError<M>> {
+    fn send_blocking(address: &Self::Channel, msg: M) -> Result<Returns<M>, SendError<M>> {
         address.send_blocking_unchecked(msg).map_err(|e| match e {
             SendUncheckedError::Closed(msg) => SendError(msg),
             SendUncheckedError::NotAccepted(_) => {
@@ -120,7 +85,7 @@ where
         })
     }
 
-    fn send(address: &<Self::Type as ChannelType>::Channel, msg: M) -> SendFut<'_, M> {
+    fn send(address: &Self::Channel, msg: M) -> SendFut<'_, M> {
         SendFut(Box::pin(async move {
             address.send_unchecked(msg).await.map_err(|e| match e {
                 SendUncheckedError::Closed(msg) => SendError(msg),
@@ -139,11 +104,8 @@ where
     Sends<M>: Send + 'static,
     M: Message + Send + 'static,
 {
-    fn try_send(
-        address: &<Self::Type as ChannelType>::Channel,
-        msg: M,
-    ) -> Result<Returns<M>, TrySendError<M>> {
-        let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+    fn try_send(address: &Self::Channel, msg: M) -> Result<Returns<M>, TrySendError<M>> {
+        let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
 
         match address.try_send(P::from_sends(sends)) {
             Ok(()) => Ok(returns),
@@ -156,11 +118,8 @@ where
         }
     }
 
-    fn send_now(
-        address: &<Self::Type as ChannelType>::Channel,
-        msg: M,
-    ) -> Result<Returns<M>, TrySendError<M>> {
-        let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+    fn send_now(address: &Self::Channel, msg: M) -> Result<Returns<M>, TrySendError<M>> {
+        let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
 
         match address.send_now(P::from_sends(sends)) {
             Ok(()) => Ok(returns),
@@ -173,11 +132,8 @@ where
         }
     }
 
-    fn send_blocking(
-        address: &<Self::Type as ChannelType>::Channel,
-        msg: M,
-    ) -> Result<Returns<M>, SendError<M>> {
-        let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+    fn send_blocking(address: &Self::Channel, msg: M) -> Result<Returns<M>, SendError<M>> {
+        let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
 
         match address.send_blocking(P::from_sends(sends)) {
             Ok(()) => Ok(returns),
@@ -185,9 +141,9 @@ where
         }
     }
 
-    fn send(address: &<Self::Type as ChannelType>::Channel, msg: M) -> SendFut<'_, M> {
+    fn send(address: &Self::Channel, msg: M) -> SendFut<'_, M> {
         SendFut(Box::pin(async move {
-            let (sends, returns) = <M::Type as MsgType<M>>::new_pair(msg);
+            let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
 
             match address.send(P::from_sends(sends)).await {
                 Ok(()) => Ok(returns),
@@ -198,7 +154,7 @@ where
 }
 
 //------------------------------------------------------------------------------------------------
-//  IntoDyn + IsDyn
+//  IntoDynamic + IsDynamic
 //------------------------------------------------------------------------------------------------
 
 /// Marker trait that signifies whether an address can be converted to a dynamic [AddressType] `T`.
@@ -214,47 +170,54 @@ pub trait IsDynamic {
 //  Dynamic types
 //------------------------------------------------------------------------------------------------
 
-macro_rules! dyn_types {
-    ($($ident:ident $(<$( $ty:ident ),*>)?),*) => {
-        $(
-            // Create the trait
+mod dyn_type {
+    use crate::*;
+    use std::any::TypeId;
 
-            /// A dynamic address-type.
-            pub trait $ident< $($($ty: Message,)?)*>: $($( ProtocolMessage<$ty> + )?)* {}
+    macro_rules! dyn_types {
+        ($($ident:ident $(<$( $ty:ident ),*>)?),*) => {
+            $(
+                // Create the trait
 
-            // Implement `IsDyn` for it
-            impl<$($($ty: Message + 'static,)?)*> IsDynamic for Dyn<dyn $ident< $($($ty,)?)*>> {
-                fn message_ids() -> Box<[TypeId]> {
-                    Box::new([$($(TypeId::of::<$ty>(),)?)*])
+                /// A dynamic address-type.
+                pub trait $ident< $($($ty: Message,)?)*>: $($( ProtocolMessage<$ty> + )?)* {}
+
+                // Implement `IsDyn` for it
+                impl<$($($ty: Message + 'static,)?)*> IsDynamic for Dyn<dyn $ident< $($($ty,)?)*>> {
+                    fn message_ids() -> Box<[TypeId]> {
+                        Box::new([$($(TypeId::of::<$ty>(),)?)*])
+                    }
                 }
-            }
 
-            // Implement `IntoDyn` for all dynamic address-types
-            impl<T, $($($ty: Message,)?)*> IntoDynamic<Dyn<dyn $ident<$($($ty,)?)*>>> for Dyn<T>
-            where
-                T: ?Sized $($( + ProtocolMessage<$ty> )?)* {}
+                // Implement `IntoDyn` for all dynamic address-types
+                impl<T, $($($ty: Message,)?)*> IntoDynamic<Dyn<dyn $ident<$($($ty,)?)*>>> for Dyn<T>
+                where
+                    T: ?Sized $($( + ProtocolMessage<$ty> )?)* {}
 
-            // Implement `IntoDyn` for all static address-types
-            impl<T, $($($ty: Message,)?)*> IntoDynamic<Dyn<dyn $ident<$($($ty,)?)*>>> for T
-            where
-                T: Protocol $($( + ProtocolMessage<$ty> )?)* {}
-        )*
-    };
+                // Implement `IntoDyn` for all static address-types
+                impl<T, $($($ty: Message,)?)*> IntoDynamic<Dyn<dyn $ident<$($($ty,)?)*>>> for T
+                where
+                    T: Protocol $($( + ProtocolMessage<$ty> )?)* {}
+            )*
+        };
+    }
+
+    dyn_types! {
+        AcceptsNone,
+        AcceptsOne<M1>,
+        AcceptsTwo<M1, M2>,
+        AcceptsThree<M1, M2, M3>,
+        AcceptsFour<M1, M2, M3, M4>,
+        AcceptsFive<M1, M2, M3, M4, M5>,
+        AcceptsSix<M1, M2, M3, M4, M5, M6>,
+        AcceptsSeven<M1, M2, M3, M4, M5, M6, M7>,
+        AcceptsEight<M1, M2, M3, M4, M5, M6, M7, M8>,
+        AcceptsNine<M1, M2, M3, M4, M5, M6, M7, M8, M9>,
+        AcceptsTen<M1, M2, M3, M4, M5, M6, M7, M8, M9, M10>
+    }
 }
 
-dyn_types! {
-    AcceptsNone,
-    AcceptsOne<M1>,
-    AcceptsTwo<M1, M2>,
-    AcceptsThree<M1, M2, M3>,
-    AcceptsFour<M1, M2, M3, M4>,
-    AcceptsFive<M1, M2, M3, M4, M5>,
-    AcceptsSix<M1, M2, M3, M4, M5, M6>,
-    AcceptsSeven<M1, M2, M3, M4, M5, M6, M7>,
-    AcceptsEight<M1, M2, M3, M4, M5, M6, M7, M8>,
-    AcceptsNine<M1, M2, M3, M4, M5, M6, M7, M8, M9>,
-    AcceptsTen<M1, M2, M3, M4, M5, M6, M7, M8, M9, M10>
-}
+pub use dyn_type::*;
 
 //------------------------------------------------------------------------------------------------
 //  IntoAddress
@@ -266,7 +229,7 @@ pub trait IntoAddress<T: ActorType> {
 
 impl<R: ?Sized, T: ?Sized> IntoAddress<Dyn<T>> for Address<Dyn<R>>
 where
-    Dyn<R>: ActorType<Type = Dynamic> + IntoDynamic<Dyn<T>>,
+    Dyn<R>: ActorType<Channel = dyn BoxChannel> + IntoDynamic<Dyn<T>>,
 {
     fn into_address(self) -> Address<Dyn<T>> {
         self.transform()
@@ -289,11 +252,11 @@ where
 
 /// A macro to easily create dynamic [Address]es.
 ///
-/// See [Accepts!] for creating dynamic [AddressType]s.
+/// See [DynAccepts!] for creating dynamic [ActorType]s.
 ///
 /// # Examples
-/// * `Address![]` == `Address<Dyn<dyn AcceptsNone>>`
-/// * `Address![u32, u64]` == `Address<Dyn<dyn AcceptsTwo<u32, u64>>>`
+/// * `DynAddress![]` == `Address<Dyn<dyn AcceptsNone>>`
+/// * `DynAddress![u32, u64]` == `Address<Dyn<dyn AcceptsTwo<u32, u64>>>`
 #[macro_export]
 macro_rules! DynAddress {
     ($($ty:ty),*) => {
@@ -305,14 +268,14 @@ macro_rules! DynAddress {
 //  Accepts
 //------------------------------------------------------------------------------------------------
 
-/// A macro to easily create dynamic [AddressType]s.
+/// A macro to easily create dynamic [ActorType]s.
 ///
-/// See [Address!] for creating dynamic [Address]es.
+/// See [DynAddress!] for creating dynamic [Address]es.
 ///
 /// # Examples
-/// * `Accepts![u32, u64]` == `Dyn<dyn AcceptsTwo<u32, u64>>`
-/// * `Address<Accepts![]>` == `Address<Dyn<dyn AcceptsNone>>`
-/// * `Address<Accepts![u32, u64]>` == `Address<Dyn<dyn AcceptsTwo<u32, u64>>>`
+/// * `DynAccepts![u32, u64]` == `Dyn<dyn AcceptsTwo<u32, u64>>`
+/// * `Address<DynAccepts![]>` == `Address<Dyn<dyn AcceptsNone>>`
+/// * `Address<DynAccepts![u32, u64]>` == `Address<Dyn<dyn AcceptsTwo<u32, u64>>>`
 #[macro_export]
 macro_rules! DynAccepts {
     () => {

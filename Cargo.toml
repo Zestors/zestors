@@ -4,5 +4,6 @@ members = [
   "zestors-codegen",
   "zestors-core",
   "zestors-distributed",
-  "zestors-actor",
+  "zestors-extra",
+  "zestors-actor"
 ]

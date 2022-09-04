@@ -3,16 +3,16 @@ extern crate zestors;
 
 use std::time::Duration;
 use zestors::{
-    process::{spawn, Address, Inbox},
     actor_type::{Accepts, IntoAddress},
     config::Config,
     error::{ExitError, RecvError},
+    process::{self, spawn, Address, Inbox},
     request::{Request, Rx},
 };
 
-//-------------------------------------------------
+//--------------------------------------------------------
 //  Step 1: Define the messages you will use
-//-------------------------------------------------
+//--------------------------------------------------------
 
 // This message will be a simple message, without any reply.
 #[derive(Message, Debug)]
@@ -20,22 +20,21 @@ struct MyMessage {
     number: u32,
 }
 
-// Now we define a message which expects a response of a `String`.
+// Now we define a message which expects a reply of a `String`.
 #[derive(Message, Debug)]
 #[msg(Request<String>)]
 struct Echo {
     string: String,
 }
 
-//-------------------------------------------------
+//---------------------------------------------------------
 //  Step 2: Define the protocol of the actor
-//-------------------------------------------------
+//---------------------------------------------------------
 
 // Here we define our protocol as an enum.
 // It accepts 3 messages: `Echo`, `MyMessage` and `i64`.
 //
-// This macro modifies the enum such that a response can be sent back, this
-// will be made obvious later.
+// This macro modifies the enum such that a reply can be sent back.
 #[derive(Debug)]
 #[protocol]
 enum MyProtocol {
@@ -46,14 +45,15 @@ enum MyProtocol {
 
 #[tokio::main]
 async fn main() {
-    //-------------------------------------------------
+    //-----------------------------------------------------------------------
     //  Step 3: Spawn the actor
-    //-------------------------------------------------
+    //-----------------------------------------------------------------------
 
-    // Here, we spawn the actor with a default configuration.
+    // Here, we spawn the actor with a function from a default configuration.
     //
     // We get back a `Child<String, MyProtocol>` and a `Address<MyProtocol>`.
-    let (mut child, address) = spawn(
+    // These types are exactly the same as those gotten back from `spawn_actor`.
+    let (mut child, address) = process::spawn(
         Config::default(),
         |mut inbox: Inbox<MyProtocol>| async move {
             loop {
@@ -77,9 +77,9 @@ async fn main() {
                     },
                     Err(e) => match e {
                         // Here we received a halt-signal, so we should exit now.
-                        RecvError::Halted => break "Halted",
+                        RecvError::Halted => break "Halted".to_string(),
                         // And if the inbox is closed and empty, we should also exit.
-                        RecvError::ClosedAndEmpty => break "ClosedAndEmpty",
+                        RecvError::ClosedAndEmpty => break "ClosedAndEmpty".to_string(),
                     },
                 }
             }

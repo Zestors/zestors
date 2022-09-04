@@ -2,6 +2,7 @@ use crate::*;
 use futures::Future;
 use tiny_actor::{Config, Inbox};
 
+/// See [tiny_actor::spawn]
 pub fn spawn<P, E, Fun, Fut>(config: Config, fun: Fun) -> (Child<E, P>, Address<P>)
 where
     Fun: FnOnce(Inbox<P>) -> Fut + Send + 'static,
@@ -13,6 +14,7 @@ where
     (Child::from_inner(child), Address::from_inner(addr))
 }
 
+/// See [tiny_actor::spawn_one]
 pub fn spawn_one<P, E, Fun, Fut>(config: Config, fun: Fun) -> (ChildPool<E, P>, Address<P>)
 where
     Fun: FnOnce(Inbox<P>) -> Fut + Send + 'static,
@@ -24,6 +26,7 @@ where
     (ChildPool::from_inner(child), Address::from_inner(addr))
 }
 
+/// See [tiny_actor::spawn_many]
 pub fn spawn_many<P, E, I, Fun, Fut>(
     iter: impl IntoIterator<Item = I>,
     config: Config,
