@@ -7,7 +7,7 @@ use zestors::{
     config::Config,
     error::{ExitError, RecvError},
     process::{self, spawn, Address, Inbox},
-    request::{Request, Rx},
+    request::{IntoRecv, Request, Rx},
 };
 
 //--------------------------------------------------------
@@ -104,6 +104,16 @@ async fn main() {
 
     // We can await the `Rx` to get it back:
     let reply = rx.await.unwrap();
+    assert_eq!(reply, "Hi there".to_string());
+
+    // Or more concise:
+    let reply = address
+        .send(Echo {
+            string: "Hi there".to_string(),
+        })
+        .into_recv()
+        .await
+        .unwrap();
     assert_eq!(reply, "Hi there".to_string());
 
     //-------------------------------------------------

@@ -31,12 +31,12 @@ macro_rules! send_methods {
 
         /// Send a message to the actor. If the inbox is full or returns a timeout, wait for this
         /// and then send it.
-        pub async fn send<M>(&self, msg: M) -> Result<Returns<M>, tiny_actor::SendError<M>>
+        pub fn send<M>(&self, msg: M) -> SendFut<M>
         where
             M: Message,
             T: Accepts<M>,
         {
-            <T as Accepts<M>>::send(&self.$at.channel_ref(), msg).await
+            <T as Accepts<M>>::send(&self.$at.channel_ref(), msg)
         }
     };
 }
