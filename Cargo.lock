@@ -944,8 +944,8 @@ dependencies = [
  "async-trait",
  "futures",
  "tokio",
- "zestors-codegen",
- "zestors-core",
+ "zestors-codegen 0.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zestors-core 0.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "zestors-request",
 ]
 
@@ -957,8 +957,8 @@ dependencies = [
  "futures",
  "thiserror",
  "tokio",
- "zestors-codegen",
- "zestors-core",
+ "zestors-codegen 0.0.3",
+ "zestors-core 0.0.1",
 ]
 
 [[package]]
@@ -971,8 +971,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "zestors-codegen"
+version = "0.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3be6dd8e178d0ef644fe9f0a598fc9525cdc5ef95aaf164becee280514465100"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "zestors-core"
 version = "0.0.1"
+dependencies = [
+ "futures",
+ "thiserror",
+ "tiny-actor",
+ "tokio",
+]
+
+[[package]]
+name = "zestors-core"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b76860ab340ee170f4a946666e7064896461daf8434006c63356be6a775da35e"
 dependencies = [
  "futures",
  "thiserror",
@@ -992,7 +1015,7 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
- "zestors-core",
+ "zestors-core 0.0.1",
 ]
 
 [[package]]
@@ -1002,5 +1025,5 @@ dependencies = [
  "futures",
  "thiserror",
  "tokio",
- "zestors-core",
+ "zestors-core 0.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]

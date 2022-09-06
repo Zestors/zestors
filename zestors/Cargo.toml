@@ -6,8 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-zestors-codegen = { path = "../zestors-codegen" }
-zestors-core = { path = "../zestors-core" }
+zestors-codegen = "0.0.3"
+zestors-core = "0.0.1"
 zestors-request = { path = "../zestors-request" }
 
 [dev-dependencies]
