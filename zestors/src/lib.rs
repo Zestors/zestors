@@ -1,4 +1,4 @@
-#![doc = include_str!("../../README.md")]
+#![doc = include_str!("../README.md")]
 
 pub use zestors_core::actor_type;
 pub use zestors_core::config;
