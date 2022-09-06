@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use futures::Future;
 use zestors_core::{
     process::Inbox,
-    protocol::{BoxedMessage, Message, Protocol, ProtocolMessage, Sends},
+    messaging::{BoxedMessage, Message, Protocol, ProtocolMessage, SendPart},
 };
 
 use crate::*;
@@ -65,14 +65,14 @@ impl<A: Actor> Event<A> {
 }
 
 impl<A: Actor> Protocol for Event<A> {
-    fn try_from_boxed(boxed: BoxedMessage) -> Result<Self, BoxedMessage>
+    fn try_unbox(boxed: BoxedMessage) -> Result<Self, BoxedMessage>
     where
         Self: Sized,
     {
         boxed.downcast::<Event<A>>()
     }
 
-    fn into_boxed(self) -> BoxedMessage {
+    fn boxed(self) -> BoxedMessage {
         BoxedMessage::new::<Self>(self)
     }
 
@@ -89,14 +89,14 @@ impl<A: Actor> Message for Event<A> {
 }
 
 impl<A: Actor> ProtocolMessage<Event<A>> for Event<A> {
-    fn from_sends(msg: Sends<Event<A>>) -> Self
+    fn from_sends(msg: SendPart<Event<A>>) -> Self
     where
         Self: Sized,
     {
         msg
     }
 
-    fn try_into_sends(self) -> Result<Sends<Event<A>>, Self>
+    fn try_into_sends(self) -> Result<SendPart<Event<A>>, Self>
     where
         Self: Sized,
     {

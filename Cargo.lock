@@ -952,6 +952,14 @@ dependencies = [
 [[package]]
 name = "zestors-actor"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "thiserror",
+ "tokio",
+ "zestors-codegen",
+ "zestors-core",
+]
 
 [[package]]
 name = "zestors-codegen"
@@ -992,10 +1000,8 @@ dependencies = [
 name = "zestors-request"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "futures",
  "thiserror",
  "tokio",
- "zestors-codegen",
  "zestors-core",
 ]

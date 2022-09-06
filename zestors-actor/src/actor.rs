@@ -1,5 +1,3 @@
-#![doc = include_str!("../../docs/actor.md")]
-
 use crate::*;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
@@ -10,8 +8,8 @@ use std::{
 use zestors_core::{
     config::Config,
     error::RecvError,
+    messaging::Protocol,
     process::{spawn, Address, Child, Inbox},
-    protocol::Protocol,
 };
 
 #[async_trait]
@@ -53,17 +51,10 @@ pub trait Actor: Sized + Send + 'static + Scheduler<Actor = Self> {
 pub trait Scheduler: Sized + Unpin {
     type Actor: Actor;
 
-    async fn next(
-        self: &mut Self,
-        inbox: &mut Inbox<<Self::Actor as Actor>::Protocol>,
-    ) -> Result<Flow, <Self::Actor as Actor>::Error> {
-        todo!()
-    }
-
     fn poll_next(
         pin: Pin<&mut (&mut Self, &mut Inbox<<Self::Actor as Actor>::Protocol>)>,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Flow, <Self::Actor as Actor>::Error>>>;
+    ) -> Poll<Option<Event<Self::Actor>>>;
 
     fn re_enable(&self) -> bool;
 }
@@ -107,7 +98,7 @@ impl<A: Actor> From<RecvError> for Exception<A> {
     }
 }
 
-struct EventStream<'a, A: Actor>(pub &'a mut A, pub &'a mut Inbox<A::Protocol>);
+struct EventStream<'a, A: Actor>(pub &'a mut A);
 
 impl<'a, A> Stream for EventStream<'a, A>
 where
@@ -137,7 +128,7 @@ async fn event_loop<H: Handler>(init: H::Init, mut inbox: Inbox<H::Protocol>) ->
         }
 
         if enabled {
-            let mut scheduler = EventStream(&mut actor, &mut inbox);
+            let mut scheduler = EventStream(&mut actor);
 
             tokio::select! {
                 biased;
@@ -161,12 +152,12 @@ async fn event_loop<H: Handler>(init: H::Init, mut inbox: Inbox<H::Protocol>) ->
                     }
                 }
 
-                // msg = scheduler.1.recv() => {
-                //     actor = match handle_recv(msg, actor, &mut inbox).await {
-                //         Ok(actor) => actor,
-                //         Err(exit) => break exit,
-                //     }
-                // }
+                msg = inbox.recv() => {
+                    actor = match handle_recv(msg, actor, &mut inbox).await {
+                        Ok(actor) => actor,
+                        Err(exit) => break exit,
+                    }
+                }
 
             }
         } else {
