@@ -6,7 +6,7 @@ use zestors::{
     actor_type::{Accepts, IntoAddress},
     config::Config,
     error::{ExitError, RecvError},
-    process::{self, spawn, Address, Inbox},
+    process::{spawn, Address, Inbox},
     request::{IntoRecv, Request, Rx},
 };
 
@@ -53,7 +53,7 @@ async fn main() {
     //
     // We get back a `Child<String, MyProtocol>` and a `Address<MyProtocol>`.
     // These types are exactly the same as those gotten back from `spawn_actor`.
-    let (mut child, address) = process::spawn(
+    let (mut child, address) = spawn(
         Config::default(),
         |mut inbox: Inbox<MyProtocol>| async move {
             loop {

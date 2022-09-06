@@ -52,7 +52,7 @@ pub trait Scheduler: Sized + Unpin {
     type Actor: Actor;
 
     fn poll_next(
-        pin: Pin<&mut (&mut Self, &mut Inbox<<Self::Actor as Actor>::Protocol>)>,
+        pin: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Event<Self::Actor>>>;
 
@@ -104,11 +104,10 @@ impl<'a, A> Stream for EventStream<'a, A>
 where
     A: Actor,
 {
-    type Item = Result<Flow, A::Error>;
+    type Item = Event<A>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        todo!()
-        // A::poll_next(Pin::new(&mut (&mut self.0, &mut self.1)), cx)
+        A::poll_next(Pin::new(self.0), cx)
     }
 }
 
@@ -202,11 +201,11 @@ async fn handle_recv<H: Handler>(
 }
 
 async fn handle_event<H: Handler>(
-    event: Result<Flow, H::Error>,
-    actor: H,
+    event: Event<H>,
+    mut actor: H,
     inbox: &mut Inbox<H::Protocol>,
 ) -> Result<H, H::Exit> {
-    let exception = match event {
+    let exception = match event.handle(&mut actor, inbox).await {
         Ok(flow) => match flow {
             Flow::Cont => None,
             Flow::Stop => Some(Exception::Stop),

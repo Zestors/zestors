@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use zestors_core::{
     actor_type::{Accepts, IntoAddress},
-    messaging::{BoxedMessage, Message, Protocol, ProtocolMessage, SendPart},
+    messaging::{BoxedMessage, Protocol, ProtocolMessage, SendPart},
     process::Address,
     DynAccepts, DynAddress,
 };
