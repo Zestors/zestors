@@ -32,17 +32,17 @@ mod test {
             Four(Msg4),
         }
 
-        Prot::One((Msg1, Request::new().0));
+        Prot::One((Msg1, Request::create().0));
         Prot::Two(Msg2);
-        Prot::Three((Msg3::Variant, Request::new().0));
+        Prot::Three((Msg3::Variant, Request::create().0));
         Prot::Four(Msg4::Variant);
 
-        <Prot as Protocol>::try_from_boxed(BoxedMessage::new::<Msg1>((Msg1, Request::new().0)))
+        <Prot as Protocol>::try_from_boxed(BoxedMessage::new::<Msg1>((Msg1, Request::create().0)))
             .unwrap();
         <Prot as Protocol>::try_from_boxed(BoxedMessage::new::<Msg2>(Msg2)).unwrap();
         <Prot as Protocol>::try_from_boxed(BoxedMessage::new::<Msg3>((
             Msg3::Variant,
-            Request::new().0,
+            Request::create().0,
         )))
         .unwrap();
         <Prot as Protocol>::try_from_boxed(BoxedMessage::new::<Msg4>(Msg4::Variant)).unwrap();
@@ -53,9 +53,9 @@ mod test {
         assert!(<Prot as Protocol>::accepts(&TypeId::of::<Msg4>()));
         assert!(!<Prot as Protocol>::accepts(&TypeId::of::<u32>()));
 
-        <Prot as ProtocolMessage<Msg1>>::from_sends((Msg1, Request::new().0));
+        <Prot as ProtocolMessage<Msg1>>::from_sends((Msg1, Request::create().0));
         <Prot as ProtocolMessage<Msg2>>::from_sends(Msg2);
-        <Prot as ProtocolMessage<Msg3>>::from_sends((Msg3::Variant, Request::new().0));
+        <Prot as ProtocolMessage<Msg3>>::from_sends((Msg3::Variant, Request::create().0));
         <Prot as ProtocolMessage<Msg4>>::from_sends(Msg4::Variant);
     }
 }

@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 zestors-codegen = { path = "../zestors-codegen" }
 zestors-core = { path = "../zestors-core" }
-zestors-extra = { path = "../zestors-extra" }
+zestors-request = { path = "../zestors-request" }
 
 [dev-dependencies]
 async-trait = "0.1.57"

@@ -33,7 +33,7 @@ pub mod protocol {
 pub mod request {
     #![doc = include_str!("../../docs/request.md")]
 
-    pub use zestors_extra::request::*;
+    pub use zestors_request::*;
 }
 
 // pub mod actor {

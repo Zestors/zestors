@@ -946,7 +946,7 @@ dependencies = [
  "tokio",
  "zestors-codegen",
  "zestors-core",
- "zestors-extra",
+ "zestors-request",
 ]
 
 [[package]]
@@ -988,7 +988,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zestors-extra"
+name = "zestors-request"
 version = "0.1.0"
 dependencies = [
  "async-trait",
