@@ -963,12 +963,11 @@ dependencies = [
 
 [[package]]
 name = "zestors-codegen"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn",
- "zestors",
 ]
 
 [[package]]

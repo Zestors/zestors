@@ -1,3 +1,5 @@
+[![Crates.io](https://img.shields.io/crates/v/zestors)](https://crates.io/crates/zestors)
+[![Documentation](https://docs.rs/zestors/badge.svg)](https://docs.rs/zestors)
 
 # Zestors
 Zestors is a message-centric actor framework for tokio. It builds on top of [tiny-actor](https://github.com/jvdwrf/tiny-actor) while adding a layer of abstraction that allows for building more complex systems. 

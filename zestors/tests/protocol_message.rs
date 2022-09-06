@@ -5,6 +5,7 @@ use std::any::TypeId;
 use zestors::{
     messaging::{BoxedMessage, Protocol, ProtocolMessage},
     request::Request,
+    Message,
 };
 
 #[test]
