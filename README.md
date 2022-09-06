@@ -11,7 +11,7 @@ Zestors is a message-centric actor framework for tokio. It builds on top of [tin
 **Extensible**: Wherever possible, features have been implemented as external libraries. This means that it is possible to use your own custom message-types, distributed framework, etc.
 
 # Getting started
-To get started it is best to read the [docs](https://docs.rs/zestors/0.0.1/zestors/) of zestors first. For more information about the behaviour of supervision, spawning, aborting, etc, the [README](https://github.com/jvdwrf/tiny-actor/blob/main/README.md) of `tiny-actor` has an in-depth explanation of these concepts.
+To get started it is best to read the [docs](https://docs.rs/zestors/0.0.2/zestors/) of zestors first. For more information about the behaviour of supervision, spawning, aborting, etc, the [README](https://github.com/jvdwrf/tiny-actor/blob/main/README.md) of `tiny-actor` has an in-depth explanation of these concepts.
 
 *Please note that zestors is still in early development and could (will) contain bugs*
 
