@@ -1,5 +1,3 @@
-#![doc = include_str!("../../docs/error.md")]
-
 pub use tiny_actor::error::{
     ExitError, HaltedError, RecvError, SendError, SpawnError, TryRecvError, TrySendError,
     TrySpawnError,

@@ -1,5 +1,3 @@
-#![doc = include_str!("../../../docs/process.md")]
-
 mod address;
 mod child;
 mod child_pool;
@@ -8,4 +6,4 @@ mod spawning;
 
 pub use {address::*, child::*, child_pool::*, send_fut::*, spawning::*};
 
-pub use tiny_actor::{Inbox, RecvFut, Channel};
+pub use tiny_actor::{Channel, Inbox, RecvFut};

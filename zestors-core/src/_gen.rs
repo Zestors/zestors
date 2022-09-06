@@ -2,7 +2,7 @@ macro_rules! send_methods {
     ($at:ident) => {
         /// Attempts to send a message to an actor. If the mailbox is full or if a timeout is
         /// returned this method will fail.
-        pub fn try_send<M>(&self, msg: M) -> Result<Returns<M>, tiny_actor::TrySendError<M>>
+        pub fn try_send<M>(&self, msg: M) -> Result<ReturnPart<M>, tiny_actor::TrySendError<M>>
         where
             M: Message,
             T: Accepts<M>,
@@ -12,7 +12,7 @@ macro_rules! send_methods {
 
         /// Attempts to send a message to an actor. If the mailbox is full this will fail, but if
         /// a timeout is returned then this will succeed.
-        pub fn send_now<M>(&self, msg: M) -> Result<Returns<M>, tiny_actor::TrySendError<M>>
+        pub fn send_now<M>(&self, msg: M) -> Result<ReturnPart<M>, tiny_actor::TrySendError<M>>
         where
             M: Message,
             T: Accepts<M>,
@@ -21,7 +21,7 @@ macro_rules! send_methods {
         }
 
         /// Same as `send`, but blocks the thread instead.
-        pub fn send_blocking<M>(&self, msg: M) -> Result<Returns<M>, tiny_actor::SendError<M>>
+        pub fn send_blocking<M>(&self, msg: M) -> Result<ReturnPart<M>, tiny_actor::SendError<M>>
         where
             M: Message,
             T: Accepts<M>,
@@ -48,10 +48,13 @@ macro_rules! unchecked_send_methods {
         /// Send a message to an actor without checking whether this actor accepts the message.
         ///
         /// If the actor does not accept the message, then nothing is sent and an error is returned.
-        pub fn try_send_unchecked<M>(&self, msg: M) -> Result<Returns<M>, TrySendUncheckedError<M>>
+        pub fn try_send_unchecked<M>(
+            &self,
+            msg: M,
+        ) -> Result<ReturnPart<M>, TrySendUncheckedError<M>>
         where
             M: Message + Send + 'static,
-            Sends<M>: Send + 'static,
+            SendPart<M>: Send + 'static,
         {
             self.$at.channel_ref().try_send_unchecked(msg)
         }
@@ -59,10 +62,13 @@ macro_rules! unchecked_send_methods {
         /// Send a message to an actor without checking whether this actor accepts the message.
         ///
         /// If the actor does not accept the message, then nothing is sent and an error is returned.
-        pub fn send_now_unchecked<M>(&self, msg: M) -> Result<Returns<M>, TrySendUncheckedError<M>>
+        pub fn send_now_unchecked<M>(
+            &self,
+            msg: M,
+        ) -> Result<ReturnPart<M>, TrySendUncheckedError<M>>
         where
             M: Message + Send + 'static,
-            Sends<M>: Send + 'static,
+            SendPart<M>: Send + 'static,
         {
             self.$at.channel_ref().send_now_unchecked(msg)
         }
@@ -73,10 +79,10 @@ macro_rules! unchecked_send_methods {
         pub fn send_blocking_unchecked<M>(
             &self,
             msg: M,
-        ) -> Result<Returns<M>, SendUncheckedError<M>>
+        ) -> Result<ReturnPart<M>, SendUncheckedError<M>>
         where
             M: Message + Send + 'static,
-            Sends<M>: Send + 'static,
+            SendPart<M>: Send + 'static,
         {
             self.$at.channel_ref().send_blocking_unchecked(msg)
         }
@@ -84,10 +90,13 @@ macro_rules! unchecked_send_methods {
         /// Send a message to an actor without checking whether this actor accepts the message.
         ///
         /// If the actor does not accept the message, then nothing is sent and an error is returned.
-        pub async fn send_unchecked<M>(&self, msg: M) -> Result<Returns<M>, SendUncheckedError<M>>
+        pub async fn send_unchecked<M>(
+            &self,
+            msg: M,
+        ) -> Result<ReturnPart<M>, SendUncheckedError<M>>
         where
             M: Message + Send + 'static,
-            Sends<M>: Send + 'static,
+            SendPart<M>: Send + 'static,
         {
             self.$at.channel_ref().send_unchecked(msg).await
         }

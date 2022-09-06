@@ -27,12 +27,12 @@ impl<M, R> MessageType<M> for Request<R> {
     type Sends = (M, Tx<R>);
     type Returns = Rx<R>;
 
-    fn new_pair(msg: M) -> ((M, Tx<R>), Rx<R>) {
+    fn create(msg: M) -> ((M, Tx<R>), Rx<R>) {
         let (tx, rx) = Request::create();
         ((msg, tx), rx)
     }
 
-    fn into_msg(sends: (M, Tx<R>), _returns: Rx<R>) -> M {
+    fn destroy(sends: (M, Tx<R>), _returns: Rx<R>) -> M {
         sends.0
     }
 }

@@ -8,7 +8,6 @@ use tokio::task::JoinHandle;
 //  Child
 //------------------------------------------------------------------------------------------------
 
-
 /// # Child<E, T>
 /// The first generic `E` indicates what the `task` will exit with, while the second generic
 ///  `T` indicates what messages can be sent to the actor. For more information about `T`, please
@@ -35,9 +34,7 @@ where
     _gen::send_methods!(inner);
     _gen::child_methods!(inner);
 
-    pub(crate) fn from_inner(
-        inner: tiny_actor::Child<E, T::Channel>,
-    ) -> Self {
+    pub(crate) fn from_inner(inner: tiny_actor::Child<E, T::Channel>) -> Self {
         Self { inner }
     }
 

@@ -5,13 +5,13 @@ use tiny_actor::SendError;
 
 /// Future returned when sending a message to an [Address].
 pub struct SendFut<'a, M: Message>(
-    pub(crate) Pin<Box<dyn Future<Output = Result<Returns<M>, SendError<M>>> + Send + 'a>>,
+    pub(crate) Pin<Box<dyn Future<Output = Result<ReturnPart<M>, SendError<M>>> + Send + 'a>>,
 );
 
 impl<'a, M: Message> Unpin for SendFut<'a, M> {}
 
 impl<'a, M: Message> Future for SendFut<'a, M> {
-    type Output = Result<Returns<M>, SendError<M>>;
+    type Output = Result<ReturnPart<M>, SendError<M>>;
 
     fn poll(
         mut self: Pin<&mut Self>,

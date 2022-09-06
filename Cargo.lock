@@ -960,6 +960,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+ "zestors",
 ]
 
 [[package]]

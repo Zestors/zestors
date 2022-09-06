@@ -1,18 +1,18 @@
 use std::any::TypeId;
 use zestors_core::{
     actor_type::{Accepts, IntoAddress},
+    messaging::{BoxedMessage, Message, Protocol, ProtocolMessage, SendPart},
     process::Address,
-    messaging::{BoxedMessage, Message, Protocol, ProtocolMessage, Sends},
     DynAccepts, DynAddress,
 };
 
 pub(crate) struct TestProt;
 impl Protocol for TestProt {
-    fn try_from_boxed(_boxed: BoxedMessage) -> Result<Self, BoxedMessage> {
+    fn try_unbox(_boxed: BoxedMessage) -> Result<Self, BoxedMessage> {
         todo!()
     }
 
-    fn into_boxed(self) -> BoxedMessage {
+    fn boxed(self) -> BoxedMessage {
         todo!()
     }
 
@@ -22,14 +22,14 @@ impl Protocol for TestProt {
 }
 
 impl ProtocolMessage<u32> for TestProt {
-    fn from_sends(_msg: Sends<u32>) -> Self
+    fn from_sends(_msg: SendPart<u32>) -> Self
     where
         Self: Sized,
     {
         todo!()
     }
 
-    fn try_into_sends(self) -> Result<Sends<u32>, Self>
+    fn try_into_sends(self) -> Result<SendPart<u32>, Self>
     where
         Self: Sized,
     {
@@ -38,14 +38,14 @@ impl ProtocolMessage<u32> for TestProt {
 }
 
 impl ProtocolMessage<u64> for TestProt {
-    fn from_sends(_msg: Sends<u64>) -> Self
+    fn from_sends(_msg: SendPart<u64>) -> Self
     where
         Self: Sized,
     {
         todo!()
     }
 
-    fn try_into_sends(self) -> Result<Sends<u64>, Self>
+    fn try_into_sends(self) -> Result<SendPart<u64>, Self>
     where
         Self: Sized,
     {

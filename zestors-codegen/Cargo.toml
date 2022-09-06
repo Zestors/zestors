@@ -12,3 +12,6 @@ proc-macro2 = "1.0.20"
 
 [lib]
 proc-macro = true
+
+[dev-dependencies]
+zestors = { path = "../zestors" }

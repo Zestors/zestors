@@ -31,10 +31,10 @@ impl<P: Protocol + Send + 'static> BoxChannel for Channel<P> {
         &self,
         boxed: BoxedMessage,
     ) -> Result<(), TrySendUncheckedError<BoxedMessage>> {
-        match P::try_from_boxed(boxed) {
+        match P::try_unbox(boxed) {
             Ok(prot) => self.try_send(prot).map_err(|e| match e {
-                TrySendError::Full(prot) => TrySendUncheckedError::Full(prot.into_boxed()),
-                TrySendError::Closed(prot) => TrySendUncheckedError::Closed(prot.into_boxed()),
+                TrySendError::Full(prot) => TrySendUncheckedError::Full(prot.boxed()),
+                TrySendError::Closed(prot) => TrySendUncheckedError::Closed(prot.boxed()),
             }),
             Err(boxed) => Err(TrySendUncheckedError::NotAccepted(boxed)),
         }
@@ -44,10 +44,10 @@ impl<P: Protocol + Send + 'static> BoxChannel for Channel<P> {
         &self,
         boxed: BoxedMessage,
     ) -> Result<(), TrySendUncheckedError<BoxedMessage>> {
-        match P::try_from_boxed(boxed) {
+        match P::try_unbox(boxed) {
             Ok(prot) => self.send_now(prot).map_err(|e| match e {
-                TrySendError::Full(prot) => TrySendUncheckedError::Full(prot.into_boxed()),
-                TrySendError::Closed(prot) => TrySendUncheckedError::Closed(prot.into_boxed()),
+                TrySendError::Full(prot) => TrySendUncheckedError::Full(prot.boxed()),
+                TrySendError::Closed(prot) => TrySendUncheckedError::Closed(prot.boxed()),
             }),
             Err(boxed) => Err(TrySendUncheckedError::NotAccepted(boxed)),
         }
@@ -57,10 +57,10 @@ impl<P: Protocol + Send + 'static> BoxChannel for Channel<P> {
         &self,
         boxed: BoxedMessage,
     ) -> Result<(), SendUncheckedError<BoxedMessage>> {
-        match P::try_from_boxed(boxed) {
+        match P::try_unbox(boxed) {
             Ok(prot) => self
                 .send_blocking(prot)
-                .map_err(|SendError(prot)| SendUncheckedError::Closed(prot.into_boxed())),
+                .map_err(|SendError(prot)| SendUncheckedError::Closed(prot.boxed())),
             Err(boxed) => Err(SendUncheckedError::NotAccepted(boxed)),
         }
     }
@@ -71,11 +71,11 @@ impl<P: Protocol + Send + 'static> BoxChannel for Channel<P> {
     ) -> Pin<Box<dyn Future<Output = Result<(), SendUncheckedError<BoxedMessage>>> + Send + 'a>>
     {
         Box::pin(async move {
-            match P::try_from_boxed(boxed) {
+            match P::try_unbox(boxed) {
                 Ok(prot) => self
                     .send(prot)
                     .await
-                    .map_err(|SendError(prot)| SendUncheckedError::Closed(prot.into_boxed())),
+                    .map_err(|SendError(prot)| SendUncheckedError::Closed(prot.boxed())),
                 Err(boxed) => Err(SendUncheckedError::NotAccepted(boxed)),
             }
         })
@@ -90,12 +90,12 @@ impl dyn BoxChannel {
     pub(crate) fn try_send_unchecked<M>(
         &self,
         msg: M,
-    ) -> Result<Returns<M>, TrySendUncheckedError<M>>
+    ) -> Result<ReturnPart<M>, TrySendUncheckedError<M>>
     where
         M: Message,
-        Sends<M>: Send + 'static,
+        SendPart<M>: Send + 'static,
     {
-        let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
+        let (sends, returns) = <M::Type as MessageType<M>>::create(msg);
         let res = self.try_send_boxed(BoxedMessage::new::<M>(sends));
 
         match res {
@@ -117,12 +117,12 @@ impl dyn BoxChannel {
     pub(crate) fn send_now_unchecked<M>(
         &self,
         msg: M,
-    ) -> Result<Returns<M>, TrySendUncheckedError<M>>
+    ) -> Result<ReturnPart<M>, TrySendUncheckedError<M>>
     where
         M: Message,
-        Sends<M>: Send + 'static,
+        SendPart<M>: Send + 'static,
     {
-        let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
+        let (sends, returns) = <M::Type as MessageType<M>>::create(msg);
         let res = self.send_now_boxed(BoxedMessage::new::<M>(sends));
 
         match res {
@@ -144,12 +144,12 @@ impl dyn BoxChannel {
     pub(crate) fn send_blocking_unchecked<M>(
         &self,
         msg: M,
-    ) -> Result<Returns<M>, SendUncheckedError<M>>
+    ) -> Result<ReturnPart<M>, SendUncheckedError<M>>
     where
         M: Message,
-        Sends<M>: Send + 'static,
+        SendPart<M>: Send + 'static,
     {
-        let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
+        let (sends, returns) = <M::Type as MessageType<M>>::create(msg);
         let res = self.send_blocking_boxed(BoxedMessage::new::<M>(sends));
 
         match res {
@@ -168,12 +168,12 @@ impl dyn BoxChannel {
     pub(crate) async fn send_unchecked<M>(
         &self,
         msg: M,
-    ) -> Result<Returns<M>, SendUncheckedError<M>>
+    ) -> Result<ReturnPart<M>, SendUncheckedError<M>>
     where
         M: Message,
-        Sends<M>: Send + 'static,
+        SendPart<M>: Send + 'static,
     {
-        let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
+        let (sends, returns) = <M::Type as MessageType<M>>::create(msg);
         let res = self.send_boxed(BoxedMessage::new::<M>(sends)).await;
 
         match res {

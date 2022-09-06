@@ -1,5 +1,3 @@
-#![doc = include_str!("../../docs/actor_type.md")]
-
 use crate::*;
 use std::{any::TypeId, marker::PhantomData};
 use tiny_actor::{Channel, SendError, TrySendError};
@@ -42,9 +40,9 @@ unsafe impl<D: ?Sized> Sync for Dyn<D> {}
 /// Whether an actor accepts messages of a certain kind. If this is implemented for the
 /// [ActorType] then messages of type `M` can be sent to it's address.
 pub trait Accepts<M: Message>: ActorType {
-    fn try_send(address: &Self::Channel, msg: M) -> Result<Returns<M>, TrySendError<M>>;
-    fn send_now(address: &Self::Channel, msg: M) -> Result<Returns<M>, TrySendError<M>>;
-    fn send_blocking(address: &Self::Channel, msg: M) -> Result<Returns<M>, SendError<M>>;
+    fn try_send(address: &Self::Channel, msg: M) -> Result<ReturnPart<M>, TrySendError<M>>;
+    fn send_now(address: &Self::Channel, msg: M) -> Result<ReturnPart<M>, TrySendError<M>>;
+    fn send_blocking(address: &Self::Channel, msg: M) -> Result<ReturnPart<M>, SendError<M>>;
     fn send(address: &Self::Channel, msg: M) -> SendFut<'_, M>;
 }
 
@@ -52,11 +50,11 @@ impl<M, T> Accepts<M> for Dyn<T>
 where
     Self: IntoDynamic<Dyn<dyn AcceptsOne<M>>>,
     M: Message + Send + 'static,
-    Sends<M>: Send + 'static,
-    Returns<M>: Send,
+    SendPart<M>: Send + 'static,
+    ReturnPart<M>: Send,
     T: ?Sized,
 {
-    fn try_send(address: &Self::Channel, msg: M) -> Result<Returns<M>, TrySendError<M>> {
+    fn try_send(address: &Self::Channel, msg: M) -> Result<ReturnPart<M>, TrySendError<M>> {
         address.try_send_unchecked(msg).map_err(|e| match e {
             TrySendUncheckedError::Full(msg) => TrySendError::Full(msg),
             TrySendUncheckedError::Closed(msg) => TrySendError::Closed(msg),
@@ -66,7 +64,7 @@ where
         })
     }
 
-    fn send_now(address: &Self::Channel, msg: M) -> Result<Returns<M>, TrySendError<M>> {
+    fn send_now(address: &Self::Channel, msg: M) -> Result<ReturnPart<M>, TrySendError<M>> {
         address.send_now_unchecked(msg).map_err(|e| match e {
             TrySendUncheckedError::Full(msg) => TrySendError::Full(msg),
             TrySendUncheckedError::Closed(msg) => TrySendError::Closed(msg),
@@ -76,7 +74,7 @@ where
         })
     }
 
-    fn send_blocking(address: &Self::Channel, msg: M) -> Result<Returns<M>, SendError<M>> {
+    fn send_blocking(address: &Self::Channel, msg: M) -> Result<ReturnPart<M>, SendError<M>> {
         address.send_blocking_unchecked(msg).map_err(|e| match e {
             SendUncheckedError::Closed(msg) => SendError(msg),
             SendUncheckedError::NotAccepted(_) => {
@@ -100,12 +98,12 @@ where
 impl<M, P> Accepts<M> for P
 where
     P: Protocol + ProtocolMessage<M>,
-    Returns<M>: Send,
-    Sends<M>: Send + 'static,
+    ReturnPart<M>: Send,
+    SendPart<M>: Send + 'static,
     M: Message + Send + 'static,
 {
-    fn try_send(address: &Self::Channel, msg: M) -> Result<Returns<M>, TrySendError<M>> {
-        let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
+    fn try_send(address: &Self::Channel, msg: M) -> Result<ReturnPart<M>, TrySendError<M>> {
+        let (sends, returns) = <M::Type as MessageType<M>>::create(msg);
 
         match address.try_send(P::from_sends(sends)) {
             Ok(()) => Ok(returns),
@@ -118,8 +116,8 @@ where
         }
     }
 
-    fn send_now(address: &Self::Channel, msg: M) -> Result<Returns<M>, TrySendError<M>> {
-        let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
+    fn send_now(address: &Self::Channel, msg: M) -> Result<ReturnPart<M>, TrySendError<M>> {
+        let (sends, returns) = <M::Type as MessageType<M>>::create(msg);
 
         match address.send_now(P::from_sends(sends)) {
             Ok(()) => Ok(returns),
@@ -132,8 +130,8 @@ where
         }
     }
 
-    fn send_blocking(address: &Self::Channel, msg: M) -> Result<Returns<M>, SendError<M>> {
-        let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
+    fn send_blocking(address: &Self::Channel, msg: M) -> Result<ReturnPart<M>, SendError<M>> {
+        let (sends, returns) = <M::Type as MessageType<M>>::create(msg);
 
         match address.send_blocking(P::from_sends(sends)) {
             Ok(()) => Ok(returns),
@@ -143,7 +141,7 @@ where
 
     fn send(address: &Self::Channel, msg: M) -> SendFut<'_, M> {
         SendFut(Box::pin(async move {
-            let (sends, returns) = <M::Type as MessageType<M>>::new_pair(msg);
+            let (sends, returns) = <M::Type as MessageType<M>>::create(msg);
 
             match address.send(P::from_sends(sends)).await {
                 Ok(()) => Ok(returns),

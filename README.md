@@ -1,215 +1,27 @@
 
 # Zestors
+Zestors is a message-centric actor framework for tokio. It builds on top of [tiny-actor](https://github.com/jvdwrf/tiny-actor) while adding a layer of abstraction that allows for building more complex systems. 
 
-Zestors is a fully-featured actor-framework for tokio. It builds on top of [tiny-actor](https://github.com/jvdwrf/tiny-actor), and adds a layer of abstractions which allows for building more complex systems. The [README](https://github.com/jvdwrf/tiny-actor/blob/main/README.md) of `tiny-actor` describes in detail the basis of the actor-system, and it is recommended to read that first. The following readme explains what is added on top.
+**Fast**: There is 0 overhead when using `zestors` over `tiny-actor`, performace should be very similar to spawning a task with channel while gaining a lot of features. Messages are not boxed before sending but have exactly the same layout as specified in the protocol.
+
+**Flexible**: Addresses can be typed either by their protocol *(static)* or by the messages that it accepts *(dynamic)*. As far as I know, this is the only rust actor-framework to allow this, and is very essential for easy message-sending.
+
+**Extensible**: Wherever possible, features have been implemented as external libraries. This means that it is possible to use your own custom message-types, distributed framework, etc.
 
 # Getting started
+To get started it is best to read the [docs](https://docs.rs/zestors/0.0.1/zestors/) of zestors first. For more information about the behaviour of supervision, spawning, aborting, etc, the [README](https://github.com/jvdwrf/tiny-actor/blob/main/README.md) of `tiny-actor` has an in-depth explanation of these concepts.
 
-```rust
-#[macro_use]
-extern crate zestors;
+*Please note that zestors is still in early development and could (will) contain bugs*
 
-use std::time::Duration;
-use zestors::{
-    actor::{spawn, Address, Inbox},
-    actor_type::{Accepts, IntoAddress},
-    config::Config,
-    error::{ExitError, RecvError},
-    request::{Request, Rx},
-};
+# Repository organization
+The main crate for users is `zestors`, which exports other crates within this repository. When building libraries, it's better to depend only on those crates actually necessary, since these will be more stable.
 
-//-------------------------------------------------
-//  Step 1: Define the messages you will use
-//-------------------------------------------------
+# Contributing
+It would be amazing for other people to start contributing to zestors. I'm currently developing zestors in my spare time while balancing it with a study, so any help is appreciated. :)
 
-// This message will be a simple message, without any reply.
-#[derive(Message, Debug)]
-struct MyMessage {
-    number: u32,
-}
-
-// Now we define a message which expects a response of a `String`.
-#[derive(Message, Debug)]
-#[msg(Request<String>)]
-struct Echo {
-    string: String,
-}
-
-//-------------------------------------------------
-//  Step 2: Define the protocol of the actor
-//-------------------------------------------------
-
-// Here we define our protocol as an enum.
-// It accepts 3 messages: `Echo`, `MyMessage` and `i64`.
-//
-// This macro modifies the enum such that a response can be sent back, this
-// will be made obvious later.
-#[derive(Debug)]
-#[protocol]
-enum MyProtocol {
-    Echo(Echo),
-    MyMessage(MyMessage),
-    Number(i64),
-}
-
-#[tokio::main]
-async fn main() {
-    //-------------------------------------------------
-    //  Step 3: Spawn the actor
-    //-------------------------------------------------
-
-    // Here, we spawn the actor with a default configuration.
-    //
-    // We get back a `Child<String, MyProtocol>` and a `Address<MyProtocol>`.
-    let (mut child, address) = spawn(
-        Config::default(),
-        |mut inbox: Inbox<MyProtocol>| async move {
-            loop {
-                match inbox.recv().await {
-                    Ok(msg) => match msg {
-                        // Here we receive the echo message, which wants back a reply!
-                        // This reply can be sent back to the `Tx`, and was automatically
-                        // created for us.
-                        MyProtocol::Echo((Echo { string }, tx)) => {
-                            println!("Echoing string: {}", string);
-                            let _ = tx.send(string);
-                        }
-                        // The MyMessage does not have this `Tx`, as can be seen.
-                        MyProtocol::MyMessage(MyMessage { number }) => {
-                            println!("Received number: {}", number);
-                        }
-                        // And neither does the `u32`.
-                        MyProtocol::Number(number) => {
-                            println!("Received number: {}", number);
-                        }
-                    },
-                    Err(e) => match e {
-                        // Here we received a halt-signal, so we should exit now.
-                        RecvError::Halted => break "Halted",
-                        // And if the inbox is closed and empty, we should also exit.
-                        RecvError::ClosedAndEmpty => break "ClosedAndEmpty",
-                    },
-                }
-            }
-        },
-    );
-
-    //-------------------------------------------------
-    //  Step 4: Send messages!
-    //-------------------------------------------------
-
-    // The following messages don't get a reply:
-    let _: () = address.send(10 as i64).await.unwrap();
-    let _: () = address.send(MyMessage { number: 11 }).await.unwrap();
-
-    // But our echo will get back a reply!
-    let rx: Rx<String> = address
-        .send(Echo {
-            string: "Hi there".to_string(),
-        })
-        .await
-        .unwrap();
-
-    // We can await the `Rx` to get it back:
-    let reply = rx.await.unwrap();
-    assert_eq!(reply, "Hi there".to_string());
-
-    //-------------------------------------------------
-    //  (Step 4.1): Conversion of addresses
-    //-------------------------------------------------
-
-    // (Just skip to Step 5 if the readme is getting to long ;))
-
-    // Now you might be wondering, what is the use of all these complicated traits?
-    // Well, we can convert our `Address<MyProtocol>` into an `DynAddress![i64, Echo]`.
-    // This conversion is checked at compile-time, so it is impossible for errors to
-    // occur at runtime.
-
-    let address: DynAddress![i64, Echo] = address.into_dyn();
-    address.send(10 as i64).await.unwrap();
-
-    // This address can be transformed further:
-
-    let address: DynAddress![Echo] = address.transform();
-    let _tx = address
-        .send(Echo {
-            string: "Hi".to_string(),
-        })
-        .await
-        .unwrap();
-
-    // And it can finally be converted back into our original address:
-
-    let address: Address<MyProtocol> = address.downcast().unwrap();
-    address.send(10 as i64).await.unwrap();
-
-    //-------------------------------------------------
-    //  (Step 4.2): More cool things
-    //-------------------------------------------------
-
-    // What is so great about this?
-    //
-    // We can now transform addresses with different types into the same ones.
-    // As long as an address accepts the message `u32`, it can be transformed into
-    // an `Address![u32]`. Some examples of this usage:
-
-    async fn accepts_u32_v1(address: DynAddress![i64, Echo]) {
-        address.send(10 as i64).await.unwrap();
-    }
-
-    async fn accepts_u32_v2<T>(address: T)
-    where
-        T: IntoAddress<DynAccepts![i64, Echo]>,
-    {
-        let address: DynAddress![i64, Echo] = address.into_address();
-        address.send(10 as i64).await.unwrap();
-    }
-
-    async fn accepts_u32_v3<T>(address: Address<T>)
-    where
-        T: Accepts<i64> + Accepts<Echo>,
-    {
-        address.send(10 as i64).await.unwrap();
-    }
-
-    // v1 must be used with a dynamic address
-    accepts_u32_v1(address.clone().into_dyn()).await;
-
-    // v2 can also be used with a static address
-    accepts_u32_v2(address.clone()).await;
-    accepts_u32_v2(address.clone().into_dyn::<DynAccepts![Echo, i64]>()).await;
-
-    // Just like v3
-    accepts_u32_v3(address.clone()).await;
-    accepts_u32_v3(address.clone().into_dyn::<DynAccepts![Echo, i64]>()).await;
-
-    // All of these functions can be used with addresses of different protocols. This
-    // principle allows for building generic solutions that work for different types of
-    // addresses.
-
-    // This is done without any overhead for normal message sending. Messages are NOT
-    // boxed before being sent, but the normal `Protocol` is sent through the channel.
-
-    //-------------------------------------------------
-    //  Step 5: Shutting down the actor
-    //-------------------------------------------------
-
-    // Now we would like our actor to shutdown gracefully again. Luckily there is builtin
-    // functionality for this.
-
-    // Since we used a default config, we could drop the `Child`, which would halt and abort
-    // the actor, and cause for a graceful exit. But there is an even better way to do this:
-
-    // We will give the child 1 second to shut down before we try to abort it.
-    match child.shutdown(Duration::from_secs(1)).await {
-        Ok(exit) => {
-            // Now, it should have exited with the string "Halted".
-            assert_eq!(exit, "Halted");
-        }
-        Err(error) => match error {
-            ExitError::Panic(_) => panic!("Actor exited because of a panic"),
-            ExitError::Abort => panic!("Actor exited because it was aborted"),
-        },
-    }
-}
-```
+I have tried to keep everything as modular as possible, so that a lot of things can be built as external libraries. For an example library, look at `zestors-request`, which implements messages with a reply as an external crate. Some libraries which I think would be a great additions are:
+- `Actor`: An actor trait which allows handing messages similar to [Actix](https://docs.rs/actix/0.13.0/actix/) or the Erlang/Elixir genserver. For some inspiration you can take look at `zestors-actor`, where I started on such a solution. Eventlually I would like to integrate a version of this trait into `zestors`, but currently I'm a bit unsure about the best way to do this.
+- `Supervision`: I imagine this would be very similar to Erlang/Elixir's OTP framework. It's possible to go many different directions with this, but the basics would be the ability to automatically supervise/shutdown actors. What would also be very nice to have is a way to inspect supervision-trees at runtime, though I'm not entirely sure what the best way is for this to be done. (This might only be possible if combined with the actor-trait)
+- `Registry`: The ability to easily register processes in a (global) registry.
+- `Distribution`: The ability to send messages across different binaries/physical computers. I will be working on implementing this in `zestors-distributed`.
+- Anything else you come up with ;)

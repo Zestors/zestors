@@ -8,19 +8,19 @@ pub struct BoxedMessage(Box<dyn Any + Send + 'static>);
 
 impl BoxedMessage {
     /// Create a new `BoxedMessage` from the `Sends<M>`.
-    pub fn new<M>(sends: Sends<M>) -> Self
+    pub fn new<M>(sends: SendPart<M>) -> Self
     where
         M: Message,
-        Sends<M>: Send + 'static,
+        SendPart<M>: Send + 'static,
     {
         Self(Box::new(sends))
     }
 
     /// Downcast the `BoxedMessage` to the `Sends<M>`.
-    pub fn downcast<M>(self) -> Result<Sends<M>, Self>
+    pub fn downcast<M>(self) -> Result<SendPart<M>, Self>
     where
         M: Message,
-        Sends<M>: Send + 'static
+        SendPart<M>: Send + 'static,
     {
         match self.0.downcast() {
             Ok(cast) => Ok(*cast),
@@ -29,13 +29,13 @@ impl BoxedMessage {
     }
 
     /// Downcast the `BoxedMessage` to the `Sends<M>`, and then get `M`.
-    pub fn downcast_into_msg<M>(self, returns: Returns<M>) -> Result<M, Self>
+    pub fn downcast_into_msg<M>(self, returns: ReturnPart<M>) -> Result<M, Self>
     where
         M: Message,
-        Sends<M>: Send + 'static
+        SendPart<M>: Send + 'static,
     {
         match self.downcast::<M>() {
-            Ok(sends) => Ok(<M::Type as MessageType<M>>::into_msg(sends, returns)),
+            Ok(sends) => Ok(<M::Type as MessageType<M>>::destroy(sends, returns)),
             Err(boxed) => Err(boxed),
         }
     }
