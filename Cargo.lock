@@ -939,14 +939,14 @@ dependencies = [
 
 [[package]]
 name = "zestors"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "async-trait",
  "futures",
  "tokio",
  "zestors-codegen 0.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "zestors-core 0.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "zestors-request",
+ "zestors-request 0.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1021,6 +1021,18 @@ dependencies = [
 [[package]]
 name = "zestors-request"
 version = "0.0.1"
+dependencies = [
+ "futures",
+ "thiserror",
+ "tokio",
+ "zestors-core 0.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "zestors-request"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ddee542f28680b79227af140e6c5c2f74258484a0e92f0a9951b97e6dd5e388"
 dependencies = [
  "futures",
  "thiserror",

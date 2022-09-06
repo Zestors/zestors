@@ -1,14 +1,22 @@
 [package]
 name = "zestors"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
+
+license = "MIT OR Apache-2.0"
+description = "A fast, flexible and extensible actor-framework."
+repository = "https://github.com/Zestors/zestors"
+homepage = "https://github.com/Zestors/zestors"
+keywords = ["actor", "actor-system", "tokio", "pool"]
+categories = ["concurrency"]
+authors = ["jvdwrf"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 zestors-codegen = "0.0.3"
 zestors-core = "0.0.1"
-zestors-request = { path = "../zestors-request" }
+zestors-request = "0.0.1"
 
 [dev-dependencies]
 async-trait = "0.1.57"
