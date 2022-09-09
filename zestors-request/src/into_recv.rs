@@ -37,7 +37,7 @@ where
 
 impl<'a, M, R> IntoRecv for SendFut<'a, M>
 where
-    M: Message<Type = Request<R>> + Send + 'a,
+    M: Message<Type = Rx<R>> + Send + 'a,
     R: Send + 'a,
 {
     type Receives = Pin<Box<dyn Future<Output = Result<R, SendRecvError<M>>> + Send + 'a>>;
