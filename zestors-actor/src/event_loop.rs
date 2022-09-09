@@ -45,7 +45,7 @@ async fn handle_recv<H: Handler>(
 ) -> Result<H, H::Exit> {
     match msg {
         Ok(msg) => handle_msg(msg, actor, inbox).await,
-        Err(e) => match actor.exit(inbox, e.into()).await {
+        Err(e) => match actor.handle_exception(inbox, e.into()).await {
             ExitFlow::Cont(actor) => Ok(actor),
             ExitFlow::Exit(exit) => Err(exit),
         },
@@ -76,13 +76,13 @@ async fn handle_msg<H: Handler>(
     let exception = match actor.handle(inbox, msg).await {
         Ok(flow) => match flow {
             Flow::Cont => None,
-            Flow::Stop => Some(Exception::Stop),
+            Flow::Exit(e) => return Err(e),
         },
-        Err(e) => Some(Exception::CustomError(e)),
+        Err(e) => Some(Exception::Error(e)),
     };
 
     if let Some(exception) = exception {
-        match actor.exit(inbox, exception).await {
+        match actor.handle_exception(inbox, exception).await {
             ExitFlow::Cont(actor) => Ok(actor),
             ExitFlow::Exit(exit) => Err(exit),
         }

@@ -15,19 +15,9 @@ use zestors_core::{
 pub fn spawn_actor<A: Handler>(
     init: A::Init,
 ) -> (Child<A::Exit, A::Protocol>, Address<A::Protocol>) {
-    spawn(
-        A::config(),
-        |inbox| async move { event_loop::run::<A>(init, inbox).await },
-    )
-}
-
-#[async_trait]
-pub trait Handler: Actor {
-    async fn handle(
-        &mut self,
-        inbox: &mut Inbox<Self::Protocol>,
-        protocol: Self::Protocol,
-    ) -> Result<Flow, Self::Error>;
+    spawn(A::config(), |inbox| async move {
+        event_loop::run::<A>(init, inbox).await
+    })
 }
 
 #[async_trait]
@@ -49,23 +39,31 @@ pub trait Actor: Sized + Send + 'static + Scheduler<Self::Protocol> {
 
     async fn init(init: Self::Init, inbox: &mut Inbox<Self::Protocol>) -> InitFlow<Self>;
 
-    async fn exit(
+    async fn handle_exception(
         self,
         inbox: &mut Inbox<Self::Protocol>,
         exception: Exception<Self>,
     ) -> ExitFlow<Self>;
 }
 
+#[async_trait]
+pub trait Handler: Actor {
+    async fn handle(
+        &mut self,
+        inbox: &mut Inbox<Self::Protocol>,
+        protocol: Self::Protocol,
+    ) -> Result<Flow<Self>, Self::Error>;
+}
+
 pub enum Exception<A: Actor> {
-    Stop,
-    CustomError(A::Error),
+    Error(A::Error),
     Halt,
     ClosedAndEmpty,
 }
 
-pub enum Flow {
+pub enum Flow<A: Actor> {
     Cont,
-    Stop,
+    Exit(A::Exit),
 }
 
 pub enum ExitFlow<A: Actor> {
