@@ -1,33 +1,41 @@
-use std::{collections::HashMap, net::SocketAddr};
+use std::collections::HashMap;
 
 use crate::*;
-use tokio::{net::TcpStream, sync::Mutex};
+use tokio::sync::Mutex;
+use uuid::Uuid;
 
 #[derive(Debug)]
-pub(super) struct SharedSystem {
-    connections: Mutex<HashMap<SocketAddr, TcpStream>>,
+pub(crate) struct SystemShared {
+    session_id: Uuid,
+    id: u64,
+    connections: Mutex<HashMap<NodeId, NodeRef>>,
 }
 
-impl SharedSystem {
-    pub fn new() -> Self {
+impl SystemShared {
+    pub fn new(id: u64) -> Self {
         Self {
             connections: Mutex::new(HashMap::new()),
+            session_id: Uuid::new_v4(),
+            id,
         }
     }
 
-    pub async fn add_connection(&self, stream: TcpStream) -> Result<(), ConnectError> {
-        let socket = stream.peer_addr()?;
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub async fn register_node(&self, node_ref: NodeRef) -> Result<(), ConnectError> {
+        let id = node_ref.id();
         let mut connections = self.connections.lock().await;
 
-        if connections.contains_key(&socket) {
+        if connections.contains_key(&id) {
             Err(ConnectError::AlreadyConnected)
-        } else {
-            connections.insert(socket, stream);
-            todo!()
         }
-    }
-
-    pub async fn is_connected(&self, socket: &SocketAddr) -> bool {
-        self.connections.lock().await.contains_key(socket)
+        else if id == self.id {
+            Err(ConnectError::ConnectedToSelf)
+        } else {
+            connections.insert(id, node_ref);
+            Ok(())
+        }
     }
 }
