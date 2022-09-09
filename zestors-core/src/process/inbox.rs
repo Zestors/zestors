@@ -1,6 +1,7 @@
 use crate::*;
 use futures::{stream::FusedStream, Stream, StreamExt};
 
+#[derive(Debug)]
 pub struct Inbox<P> {
     inbox: tiny_actor::Inbox<P>,
 }
