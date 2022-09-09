@@ -14,9 +14,9 @@ authors = ["jvdwrf"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-zestors-codegen = "0.0.3"
-zestors-core = "0.0.1"
-zestors-request = "0.0.1"
+zestors-codegen = { path = "../zestors-codegen" }
+zestors-core = { path = "../zestors-core" }
+zestors-request = { path = "../zestors-request" }
 
 [dev-dependencies]
 async-trait = "0.1.57"

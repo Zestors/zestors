@@ -7,7 +7,7 @@ use zestors::{
     config::Config,
     error::{ExitError, RecvError},
     process::{spawn, Address, Inbox},
-    request::{IntoRecv, Request, Rx},
+    request::{IntoRecv, Rx},
 };
 
 //--------------------------------------------------------
@@ -22,7 +22,7 @@ struct MyMessage {
 
 // Now we define a message which expects a reply of a `String`.
 #[derive(Message, Debug)]
-#[msg(Request<String>)]
+#[msg(Rx<String>)]
 struct Echo {
     string: String,
 }
