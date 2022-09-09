@@ -12,7 +12,7 @@ categories = ["concurrency"]
 authors = ["jvdwrf"]
 
 [dependencies]
-tiny-actor = { version = "^0.2", features = ["internals"] }
+tiny-actor = { version = "^0.2.1", features = ["internals"] }
 futures = "^0.3"
 tokio = { version = "^1", features = ["full"] }
 thiserror = "^1"

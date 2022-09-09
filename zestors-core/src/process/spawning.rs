@@ -1,6 +1,6 @@
 use crate::*;
 use futures::Future;
-use tiny_actor::{Config, Inbox};
+use tiny_actor::Config;
 
 /// See [tiny_actor::spawn]
 pub fn spawn<P, E, Fun, Fut>(config: Config, fun: Fun) -> (Child<E, P>, Address<P>)
@@ -10,7 +10,9 @@ where
     E: Send + 'static,
     P: Protocol,
 {
-    let (child, addr) = tiny_actor::spawn(config, fun);
+    let (child, addr) = tiny_actor::spawn(config, |inbox| async move {
+        fun(Inbox::from_inner(inbox)).await
+    });
     (Child::from_inner(child), Address::from_inner(addr))
 }
 
@@ -22,7 +24,9 @@ where
     E: Send + 'static,
     P: Protocol,
 {
-    let (child, addr) = tiny_actor::spawn_one(config, fun);
+    let (child, addr) = tiny_actor::spawn_one(config, |inbox| async move {
+        fun(Inbox::from_inner(inbox)).await
+    });
     (ChildPool::from_inner(child), Address::from_inner(addr))
 }
 
@@ -39,6 +43,8 @@ where
     P: Protocol,
     I: Send + 'static,
 {
-    let (child, addr) = tiny_actor::spawn_many(iter, config, fun);
+    let (child, addr) = tiny_actor::spawn_many(iter, config, |i, inbox| async move {
+        fun(i, Inbox::from_inner(inbox)).await
+    });
     (ChildPool::from_inner(child), Address::from_inner(addr))
 }

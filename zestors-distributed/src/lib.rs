@@ -1,9 +1,6 @@
-// #![doc = include_str!("../../docs/distribution.md")]
+#![doc = include_str!("../README.md")]
 
-// pub mod address;
-// pub mod message;
-// pub mod node;
+pub mod node;
+pub mod system;
 
-// pub use {address::*, message::*, node::*};
-
-// pub(crate) use zestors_core::DynAccepts;
+pub use {system::*, node::*};

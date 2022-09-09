@@ -681,9 +681,9 @@ dependencies = [
 
 [[package]]
 name = "tiny-actor"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b84ea6155f5e1a9cdea6472b262654bc4ab175dd9a6561409eb15f3b1856174e"
+checksum = "c7cd3ca4823d6bab20a09cfb0ab33f15383dc502c4e3f7055e2d45c84dd55ba2"
 dependencies = [
  "concurrent-queue",
  "event-listener",
@@ -1015,6 +1015,7 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
+ "zestors-codegen 0.0.3",
  "zestors-core 0.0.1",
 ]
 
