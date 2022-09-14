@@ -9,6 +9,7 @@ pub(crate) use {actor_type::*, error::*, messaging::*, process::*};
 //  Public modules
 //------------------------------------------------------------------------------------------------
 
+pub mod actor;
 pub mod actor_type;
 pub mod config;
 pub mod error;
