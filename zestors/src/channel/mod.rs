@@ -1,6 +1,7 @@
 mod accepts;
+mod actor_type;
+mod address;
 mod dyn_channel;
 mod into_address;
-mod actor_type;
 
-pub use {accepts::*, dyn_channel::*, into_address::*, actor_type::*};
+pub use {accepts::*, actor_type::*, address::*, dyn_channel::*, into_address::*};

@@ -10,7 +10,12 @@ use std::{
 //------------------------------------------------------------------------------------------------
 
 pub struct DynamicSupervisee(
-    Box<dyn for<'a> PrivSupervises<'a, SuperviseFut = BoxFuture<'a, Result<bool, StartError>>>>,
+    Box<
+        dyn for<'a> PrivDynamicallySupervisable<
+            'a,
+            SuperviseFut = BoxFuture<'a, Result<bool, StartError>>,
+        >,
+    >,
 );
 
 impl DynamicSupervisee {
@@ -39,14 +44,26 @@ impl Stream for DynamicSupervisee {
     }
 }
 
-trait PrivSupervises<'a>: Send + 'static {
+impl<R: Restartable> From<Supervisee<R>> for DynamicSupervisee {
+    fn from(value: Supervisee<R>) -> Self {
+        value.into_dyn()
+    }
+}
+
+//------------------------------------------------------------------------------------------------
+//  PrivDynamicallySupervisable
+//------------------------------------------------------------------------------------------------
+
+trait PrivDynamicallySupervisable<'a>: Send + 'static {
     type SuperviseFut: Future<Output = Result<bool, StartError>> + Send + 'a;
     fn supervise(&'a mut self) -> Self::SuperviseFut;
 }
 
-impl<R: Restartable> From<Supervisee<R>> for DynamicSupervisee {
-    fn from(value: Supervisee<R>) -> Self {
-        value.into_dyn()
+impl<'a, S: Restartable> PrivDynamicallySupervisable<'a> for Supervisee<S> {
+    type SuperviseFut = BoxFuture<'a, Result<bool, StartError>>;
+
+    fn supervise(&'a mut self) -> Self::SuperviseFut {
+        Box::pin(self.supervise())
     }
 }
 
@@ -69,7 +86,7 @@ enum RestartableChildState<R: Restartable> {
     WantsRestart(R::Starter),
     /// The ChildSpec is currently starting.
     /// Awaiting the future returns `(Result<Child<E, P>, StartError>, O)`
-    Restarting(<R::Starter as StartableWith<R::Starter>>::Fut),
+    Restarting(<R::Starter as Startable>::Fut),
     /// The child has exited and does not want to be restarted.
     Finished,
     /// Starting has failed, it is impossible to start this again.
@@ -88,6 +105,7 @@ impl<R: Restartable> Supervisee<R> {
     pub fn into_dyn(self) -> DynamicSupervisee {
         DynamicSupervisee::new(self)
     }
+
     /// Supervise the process and automatically restart it by calling this again.
     ///
     /// Calling `supervise()` may return the following results:
@@ -143,13 +161,5 @@ impl<R: Restartable> Supervisee<R> {
                 RestartableChildState::StartFailed => panic!("Starting has failed before!"),
             }
         }
-    }
-}
-
-impl<'a, S: Restartable> PrivSupervises<'a> for Supervisee<S> {
-    type SuperviseFut = BoxFuture<'a, Result<bool, StartError>>;
-
-    fn supervise(&'a mut self) -> Self::SuperviseFut {
-        Box::pin(async move { self.supervise().await })
     }
 }

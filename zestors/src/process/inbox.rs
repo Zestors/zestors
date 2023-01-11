@@ -9,25 +9,25 @@ pub struct Inbox<P> {
     inbox: tiny_actor::Inbox<P>,
 }
 
-impl<T> Inbox<T> {
-    pub(crate) fn from_inner(inbox: tiny_actor::Inbox<T>) -> Self {
+impl<P> Inbox<P> {
+    pub(crate) fn from_inner(inbox: tiny_actor::Inbox<P>) -> Self {
         Self { inbox }
     }
 
     /// Attempt to receive a message from the [Inbox]. If there is no message, this
     /// returns `None`.
-    pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
+    pub fn try_recv(&mut self) -> Result<P, TryRecvError> {
         self.inbox.try_recv()
     }
 
     /// Wait until there is a message in the [Inbox], or until the channel is closed.
-    pub fn recv(&mut self) -> RecvFut<'_, T> {
+    pub fn recv(&mut self) -> RecvFut<'_, P> {
         self.inbox.recv()
     }
 
-    pub fn get_address(&self) -> Address<T>
+    pub fn get_address(&self) -> Address<P>
     where
-        T: Protocol,
+        P: Protocol,
     {
         let address = self.inbox.get_address();
         Address::from_inner(address)

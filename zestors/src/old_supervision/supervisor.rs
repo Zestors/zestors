@@ -1,5 +1,5 @@
 use crate::*;
-use futures::{future::BoxFuture, pin_mut, Future, FutureExt, Stream, StreamExt};
+use futures::{Future, FutureExt, Stream, StreamExt};
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -20,20 +20,40 @@ impl SupervisorBuilder {
         }
     }
 
-    pub fn add_spec<S: SpecifiesChild<S>>(mut self, spec: S) -> Self {
-        self.child_specs.push(DynamicChildSpec::new(spec));
+    pub fn add_spec<S>(&mut self, spec: S)
+    where
+        S: SpecifiesChild,
+    {
+        self.child_specs.push(RawStarter::new(
+            async move { // Do something before the child is started.
+                let (child, restarter) = spec.start().await?;
+                // Do something after the child is started
+                Ok((child, restarter))
+            }, // And we can add a futures here that get triggered based on certain child behavior
+        ).into_dyn());
+    }
+
+    pub fn add_spec2<S: SpecifiesChild>(mut self, spec: S) -> Self {
+        self.child_specs.push(DynamicChildSpec::new(
+            spec.map_before_start(|res| async move { res })
+                .map_after_start(|res| async move { res }),
+        ));
         self
     }
 
-    pub async fn start(self) -> Result<(), StartError> {
-        let mut children = Vec::with_capacity(self.child_specs.len());
+    pub async fn start(self) -> Result<(Child<SupervisorExit>, SupervisorRef), StartError> {
+        // let mut children = Vec::with_capacity(self.child_specs.len());
+        // Supervisor::start_from(self.child_specs).await
+        Supervisor::_start_from(self.child_specs).await
+    }
+}
 
-        for spec in self.child_specs {
-            let child = spec.start().await?;
-            children.push(child);
-        }
+impl Startable for SupervisorBuilder {
+    type Ok = (Child<SupervisorExit>, SupervisorRef);
+    type Fut = BoxStartFut<Self::Ok>;
 
-        Ok(())
+    fn start(self) -> Self::Fut {
+        Box::pin(self.start())
     }
 }
 
@@ -47,7 +67,7 @@ struct Supervisor {
 }
 
 impl Supervisor {
-    async fn start(
+    async fn _start_from(
         child_specs: Vec<DynamicChildSpec>,
     ) -> Result<(Child<SupervisorExit>, SupervisorRef), StartError> {
         let mut supervisees = Vec::new();
@@ -63,14 +83,14 @@ impl Supervisor {
     }
 }
 
-impl StartableWith<Vec<DynamicChildSpec>> for Supervisor {
-    type Output = (Child<SupervisorExit>, SupervisorRef);
-    type Fut = BoxStartFut<Self::Output>;
+// impl StartableFrom<Vec<DynamicChildSpec>> for Supervisor {
+//     type Ok = (Child<SupervisorExit>, SupervisorRef);
+//     type Fut = BoxStartFut<Self::Ok>;
 
-    fn start_with(with: Vec<DynamicChildSpec>) -> Self::Fut {
-        Box::pin(Self::start(with))
-    }
-}
+//     fn start_from(with: Vec<DynamicChildSpec>) -> Self::Fut {
+//         Box::pin(Self::_start_from(with))
+//     }
+// }
 
 impl Unpin for Supervisor {}
 
@@ -134,11 +154,11 @@ impl Future for Supervisor {
     }
 }
 
-struct SupervisorRef {
+pub struct SupervisorRef {
     address: Address<SupervisorProtocol>,
 }
 type SupervisorExit = Result<(), SupervisorError>;
-enum SupervisorError {
+pub enum SupervisorError {
     ChildFailedToStart(StartError),
 }
 type SupervisorProtocol = ();

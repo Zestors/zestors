@@ -59,7 +59,7 @@ where
     ///
     /// This will first halt the actor. If the actor has not exited before the timeout,
     /// it will be aborted instead.
-    pub fn shutdown(&mut self, timeout: Duration) -> ShutdownFut<'_, E, T::Channel> {
+    pub fn shutdown(&mut self, timeout: Duration) -> ShutdownFut<'_, E, T> {
         ShutdownFut(self.inner.shutdown(timeout))
     }
 }
@@ -122,11 +122,11 @@ where
 //------------------------------------------------------------------------------------------------
 
 /// Future returned when shutting down a [Child].
-pub struct ShutdownFut<'a, E: Send + 'static, T: DynChannel + ?Sized>(
-    tiny_actor::ShutdownFut<'a, E, T>,
+pub struct ShutdownFut<'a, E: Send + 'static, T: ActorType>(
+    tiny_actor::ShutdownFut<'a, E, T::Channel>,
 );
 
-impl<'a, E: Send + 'static, T: DynChannel + ?Sized> Future for ShutdownFut<'a, E, T> {
+impl<'a, E: Send + 'static, T: ActorType> Future for ShutdownFut<'a, E, T> {
     type Output = Result<E, ExitError>;
 
     fn poll(
@@ -137,4 +137,4 @@ impl<'a, E: Send + 'static, T: DynChannel + ?Sized> Future for ShutdownFut<'a, E
     }
 }
 
-impl<'a, E: Send + 'static, T: DynChannel + ?Sized> Unpin for ShutdownFut<'a, E, T> {}
+impl<'a, E: Send + 'static, T: ActorType> Unpin for ShutdownFut<'a, E, T> {}

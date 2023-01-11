@@ -1,10 +1,7 @@
 use crate::*;
 
-mod supervisee;
-mod specifies;
-mod supervisor;
-mod child_specs;
+mod core_traits;
+mod error;
+mod trait_ext;
 
-pub use {supervisee::*, specifies::*, supervisor::*, child_specs::*};
-
-
+pub use {core_traits::*, error::*, trait_ext::*};
