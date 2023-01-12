@@ -1,11 +1,16 @@
 use crate::*;
 use futures::{Future, FutureExt, Stream, StreamExt};
+use thiserror::Error;
 use std::{
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
+    time::Duration, any::Any,
 };
 use tokio::time::Sleep;
+
+//------------------------------------------------------------------------------------------------
+//  ShutdownFut
+//------------------------------------------------------------------------------------------------
 
 pub struct ShutdownFut<'a, E: Send + 'static, T: DefinesChannel> {
     child: &'a mut Child<E, T>,
@@ -44,6 +49,10 @@ impl<'a, E: Send + 'static, T: DefinesChannel> Future for ShutdownFut<'a, E, T> 
     }
 }
 
+//------------------------------------------------------------------------------------------------
+//  ShutdownStream
+//------------------------------------------------------------------------------------------------
+
 /// Stream returned when shutting down a [ChildPool].
 ///
 /// This stream can be collected into a vec with [StreamExt::collect]:
@@ -77,6 +86,52 @@ impl<'a, E: Send + 'static, T: DefinesChannel> Stream for ShutdownStream<'a, E, 
         self.pool.poll_next_unpin(cx)
     }
 }
+
+//------------------------------------------------------------------------------------------------
+//  ExitError
+//------------------------------------------------------------------------------------------------
+
+/// An error returned from an exiting process.
+#[derive(Debug, Error)]
+pub enum ExitError {
+    /// Process panicked.
+    #[error("Process has exited because of a panic")]
+    Panic(Box<dyn Any + Send>),
+    /// Process  was aborted.
+    #[error("Process has exited because it was aborted")]
+    Abort,
+}
+
+impl ExitError {
+    /// Whether the error is a panic.
+    pub fn is_panic(&self) -> bool {
+        match self {
+            ExitError::Panic(_) => true,
+            ExitError::Abort => false,
+        }
+    }
+
+    /// Whether the error is an abort.
+    pub fn is_abort(&self) -> bool {
+        match self {
+            ExitError::Panic(_) => false,
+            ExitError::Abort => true,
+        }
+    }
+}
+
+impl From<tokio::task::JoinError> for ExitError {
+    fn from(e: tokio::task::JoinError) -> Self {
+        match e.try_into_panic() {
+            Ok(panic) => ExitError::Panic(panic),
+            Err(_) => ExitError::Abort,
+        }
+    }
+}
+
+//------------------------------------------------------------------------------------------------
+//  Test`
+//------------------------------------------------------------------------------------------------
 
 #[cfg(test)]
 mod test {

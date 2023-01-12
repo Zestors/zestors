@@ -1,4 +1,4 @@
-use crate as zestors;
+use crate::*;
 
 macro_rules! basic_actor {
     () => {

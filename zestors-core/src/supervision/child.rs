@@ -18,12 +18,12 @@ use std::{
 /// A `Child<E, CT, PT>` has the following generics:
 /// - `E`: Stands for `Exit`, and is the value that the spawned child exits with.
 /// - `C`: Stands for [`DefinesChannel`], and specifies the underlying channel and what kind of
-///   messages the actor [Accepts] (the default is [`Accepts![]`](Accepts!)). This value can be
+///   messages the actor [trait@Accepts] (the default is [`Accepts![]`](Accepts!)). This value can be
 ///   one of the following:
 ///     - The [`Protocol`] of the actor, given that the actor has an [Inbox].
 ///     - [`Halter`], indicating that the actor does not have an [Inbox].
 ///     - A dynamic child using the [`Accepts!`] macro. This can be used for actors with or without
-///       an [Inbox], and actors of either type can be converted using [`Child::transform`].
+///       an [Inbox], and actors of either type can be converted using [`Child::transform_into`].
 /// - `P`: Stands for [`DefinesPool`], and specifies whether this child is pooled or not (default
 ///   is [NoPool]). This can be either:
 ///     - [NoPool], indicating the child is not pooled.
@@ -32,7 +32,7 @@ use std::{
 /// ## Shorthands
 /// In order to keep writing these types simple, we can use the following shorthands to define our
 /// types:
-/// ```no_run
+/// ```no_compile
 /// Child<E, C>     = Child<E, C, NoPool>;       // A regular child.
 /// Child<E>        = Child<E, Accepts![]>;      // A child that doesn't accept any messages.
 /// ChildPool<E, C> = Child<E, C, Pool>;         // A regular childpool.
@@ -54,14 +54,14 @@ where
 //  All children
 //-------------------------------------------------
 
-/// Methods valid for all children.
+/// # Methods valid for all children.
 impl<E, C, P> Child<E, C, P>
 where
     E: Send + 'static,
     C: DefinesChannel,
     P: DefinesPool,
 {
-    pub(super) fn new(
+    pub(crate) fn new(
         channel: Arc<C::Channel>,
         join_handle: P::JoinHandles<E>,
         link: Link,
@@ -85,7 +85,7 @@ where
         }
     }
 
-    /// Get the underlying [JoinHandle].
+    /// Get the underlying [`tokio::task::JoinHandle`].
     ///
     /// This will not run the drop, and therefore the actor will not be halted/aborted.
     pub fn into_inner(self) -> P::JoinHandles<E> {
@@ -187,7 +187,7 @@ where
 //  Dynamic children
 //-------------------------------------------------
 
-/// Methods valid for children that are dynamic.
+/// # Methods valid for children that are dynamic.
 impl<E, C, P> Child<E, C, P>
 where
     E: Send + 'static,
@@ -239,7 +239,7 @@ where
 //  Non-pooled children
 //-------------------------------------------------
 
-/// Methods valid for children that are not pooled.
+/// # Methods valid for children that are not pooled.
 impl<E, C> Child<E, C, NoPool>
 where
     E: Send + 'static,
@@ -269,7 +269,7 @@ where
 //  Pooled children
 //-------------------------------------------------
 
-/// Methods valid for children that are pooled.
+/// # Methods valid for children that are pooled.
 impl<E, C> Child<E, C, Pool>
 where
     E: Send + 'static,
@@ -335,7 +335,7 @@ where
 //  (Sized and pooled) children
 //-------------------------------------------------
 
-/// Methods valid for children that are both sized and pooled.
+/// # Methods valid for children that are both sized and pooled.
 impl<E, C> Child<E, C, Pool>
 where
     E: Send + 'static,
@@ -457,6 +457,88 @@ where
 
 /// A `ChildPool<E, CT>` is the same as a `Child<E, CT, Pool>`.
 pub type ChildPool<E, CT = Accepts![]> = Child<E, CT, Pool>;
+
+//------------------------------------------------------------------------------------------------
+//  IntoChild
+//------------------------------------------------------------------------------------------------
+
+pub trait IntoChild<E, T, R>
+where
+    E: Send + 'static,
+    T: DefinesChannel,
+    R: DefinesPool,
+{
+    fn into_child(self) -> Child<E, T, R>;
+}
+
+impl<E, P, T2> IntoChild<E, T2, NoPool> for Child<E, P>
+where
+    E: Send + 'static,
+    P: Protocol + TransformInto<T2>,
+    T2: DefinesDynChannel,
+{
+    fn into_child(self) -> Child<E, T2> {
+        self.transform_into()
+    }
+}
+
+impl<E, P, T2> IntoChild<E, T2, Pool> for Child<E, P>
+where
+    E: Send + 'static,
+    P: Protocol + TransformInto<T2>,
+    T2: DefinesDynChannel,
+{
+    fn into_child(self) -> ChildPool<E, T2> {
+        self.into_pool().transform_into()
+    }
+}
+
+impl<E, D, T2> IntoChild<E, T2, NoPool> for Child<E, Dyn<D>>
+where
+    E: Send + 'static,
+    T2: DefinesDynChannel,
+    D: ?Sized,
+    Dyn<D>: DefinesDynChannel + TransformInto<T2>,
+{
+    fn into_child(self) -> Child<E, T2> {
+        self.transform_into()
+    }
+}
+
+impl<E, D, T2> IntoChild<E, T2, Pool> for Child<E, Dyn<D>>
+where
+    E: Send + 'static,
+    T2: DefinesDynChannel,
+    D: ?Sized,
+    Dyn<D>: DefinesDynChannel + TransformInto<T2>,
+{
+    fn into_child(self) -> ChildPool<E, T2> {
+        self.into_pool().transform_into()
+    }
+}
+
+impl<E, D, T2> IntoChild<E, T2, Pool> for ChildPool<E, Dyn<D>>
+where
+    E: Send + 'static,
+    T2: DefinesDynChannel,
+    D: ?Sized,
+    Dyn<D>: DefinesDynChannel + TransformInto<T2>,
+{
+    fn into_child(self) -> ChildPool<E, T2> {
+        self.transform_into()
+    }
+}
+
+impl<E, P, T2> IntoChild<E, T2, Pool> for ChildPool<E, P>
+where
+    E: Send + 'static,
+    P: Protocol + TransformInto<T2>,
+    T2: DefinesDynChannel,
+{
+    fn into_child(self) -> ChildPool<E, T2> {
+        self.transform_into()
+    }
+}
 
 //------------------------------------------------------------------------------------------------
 //  Test

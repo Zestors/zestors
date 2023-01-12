@@ -9,15 +9,15 @@ use std::{
 use tokio::time::Sleep;
 
 impl<P> InboxChannel<P> {
-    pub fn send_raw(&self, msg: P) -> SendFut<'_, P> {
-        SendFut::new(self, msg)
+    pub(crate) fn send_raw(&self, msg: P) -> SendRawFut<'_, P> {
+        SendRawFut::new(self, msg)
     }
 
-    pub fn send_raw_now(&self, msg: P) -> Result<(), TrySendError<P>> {
+    pub(crate) fn send_raw_now(&self, msg: P) -> Result<(), TrySendError<P>> {
         Ok(self.push_msg(msg)?)
     }
 
-    pub fn try_send_raw(&self, msg: P) -> Result<(), TrySendError<P>> {
+    pub(crate) fn try_send_raw(&self, msg: P) -> Result<(), TrySendError<P>> {
         match self.capacity() {
             Capacity::Bounded(_) => Ok(self.push_msg(msg)?),
             Capacity::Unbounded(backoff) => match backoff.get_timeout(self.msg_count()) {
@@ -27,7 +27,7 @@ impl<P> InboxChannel<P> {
         }
     }
 
-    pub fn send_raw_blocking(&self, mut msg: P) -> Result<(), SendError<P>> {
+    pub(crate) fn send_raw_blocking(&self, mut msg: P) -> Result<(), SendError<P>> {
         match self.capacity() {
             Capacity::Bounded(_) => loop {
                 msg = match self.push_msg(msg) {
@@ -58,7 +58,7 @@ impl<P> InboxChannel<P> {
 
 /// The send-future, this can be `.await`-ed to send the message.
 #[derive(Debug)]
-pub struct SendFut<'a, P> {
+pub(crate) struct SendRawFut<'a, P> {
     channel: &'a InboxChannel<P>,
     msg: Option<P>,
     fut: Option<InnerSendFut>,
@@ -83,15 +83,15 @@ impl Future for InnerSendFut {
     }
 }
 
-impl<'a, M> SendFut<'a, M> {
+impl<'a, M> SendRawFut<'a, M> {
     pub(crate) fn new(channel: &'a InboxChannel<M>, msg: M) -> Self {
         match channel.capacity() {
-            Capacity::Bounded(_) => SendFut {
+            Capacity::Bounded(_) => SendRawFut {
                 channel,
                 msg: Some(msg),
                 fut: None,
             },
-            Capacity::Unbounded(back_pressure) => SendFut {
+            Capacity::Unbounded(back_pressure) => SendRawFut {
                 channel,
                 msg: Some(msg),
                 fut: back_pressure
@@ -161,9 +161,9 @@ impl<'a, M> SendFut<'a, M> {
     }
 }
 
-impl<'a, M> Unpin for SendFut<'a, M> {}
+impl<'a, M> Unpin for SendRawFut<'a, M> {}
 
-impl<'a, M> Future for SendFut<'a, M> {
+impl<'a, M> Future for SendRawFut<'a, M> {
     type Output = Result<(), SendError<M>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

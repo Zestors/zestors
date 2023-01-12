@@ -12,7 +12,7 @@ use tokio::task::yield_now;
 impl<M> InboxChannel<M> {
     /// This will attempt to receive a message from the [Inbox]. If there is no message, this
     /// will return `None`.
-    pub fn try_recv(&self, signaled_halt: &mut bool) -> Result<M, TryRecvError> {
+    pub(crate) fn try_recv(&self, signaled_halt: &mut bool) -> Result<M, TryRecvError> {
         if !(*signaled_halt) && self.inbox_should_halt() {
             *signaled_halt = true;
             Err(TryRecvError::Halted)
@@ -25,12 +25,12 @@ impl<M> InboxChannel<M> {
     }
 
     /// Wait until there is a message in the [Inbox].
-    pub fn recv<'a>(
+    pub(crate) fn recv<'a>(
         &'a self,
         signaled_halt: &'a mut bool,
         listener: &'a mut Option<EventListener>,
-    ) -> RecvFut<'a, M> {
-        RecvFut {
+    ) -> RecvRawFut<'a, M> {
+        RecvRawFut {
             channel: self,
             signaled_halt,
             listener,
@@ -66,15 +66,15 @@ impl<M> InboxChannel<M> {
 ///
 /// This can be awaited or streamed to get the messages.
 #[derive(Debug)]
-pub struct RecvFut<'a, M> {
-    channel: &'a InboxChannel<M>,
+pub(crate) struct RecvRawFut<'a, P> {
+    channel: &'a InboxChannel<P>,
     signaled_halt: &'a mut bool,
     listener: &'a mut Option<EventListener>,
 }
 
-impl<'a, M> Unpin for RecvFut<'a, M> {}
+impl<'a, M> Unpin for RecvRawFut<'a, M> {}
 
-impl<'a, M> Future for RecvFut<'a, M> {
+impl<'a, M> Future for RecvRawFut<'a, M> {
     type Output = Result<M, RecvError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -118,7 +118,7 @@ impl<'a, M> Future for RecvFut<'a, M> {
     }
 }
 
-impl<'a, M> Drop for RecvFut<'a, M> {
+impl<'a, M> Drop for RecvRawFut<'a, M> {
     fn drop(&mut self) {
         *self.listener = None;
     }

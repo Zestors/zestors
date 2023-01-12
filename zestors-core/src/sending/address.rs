@@ -4,7 +4,6 @@ use futures::{Future, FutureExt};
 use std::{
     fmt::Debug,
     mem::ManuallyDrop,
-    ops::Add,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -17,7 +16,7 @@ use std::{
 /// type `M`. It can be transformed into an `Address` using [Address::into_dyn].
 /// * `Address`: This form is a dynamic address, which can do everything a normal address can
 /// do, except for sending messages. It can be transformed back into an `Address<Channel<M>>` using
-/// [Address::downcast::<M>].
+/// [`Address::downcast::<M>`].
 ///
 /// An address can be awaited which returns once the actor exits.
 #[derive(Debug)]
@@ -33,10 +32,6 @@ impl<T: DefinesChannel> Address<T> {
             channel,
             exit_listener: None,
         }
-    }
-
-    pub(crate) fn channel(&self) -> &Arc<T::Channel> {
-        &self.channel
     }
 
     fn into_parts(self) -> (Arc<T::Channel>, Option<EventListener>) {
@@ -153,5 +148,38 @@ impl<T: DefinesChannel> Clone for Address<T> {
 impl<T: DefinesChannel> Drop for Address<T> {
     fn drop(&mut self) {
         self.channel.remove_address();
+    }
+}
+
+//------------------------------------------------------------------------------------------------
+//  IntoAddress
+//------------------------------------------------------------------------------------------------
+
+// todo: Make this like IntoChannel
+pub trait IntoAddress<T>
+where
+    T: DefinesChannel,
+{
+    fn into_address(self) -> Address<T>;
+}
+
+impl<P, T> IntoAddress<T> for Address<P>
+where
+    P: Protocol + TransformInto<T>,
+    T: DefinesDynChannel,
+{
+    fn into_address(self) -> Address<T> {
+        self.into_dyn()
+    }
+}
+
+impl<T, D> IntoAddress<T> for Address<Dyn<D>>
+where
+    T: DefinesDynChannel,
+    D: ?Sized,
+    Dyn<D>: DefinesDynChannel + TransformInto<T>,
+{
+    fn into_address(self) -> Address<T> {
+        self.transform()
     }
 }

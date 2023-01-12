@@ -2,7 +2,7 @@ use proc_macro::TokenStream as TokenStream1;
 use quote::quote;
 
 #[proc_macro]
-pub fn supervisor(ts: TokenStream1) -> TokenStream1 {
+pub fn supervisor(_ts: TokenStream1) -> TokenStream1 {
     quote!().into()
 }
 

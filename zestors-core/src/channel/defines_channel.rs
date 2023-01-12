@@ -5,9 +5,6 @@ use std::{any::TypeId, sync::Arc};
 //  DefinesChannel
 //------------------------------------------------------------------------------------------------
 
-/// An [ActorType] signifies the type that an actor can be. This can be one of:
-/// - A [Protocol]
-/// - A [Dyn<_>] type.
 pub trait DefinesChannel {
     /// The underlying channel used.
     type Channel: DynChannel + ?Sized;

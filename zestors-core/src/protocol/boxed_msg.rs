@@ -2,12 +2,12 @@ use super::*;
 use std::any::Any;
 
 /// A simple wrapper around a `Box<dyn Any>` that only allows messages to be created
-/// from [Sent<M>] if `M` implements [Message].
+/// from [`Sent<M>`] if `M` implements [Message].
 #[derive(Debug)]
 pub struct BoxedMessage(Box<dyn Any + Send>);
 
 impl BoxedMessage {
-    /// Create a new [BoxedMessage] from [Sent<M>].
+    /// Create a new [BoxedMessage] from [`Sent<M>`].
     pub fn new<M>(sends: Sent<M>) -> Self
     where
         M: Message,
@@ -16,7 +16,7 @@ impl BoxedMessage {
         Self(Box::new(sends))
     }
 
-    /// Downcast the [BoxedMessage] into [Sent<M>].
+    /// Downcast the [BoxedMessage] into [`Sent<M>`].
     pub fn downcast<M>(self) -> Result<Sent<M>, Self>
     where
         M: Message,

@@ -6,12 +6,12 @@ use std::{any::TypeId, marker::PhantomData, sync::Arc};
 /// - `Address<Dyn<dyn AcceptsNone>>`
 /// - `Address<Dyn<dyn AcceptsTwo<u32, u64>>`
 ///
-/// For most uses it is easier to use the [AcceptsAll!] macro, for which the
+/// For most uses it is easier to use the [Accepts!] macro, for which the
 /// examples above become:
-/// - `Address<AcceptsAll![]>`
-/// - `Address<AcceptsAll![u32, u64]>`
+/// - `Address<Accepts![]>`
+/// - `Address<Accepts![u32, u64]>`
 ///
-/// This means that `Dyn<dyn AcceptsNone>` == `AcceptsAll![]`, and they can be used
+/// This means that `Dyn<dyn AcceptsNone>` == `Accepts![]`, and they can be used
 /// interchangably.
 pub struct Dyn<T: ?Sized>(PhantomData<*const T>);
 
@@ -83,43 +83,43 @@ define_dynamic_protocol_types! {
 #[macro_export]
 macro_rules! Accepts {
     () => {
-        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsNone>
+        $crate::Dyn<dyn $crate::AcceptsNone>
     };
     ($ty1:ty) => {
-        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsOne<$ty1>>
+        $crate::Dyn<dyn $crate::AcceptsOne<$ty1>>
     };
     ($ty1:ty, $ty2:ty) => {
-        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsTwo<$ty1, $ty2>>
+        $crate::Dyn<dyn $crate::AcceptsTwo<$ty1, $ty2>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty) => {
-        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsThree<$ty1, $ty2, $ty3>>
+        $crate::Dyn<dyn $crate::AcceptsThree<$ty1, $ty2, $ty3>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty) => {
-        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsFour<$ty1, $ty2, $ty3, $ty4>>
+        $crate::Dyn<dyn $crate::AcceptsFour<$ty1, $ty2, $ty3, $ty4>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty) => {
-        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsFive<$ty1, $ty2, $ty3, $ty4, $ty5>>
+        $crate::Dyn<dyn $crate::AcceptsFive<$ty1, $ty2, $ty3, $ty4, $ty5>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty) => {
-        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsSix<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6>>
+        $crate::Dyn<dyn $crate::AcceptsSix<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty, $ty7:ty) => {
-        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsSeven<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7>>
+        $crate::Dyn<dyn $crate::AcceptsSeven<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty, $ty7:ty, $ty8:ty) => {
-        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsEight<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8>>
+        $crate::Dyn<dyn $crate::AcceptsEight<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty, $ty7:ty, $ty8:ty, $ty9:ty) => {
-        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsNine<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8, $ty9>>
+        $crate::Dyn<dyn $crate::AcceptsNine<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8, $ty9>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty, $ty7:ty, $ty8:ty, $ty9:ty, $ty10:ty) => {
-        $crate::actor_type::Dyn<dyn $crate::actor_type::AcceptsTen<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8, $ty9, $ty10>>
+        $crate::Dyn<dyn $crate::AcceptsTen<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8, $ty9, $ty10>>
     };
 }
 
 #[cfg(test)]
 mod test {
-    use crate::actor_type::{AcceptsOne, AcceptsTwo, Dyn};
+    use crate::{AcceptsOne, AcceptsTwo, Dyn};
 
     type _1 = Accepts![u32];
     type _2 = Dyn<dyn AcceptsOne<u32>>;

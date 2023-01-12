@@ -48,7 +48,7 @@ pub fn derive_message(item: TokenStream) -> Result<TokenStream, Error> {
     };
 
     Ok(quote! {
-        impl #impl_generics zestors::protocol::Message for #ident #ty_generics #where_clause {
+        impl #impl_generics zestors::core::protocol::Message for #ident #ty_generics #where_clause {
             type Type = #returns;
         }
     })

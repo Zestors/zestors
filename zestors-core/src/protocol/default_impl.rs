@@ -1,7 +1,5 @@
-use crate::Accepts;
-
-use super::*;
-use std::{any::TypeId, borrow::Cow, rc::Rc, sync::Arc};
+use crate::*;
+use std::{any::TypeId, sync::Arc};
 
 impl<M: Send + 'static> MessageType<M> for () {
     type Sent = M;

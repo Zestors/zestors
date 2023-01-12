@@ -2,8 +2,6 @@ use crate::*;
 use futures::{future::BoxFuture, Future, FutureExt};
 use std::pin::Pin;
 
-/// Whether an actor accepts messages of a certain kind. If this is implemented for the
-/// [ActorType] then messages of type `M` can be sent to it's address.
 pub trait Accepts<M: Message>: DefinesChannel {
     type SendFut<'a>: Future<Output = Result<Returned<M>, SendError<M>>> + Send + 'a;
     fn try_send(channel: &Self::Channel, msg: M) -> Result<Returned<M>, TrySendError<M>>;

@@ -1,7 +1,7 @@
 use super::*;
 use concurrent_queue::{ConcurrentQueue, PopError, PushError};
 use event_listener::{Event, EventListener};
-use futures::Future;
+use futures::{future::BoxFuture, Future};
 use std::{
     any::{Any, TypeId},
     pin::Pin,
@@ -289,7 +289,7 @@ impl<T> Channel for InboxChannel<T> {
     }
 }
 
-impl<P: Protocol> DynChannel for InboxChannel<P> {
+impl<P: Protocol + Send> DynChannel for InboxChannel<P> {
     fn try_send_boxed(
         &self,
         boxed: BoxedMessage,

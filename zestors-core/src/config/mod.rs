@@ -1,4 +1,6 @@
-//! Module containing the configuration for newly spawned actors. See [Config] for more details.
+#![doc = include_str!("../../docs/config.md")]
+#[allow(unused_imports)]
+use crate::*;
 
 use std::{
     sync::atomic::{AtomicU32, AtomicU64, Ordering},
@@ -33,7 +35,7 @@ impl Config {
         Self { link, capacity }
     }
 
-    /// A config for a default bounded [Channel]:
+    /// A config for a default bounded channel.
     /// ```no_run
     /// # use zestors_core::*;
     /// # let capacity = 1;
@@ -131,7 +133,7 @@ static DEFAULT_ABORT_TIMER_NANOS: AtomicU32 = AtomicU32::new(0);
 static DEFAULT_ABORT_TIMER_SECS: AtomicU64 = AtomicU64::new(1);
 
 /// Set the abort-timer used for default spawn [Config].
-/// 
+///
 /// This is applied globally for processes spawned after setting this value.
 pub fn set_default_abort_timer(timer: Duration) {
     DEFAULT_ABORT_TIMER_NANOS.store(timer.subsec_nanos(), Ordering::Release);
