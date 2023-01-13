@@ -1,7 +1,7 @@
 use crate::*;
 use std::any::TypeId;
 
-pub trait Protocol: DefinesChannel<Channel = InboxChannel<Self>> + Send + 'static + Sized {
+pub trait Protocol: Send + 'static + Sized {
     /// Convert the protocol into a [BoxedMessage].
     fn into_box(self) -> BoxedMessage;
 
@@ -19,9 +19,9 @@ pub trait Protocol: DefinesChannel<Channel = InboxChannel<Self>> + Send + 'stati
     fn accepts_msg(msg_id: &TypeId) -> bool;
 }
 
-/// The trait [`ProtocolAccepts<M>`] should be implemented for all messages `M` that a
+/// The trait [`ProtocolFromInto<M>`] should be implemented for all messages `M` that a
 /// [Protocol] accepts.
-pub trait ProtocolAccepts<M: Message> {
+pub trait ProtocolFromInto<M: Message> {
     /// Convert the [Message] into the [Protocol].
     fn from_msg(msg: Sent<M>) -> Self
     where

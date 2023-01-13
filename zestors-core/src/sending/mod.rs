@@ -1,6 +1,3 @@
-#![doc = include_str!("../../docs/sending.md")]
-#[allow(unused_imports)]
-use crate::*;
 mod accepts;
 mod address;
 pub use accepts::*;

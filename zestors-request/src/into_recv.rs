@@ -1,6 +1,8 @@
-use crate::*;
+use zestors_core::*;
 use futures::{future::BoxFuture, Future};
 use std::pin::Pin;
+
+use crate::Rx;
 
 /// Trait that makes it easier to await a reply from a [Rx].
 pub trait IntoRecv {

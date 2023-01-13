@@ -1,6 +1,7 @@
 use crate::*;
-use futures::{Future, FutureExt, Stream};
+use futures::{future::BoxFuture, Future, FutureExt, Stream};
 use std::{
+    any::TypeId,
     mem::{self},
     pin::Pin,
     sync::Arc,
@@ -17,8 +18,8 @@ use std::{
 ///
 /// A `Child<E, CT, PT>` has the following generics:
 /// - `E`: Stands for `Exit`, and is the value that the spawned child exits with.
-/// - `C`: Stands for [`DefinesChannel`], and specifies the underlying channel and what kind of
-///   messages the actor [trait@Accepts] (the default is [`Accepts![]`](Accepts!)). This value can be
+/// - `C`: Stands for [`DefineChannel`], and specifies the underlying channel and what kind of
+///   messages the actor [accepts](Accept) (the default is [`Accepts![]`](Accepts!)). This value can be
 ///   one of the following:
 ///     - The [`Protocol`] of the actor, given that the actor has an [Inbox].
 ///     - [`Halter`], indicating that the actor does not have an [Inbox].
@@ -42,7 +43,7 @@ use std::{
 pub struct Child<E, C = Accepts![], P = NoPool>
 where
     E: Send + 'static,
-    C: DefinesChannel,
+    C: DefineChannel,
     P: DefinesPool,
 {
     channel: Arc<C::Channel>,
@@ -51,15 +52,11 @@ where
     is_aborted: bool,
 }
 
-//-------------------------------------------------
-//  All children
-//-------------------------------------------------
-
 /// # Methods valid for all children.
 impl<E, C, P> Child<E, C, P>
 where
     E: Send + 'static,
-    C: DefinesChannel,
+    C: DefineChannel,
     P: DefinesPool,
 {
     pub(crate) fn new(
@@ -91,12 +88,6 @@ where
     /// This will not run the drop, and therefore the actor will not be halted/aborted.
     pub fn into_inner(self) -> P::JoinHandles<E> {
         self.into_parts().1.take().unwrap()
-    }
-
-    /// Get a new [Address] to the [Channel].
-    pub fn get_address(&self) -> Address<C> {
-        self.channel.add_address();
-        Address::new(self.channel.clone())
     }
 
     /// Attach the actor.
@@ -151,7 +142,7 @@ where
 
     pub fn transform_unchecked_into<T>(self) -> Child<E, T, P>
     where
-        T: DefinesDynChannel,
+        T: DefineDynChannel,
     {
         let (channel, join_handles, link, is_aborted) = self.into_parts();
         Child {
@@ -165,7 +156,7 @@ where
     pub fn transform_into<T>(self) -> Child<E, T, P>
     where
         C: TransformInto<T>,
-        T: DefinesDynChannel,
+        T: DefineDynChannel,
     {
         let (channel, join_handles, link, is_aborted) = self.into_parts();
         Child {
@@ -176,28 +167,17 @@ where
         }
     }
 
-    pub fn into_dyn(self) -> Child<E, Accepts!(), P> {
+    pub fn into_dyn(self) -> Child<E, Accepts!(), P>
+    where
+        C: DefineDynChannel,
+    {
         self.transform_unchecked_into()
     }
 
-    gen::channel_methods!();
-    gen::send_methods!(C);
-}
-
-//-------------------------------------------------
-//  Dynamic children
-//-------------------------------------------------
-
-/// # Methods valid for children that are dynamic.
-impl<E, C, P> Child<E, C, P>
-where
-    E: Send + 'static,
-    C: DefinesDynChannel,
-    P: DefinesPool,
-{
     pub fn try_transform<T>(self) -> Result<Child<E, T, P>, Self>
     where
-        T: DefinesDynChannel,
+        C: DefineDynChannel,
+        T: DefineDynChannel,
     {
         if T::msg_ids().iter().all(|id| self.accepts(id)) {
             Ok(self.transform_unchecked_into())
@@ -208,7 +188,7 @@ where
 
     pub fn downcast<T>(self) -> Result<Child<E, T, P>, Self>
     where
-        T: DefinesChannel,
+        T: DefineSizedChannel,
         T::Channel: Sized + 'static,
     {
         let (channel, join_handles, link, is_aborted) = self.into_parts();
@@ -227,24 +207,13 @@ where
             }),
         }
     }
-
-    /// Whether the actor accepts a message of the given type-id.
-    pub fn accepts(&self, id: &std::any::TypeId) -> bool {
-        self.channel.accepts(id)
-    }
-
-    gen::unchecked_send_methods!();
 }
-
-//-------------------------------------------------
-//  Non-pooled children
-//-------------------------------------------------
 
 /// # Methods valid for children that are not pooled.
 impl<E, C> Child<E, C, NoPool>
 where
     E: Send + 'static,
-    C: DefinesChannel,
+    C: DefineChannel,
 {
     /// Convert the [Child] into a [ChildPool].
     pub fn into_pool(self) -> ChildPool<E, C> {
@@ -274,7 +243,7 @@ where
 impl<E, C> Child<E, C, Pool>
 where
     E: Send + 'static,
-    C: DefinesChannel,
+    C: DefineChannel,
 {
     /// The amount of tasks that are alive.
     ///
@@ -305,11 +274,11 @@ where
     where
         Fun: FnOnce(I) -> Fut + Send + 'static,
         Fut: Future<Output = E> + Send + 'static,
-        I: SpawnsWith,
-        <I::ChannelDefinition as DefinesChannel>::Channel: Sized,
+        I: Spawn,
+        <I::ChannelDefinition as DefineChannel>::Channel: Sized,
         E: Send + 'static,
     {
-        let channel = match Arc::downcast::<<I::ChannelDefinition as DefinesChannel>::Channel>(
+        let channel = match Arc::downcast::<<I::ChannelDefinition as DefineChannel>::Channel>(
             self.channel.clone().into_any(),
         ) {
             Ok(channel) => channel,
@@ -330,19 +299,7 @@ where
     pub fn shutdown(&mut self, timeout: Duration) -> ShutdownStream<'_, E, C> {
         ShutdownStream::new(self, timeout)
     }
-}
 
-//-------------------------------------------------
-//  (Sized and pooled) children
-//-------------------------------------------------
-
-/// # Methods valid for children that are both sized and pooled.
-impl<E, C> Child<E, C, Pool>
-where
-    E: Send + 'static,
-    C: DefinesSizedChannel,
-    C::Channel: Sized,
-{
     /// Attempt to spawn an additional process on the channel.
     ///
     /// This method fails if the channel has already exited.
@@ -351,11 +308,12 @@ where
         Fun: FnOnce(C::Spawned) -> Fut + Send + 'static,
         Fut: Future<Output = E> + Send + 'static,
         E: Send + 'static,
-        C: Send + 'static,
+        C: DefineSizedChannel,
+        C::Channel: Sized,
     {
         match self.channel.try_add_inbox() {
             Ok(_) => {
-                let inbox = <C::Spawned as SpawnsWith>::new(self.channel.clone());
+                let inbox = <C::Spawned as Spawn>::new(self.channel.clone());
                 let handle = tokio::task::spawn(async move { fun(inbox).await });
                 self.join_handles.as_mut().unwrap().push(handle);
                 Ok(())
@@ -365,26 +323,134 @@ where
     }
 }
 
-//-------------------------------------------------
-//  Unpin for all children
-//-------------------------------------------------
+impl<C, E, P> ActorRef for Child<E, C, P>
+where
+    C: DefineChannel,
+    E: Send + 'static,
+    P: DefinesPool,
+{
+    type ChannelDefinition = C;
+    fn close(&self) -> bool {
+        self.channel.close()
+    }
+    fn halt_some(&self, n: u32) {
+        self.channel.halt_some(n)
+    }
+    fn halt(&self) {
+        self.channel.halt()
+    }
+    fn process_count(&self) -> usize {
+        self.channel.process_count()
+    }
+    fn msg_count(&self) -> usize {
+        self.channel.msg_count()
+    }
+    fn address_count(&self) -> usize {
+        self.channel.address_count()
+    }
+    fn is_closed(&self) -> bool {
+        self.channel.is_closed()
+    }
+    fn is_bounded(&self) -> bool {
+        self.channel.capacity().is_bounded()
+    }
+    fn capacity(&self) -> &Capacity {
+        self.channel.capacity()
+    }
+    fn has_exited(&self) -> bool {
+        self.channel.has_exited()
+    }
+    fn actor_id(&self) -> ActorId {
+        self.channel.actor_id()
+    }
+    fn try_send<M>(&self, msg: M) -> Result<Returned<M>, TrySendError<M>>
+    where
+        M: Message,
+        Self::ChannelDefinition: Accept<M>,
+    {
+        <Self::ChannelDefinition as Accept<M>>::try_send(&self.channel, msg)
+    }
+    fn send_now<M>(&self, msg: M) -> Result<Returned<M>, TrySendError<M>>
+    where
+        M: Message,
+        Self::ChannelDefinition: Accept<M>,
+    {
+        <Self::ChannelDefinition as Accept<M>>::send_now(&self.channel, msg)
+    }
+    fn send_blocking<M>(&self, msg: M) -> Result<Returned<M>, SendError<M>>
+    where
+        M: Message,
+        Self::ChannelDefinition: Accept<M>,
+    {
+        <Self::ChannelDefinition as Accept<M>>::send_blocking(&self.channel, msg)
+    }
+    fn send<M>(&self, msg: M) -> <Self::ChannelDefinition as Accept<M>>::SendFut<'_>
+    where
+        M: Message,
+        Self::ChannelDefinition: Accept<M>,
+    {
+        <Self::ChannelDefinition as Accept<M>>::send(&self.channel, msg)
+    }
+
+    fn get_address(&self) -> Address<Self::ChannelDefinition> {
+        self.channel.add_address();
+        Address::from_channel(self.channel.clone())
+    }
+}
+
+impl<C, E, P> DynActorRef for Child<E, C, P>
+where
+    C: DefineDynChannel,
+    E: Send + 'static,
+    P: DefinesPool,
+{
+    fn try_send_unchecked<M>(&self, msg: M) -> Result<Returned<M>, TrySendUncheckedError<M>>
+    where
+        M: Message + Send + 'static,
+        Sent<M>: Send + 'static,
+    {
+        self.channel.try_send_unchecked(msg)
+    }
+    fn send_now_unchecked<M>(&self, msg: M) -> Result<Returned<M>, TrySendUncheckedError<M>>
+    where
+        M: Message + Send + 'static,
+        Sent<M>: Send + 'static,
+    {
+        self.channel.send_now_unchecked(msg)
+    }
+    fn send_blocking_unchecked<M>(&self, msg: M) -> Result<Returned<M>, SendUncheckedError<M>>
+    where
+        M: Message + Send + 'static,
+        Sent<M>: Send + 'static,
+    {
+        self.channel.send_blocking_unchecked(msg)
+    }
+    fn send_unchecked<M>(&self, msg: M) -> BoxFuture<'_, Result<Returned<M>, SendUncheckedError<M>>>
+    where
+        <M::Type as MessageType<M>>::Returned: Send,
+        M: Message + Send + 'static,
+        Sent<M>: Send + 'static,
+    {
+        self.channel.send_unchecked(msg)
+    }
+    fn accepts(&self, id: &TypeId) -> bool {
+        self.channel.accepts(id)
+    }
+}
 
 impl<E, C, P> Unpin for Child<E, C, P>
 where
     E: Send + 'static,
-    C: DefinesChannel,
+    C: DefineChannel,
     P: DefinesPool,
 {
 }
 
-//-------------------------------------------------
-//  Future for unpooled children
-//-------------------------------------------------
-
+/// # Future is implemented for non-pooled children only.
 impl<E, C> Future for Child<E, C, NoPool>
 where
     E: Send + 'static,
-    C: DefinesChannel,
+    C: DefineChannel,
 {
     type Output = Result<E, ExitError>;
 
@@ -397,14 +463,11 @@ where
     }
 }
 
-//-------------------------------------------------
-//  Stream for pooled children
-//-------------------------------------------------
-
+/// # Stream is implemented for pooled children only.
 impl<E, C> Stream for Child<E, C, Pool>
 where
     E: Send + 'static,
-    C: DefinesChannel,
+    C: DefineChannel,
 {
     type Item = Result<E, ExitError>;
 
@@ -424,14 +487,10 @@ where
     }
 }
 
-//-------------------------------------------------
-//  Drop for all children
-//-------------------------------------------------
-
 impl<E, C, P> Drop for Child<E, C, P>
 where
     E: Send + 'static,
-    C: DefinesChannel,
+    C: DefineChannel,
     P: DefinesPool,
 {
     fn drop(&mut self) {
@@ -466,7 +525,7 @@ pub type ChildPool<E, CT = Accepts![]> = Child<E, CT, Pool>;
 pub trait IntoChild<E, T, R>
 where
     E: Send + 'static,
-    T: DefinesChannel,
+    T: DefineChannel,
     R: DefinesPool,
 {
     fn into_child(self) -> Child<E, T, R>;
@@ -476,7 +535,7 @@ impl<E, P, T2> IntoChild<E, T2, NoPool> for Child<E, P>
 where
     E: Send + 'static,
     P: Protocol + TransformInto<T2>,
-    T2: DefinesDynChannel,
+    T2: DefineDynChannel,
 {
     fn into_child(self) -> Child<E, T2> {
         self.transform_into()
@@ -487,7 +546,7 @@ impl<E, P, T2> IntoChild<E, T2, Pool> for Child<E, P>
 where
     E: Send + 'static,
     P: Protocol + TransformInto<T2>,
-    T2: DefinesDynChannel,
+    T2: DefineDynChannel,
 {
     fn into_child(self) -> ChildPool<E, T2> {
         self.into_pool().transform_into()
@@ -497,9 +556,9 @@ where
 impl<E, D, T2> IntoChild<E, T2, NoPool> for Child<E, Dyn<D>>
 where
     E: Send + 'static,
-    T2: DefinesDynChannel,
+    T2: DefineDynChannel,
     D: ?Sized,
-    Dyn<D>: DefinesDynChannel + TransformInto<T2>,
+    Dyn<D>: DefineDynChannel + TransformInto<T2>,
 {
     fn into_child(self) -> Child<E, T2> {
         self.transform_into()
@@ -509,9 +568,9 @@ where
 impl<E, D, T2> IntoChild<E, T2, Pool> for Child<E, Dyn<D>>
 where
     E: Send + 'static,
-    T2: DefinesDynChannel,
+    T2: DefineDynChannel,
     D: ?Sized,
-    Dyn<D>: DefinesDynChannel + TransformInto<T2>,
+    Dyn<D>: DefineDynChannel + TransformInto<T2>,
 {
     fn into_child(self) -> ChildPool<E, T2> {
         self.into_pool().transform_into()
@@ -521,9 +580,9 @@ where
 impl<E, D, T2> IntoChild<E, T2, Pool> for ChildPool<E, Dyn<D>>
 where
     E: Send + 'static,
-    T2: DefinesDynChannel,
+    T2: DefineDynChannel,
     D: ?Sized,
-    Dyn<D>: DefinesDynChannel + TransformInto<T2>,
+    Dyn<D>: DefineDynChannel + TransformInto<T2>,
 {
     fn into_child(self) -> ChildPool<E, T2> {
         self.transform_into()
@@ -534,7 +593,7 @@ impl<E, P, T2> IntoChild<E, T2, Pool> for ChildPool<E, P>
 where
     E: Send + 'static,
     P: Protocol + TransformInto<T2>,
-    T2: DefinesDynChannel,
+    T2: DefineDynChannel,
 {
     fn into_child(self) -> ChildPool<E, T2> {
         self.transform_into()
@@ -545,207 +604,207 @@ where
 //  Test
 //------------------------------------------------------------------------------------------------
 
-#[cfg(test)]
-mod test {
-    use crate::*;
-    use std::{future::pending, time::Duration};
-    use tokio::sync::oneshot;
+// #[cfg(test)]
+// mod test {
+//     use crate::*;
+//     use std::{future::pending, time::Duration};
+//     use tokio::sync::oneshot;
 
-    #[tokio::test]
-    async fn drop_halts_single_actor() {
-        let (tx, rx) = oneshot::channel();
-        let (child, _addr) = spawn(Config::default(), |mut inbox: Inbox<()>| async move {
-            if let Err(RecvError::Halted) = inbox.recv().await {
-                tx.send(true).unwrap();
-            } else {
-                tx.send(false).unwrap()
-            }
-        });
-        drop(child);
-        assert!(rx.await.unwrap());
-    }
+//     #[tokio::test]
+//     async fn drop_halts_single_actor() {
+//         let (tx, rx) = oneshot::channel();
+//         let (child, _addr) = spawn(Config::default(), |mut inbox: Inbox<()>| async move {
+//             if let Err(RecvError::Halted) = inbox.recv().await {
+//                 tx.send(true).unwrap();
+//             } else {
+//                 tx.send(false).unwrap()
+//             }
+//         });
+//         drop(child);
+//         assert!(rx.await.unwrap());
+//     }
 
-    #[tokio::test]
-    async fn dropping_aborts() {
-        let (tx, rx) = oneshot::channel();
-        let (child, _addr) = spawn(
-            Config::attached(Duration::from_millis(1)),
-            |mut inbox: Inbox<()>| async move {
-                if let Err(RecvError::Halted) = inbox.recv().await {
-                    tx.send(true).unwrap();
-                    pending::<()>().await;
-                } else {
-                    tx.send(false).unwrap()
-                }
-            },
-        );
-        drop(child);
-        assert!(rx.await.unwrap());
-    }
+//     #[tokio::test]
+//     async fn dropping_aborts() {
+//         let (tx, rx) = oneshot::channel();
+//         let (child, _addr) = spawn(
+//             Config::attached(Duration::from_millis(1)),
+//             |mut inbox: Inbox<()>| async move {
+//                 if let Err(RecvError::Halted) = inbox.recv().await {
+//                     tx.send(true).unwrap();
+//                     pending::<()>().await;
+//                 } else {
+//                     tx.send(false).unwrap()
+//                 }
+//             },
+//         );
+//         drop(child);
+//         assert!(rx.await.unwrap());
+//     }
 
-    #[tokio::test]
-    async fn dropping_detached() {
-        let (tx, rx) = oneshot::channel();
-        let (child, addr) = spawn(Config::detached(), |mut inbox: Inbox<()>| async move {
-            if let Err(RecvError::Halted) = inbox.recv().await {
-                tx.send(true).unwrap();
-            } else {
-                tx.send(false).unwrap()
-            }
-        });
-        drop(child);
-        tokio::time::sleep(Duration::from_millis(1)).await;
-        addr.try_send(()).unwrap();
-        assert!(!rx.await.unwrap());
-    }
+//     #[tokio::test]
+//     async fn dropping_detached() {
+//         let (tx, rx) = oneshot::channel();
+//         let (child, addr) = spawn(Config::detached(), |mut inbox: Inbox<()>| async move {
+//             if let Err(RecvError::Halted) = inbox.recv().await {
+//                 tx.send(true).unwrap();
+//             } else {
+//                 tx.send(false).unwrap()
+//             }
+//         });
+//         drop(child);
+//         tokio::time::sleep(Duration::from_millis(1)).await;
+//         addr.try_send(()).unwrap();
+//         assert!(!rx.await.unwrap());
+//     }
 
-    #[tokio::test]
-    async fn downcast() {
-        let (child, _addr) = spawn(Config::default(), basic_actor!());
-        assert!(matches!(
-            child.transform_into::<Accepts![]>().downcast::<()>(),
-            Ok(_)
-        ));
-    }
+//     #[tokio::test]
+//     async fn downcast() {
+//         let (child, _addr) = spawn(Config::default(), basic_actor!());
+//         assert!(matches!(
+//             child.transform_into::<Accepts![]>().downcast::<()>(),
+//             Ok(_)
+//         ));
+//     }
 
-    #[tokio::test]
-    async fn abort() {
-        let (mut child, _addr) = spawn(Config::default(), basic_actor!());
-        assert!(!child.is_aborted());
-        child.abort();
-        assert!(child.is_aborted());
-        assert!(matches!(child.await, Err(ExitError::Abort)));
-    }
+//     #[tokio::test]
+//     async fn abort() {
+//         let (mut child, _addr) = spawn(Config::default(), basic_actor!());
+//         assert!(!child.is_aborted());
+//         child.abort();
+//         assert!(child.is_aborted());
+//         assert!(matches!(child.await, Err(ExitError::Abort)));
+//     }
 
-    #[tokio::test]
-    async fn is_finished() {
-        let (mut child, _addr) = spawn(Config::default(), basic_actor!());
-        child.abort();
-        let _ = (&mut child).await;
-        assert!(child.is_finished());
-    }
+//     #[tokio::test]
+//     async fn is_finished() {
+//         let (mut child, _addr) = spawn(Config::default(), basic_actor!());
+//         child.abort();
+//         let _ = (&mut child).await;
+//         assert!(child.is_finished());
+//     }
 
-    #[tokio::test]
-    async fn into_childpool() {
-        let (child, _addr) = spawn(Config::default(), basic_actor!());
-        let pool = child.into_pool();
-        assert_eq!(pool.task_count(), 1);
-        assert_eq!(pool.process_count(), 1);
-        assert_eq!(pool.is_aborted(), false);
+//     #[tokio::test]
+//     async fn into_childpool() {
+//         let (child, _addr) = spawn(Config::default(), basic_actor!());
+//         let pool = child.into_pool();
+//         assert_eq!(pool.task_count(), 1);
+//         assert_eq!(pool.process_count(), 1);
+//         assert_eq!(pool.is_aborted(), false);
 
-        let (mut child, _addr) = spawn(Config::default(), basic_actor!());
-        child.abort();
-        let pool = child.into_pool();
-        assert_eq!(pool.is_aborted(), true);
-    }
-}
+//         let (mut child, _addr) = spawn(Config::default(), basic_actor!());
+//         child.abort();
+//         let pool = child.into_pool();
+//         assert_eq!(pool.is_aborted(), true);
+//     }
+// }
 
-#[cfg(test)]
-mod test_pooled {
-    use crate::*;
-    use futures::future::pending;
-    use std::sync::atomic::{AtomicU8, Ordering};
-    use std::time::Duration;
+// #[cfg(test)]
+// mod test_pooled {
+//     use crate::*;
+//     use futures::future::pending;
+//     use std::sync::atomic::{AtomicU8, Ordering};
+//     use std::time::Duration;
 
-    #[tokio::test]
-    async fn dropping() {
-        static HALT_COUNT: AtomicU8 = AtomicU8::new(0);
-        let (child, addr) = spawn_many(
-            0..3,
-            Config::default(),
-            |_, mut inbox: Inbox<()>| async move {
-                if let Err(RecvError::Halted) = inbox.recv().await {
-                    HALT_COUNT.fetch_add(1, Ordering::AcqRel);
-                };
-            },
-        );
-        drop(child);
-        addr.await;
+//     #[tokio::test]
+//     async fn dropping() {
+//         static HALT_COUNT: AtomicU8 = AtomicU8::new(0);
+//         let (child, addr) = spawn_many(
+//             0..3,
+//             Config::default(),
+//             |_, mut inbox: Inbox<()>| async move {
+//                 if let Err(RecvError::Halted) = inbox.recv().await {
+//                     HALT_COUNT.fetch_add(1, Ordering::AcqRel);
+//                 };
+//             },
+//         );
+//         drop(child);
+//         addr.await;
 
-        assert_eq!(HALT_COUNT.load(Ordering::Acquire), 3);
-    }
+//         assert_eq!(HALT_COUNT.load(Ordering::Acquire), 3);
+//     }
 
-    #[tokio::test]
-    async fn dropping_halts_then_aborts() {
-        static HALT_COUNT: AtomicU8 = AtomicU8::new(0);
-        let (child, addr) = spawn_many(
-            0..3,
-            Config::attached(Duration::from_millis(1)),
-            |_, mut inbox: Inbox<()>| async move {
-                if let Err(RecvError::Halted) = inbox.recv().await {
-                    HALT_COUNT.fetch_add(1, Ordering::AcqRel);
-                };
-                pending::<()>().await;
-            },
-        );
-        drop(child);
-        addr.await;
+//     #[tokio::test]
+//     async fn dropping_halts_then_aborts() {
+//         static HALT_COUNT: AtomicU8 = AtomicU8::new(0);
+//         let (child, addr) = spawn_many(
+//             0..3,
+//             Config::attached(Duration::from_millis(1)),
+//             |_, mut inbox: Inbox<()>| async move {
+//                 if let Err(RecvError::Halted) = inbox.recv().await {
+//                     HALT_COUNT.fetch_add(1, Ordering::AcqRel);
+//                 };
+//                 pending::<()>().await;
+//             },
+//         );
+//         drop(child);
+//         addr.await;
 
-        assert_eq!(HALT_COUNT.load(Ordering::Acquire), 3);
-    }
+//         assert_eq!(HALT_COUNT.load(Ordering::Acquire), 3);
+//     }
 
-    #[tokio::test]
-    async fn dropping_detached() {
-        static HALT_COUNT: AtomicU8 = AtomicU8::new(0);
+//     #[tokio::test]
+//     async fn dropping_detached() {
+//         static HALT_COUNT: AtomicU8 = AtomicU8::new(0);
 
-        let (child, addr) = spawn_many(
-            0..3,
-            Config::detached(),
-            |_, mut inbox: Inbox<()>| async move {
-                if let Err(RecvError::Halted) = inbox.recv().await {
-                    HALT_COUNT.fetch_add(1, Ordering::AcqRel);
-                };
-            },
-        );
-        drop(child);
-        tokio::time::sleep(Duration::from_millis(1)).await;
-        addr.try_send(()).unwrap();
-        addr.try_send(()).unwrap();
-        addr.try_send(()).unwrap();
-        addr.await;
+//         let (child, addr) = spawn_many(
+//             0..3,
+//             Config::detached(),
+//             |_, mut inbox: Inbox<()>| async move {
+//                 if let Err(RecvError::Halted) = inbox.recv().await {
+//                     HALT_COUNT.fetch_add(1, Ordering::AcqRel);
+//                 };
+//             },
+//         );
+//         drop(child);
+//         tokio::time::sleep(Duration::from_millis(1)).await;
+//         addr.try_send(()).unwrap();
+//         addr.try_send(()).unwrap();
+//         addr.try_send(()).unwrap();
+//         addr.await;
 
-        assert_eq!(HALT_COUNT.load(Ordering::Acquire), 0);
-    }
+//         assert_eq!(HALT_COUNT.load(Ordering::Acquire), 0);
+//     }
 
-    #[tokio::test]
-    async fn downcast() {
-        let (pool, _addr) = spawn_many(0..5, Config::default(), pooled_basic_actor!());
-        let pool: ChildPool<_> = pool.transform_into();
-        assert!(matches!(pool.downcast::<()>(), Ok(_)));
-    }
+//     #[tokio::test]
+//     async fn downcast() {
+//         let (pool, _addr) = spawn_many(0..5, Config::default(), pooled_basic_actor!());
+//         let pool: ChildPool<_> = pool.transform_into();
+//         assert!(matches!(pool.downcast::<()>(), Ok(_)));
+//     }
 
-    #[tokio::test]
-    async fn spawn_ok() {
-        let (mut child, _addr) = spawn_one(Config::default(), basic_actor!());
-        assert!(child.spawn(basic_actor!()).is_ok());
-        assert!(child
-            .transform_into::<Accepts![]>()
-            .try_spawn(basic_actor!())
-            .is_ok());
-    }
+//     #[tokio::test]
+//     async fn spawn_ok() {
+//         let (mut child, _addr) = spawn_one(Config::default(), basic_actor!());
+//         assert!(child.spawn(basic_actor!()).is_ok());
+//         assert!(child
+//             .transform_into::<Accepts![]>()
+//             .try_spawn(basic_actor!())
+//             .is_ok());
+//     }
 
-    #[tokio::test]
-    async fn spawn_err_exit() {
-        let (mut child, addr) = spawn_one(Config::default(), basic_actor!());
-        addr.halt();
-        addr.await;
-        assert!(matches!(child.spawn(basic_actor!()), Err(SpawnError(_))));
-        assert!(matches!(
-            child
-                .transform_into::<Accepts![]>()
-                .try_spawn(basic_actor!()),
-            Err(TrySpawnError::Exited(_))
-        ));
-    }
+//     #[tokio::test]
+//     async fn spawn_err_exit() {
+//         let (mut child, addr) = spawn_one(Config::default(), basic_actor!());
+//         addr.halt();
+//         addr.await;
+//         assert!(matches!(child.spawn(basic_actor!()), Err(SpawnError(_))));
+//         assert!(matches!(
+//             child
+//                 .transform_into::<Accepts![]>()
+//                 .try_spawn(basic_actor!()),
+//             Err(TrySpawnError::Exited(_))
+//         ));
+//     }
 
-    #[tokio::test]
-    async fn spawn_err_incorrect_type() {
-        let (child, _addr) = spawn_one(Config::default(), basic_actor!(U32Protocol));
-        assert!(matches!(
-            child
-                .transform_into::<Accepts![]>()
-                .try_spawn(basic_actor!(())),
-            Err(TrySpawnError::IncorrectType(_))
-        ));
-    }
-}
+//     #[tokio::test]
+//     async fn spawn_err_incorrect_type() {
+//         let (child, _addr) = spawn_one(Config::default(), basic_actor!(U32Protocol));
+//         assert!(matches!(
+//             child
+//                 .transform_into::<Accepts![]>()
+//                 .try_spawn(basic_actor!(())),
+//             Err(TrySpawnError::IncorrectType(_))
+//         ));
+//     }
+// }

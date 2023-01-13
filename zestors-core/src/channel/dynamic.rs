@@ -13,17 +13,17 @@ pub struct Dyn<T: ?Sized>(PhantomData<*const T>);
 unsafe impl<T: ?Sized> Send for Dyn<T> {}
 unsafe impl<T: ?Sized> Sync for Dyn<T> {}
 
-/// Indicates that a [channel definition](DefinesChannel) can transform into another one.
-pub trait TransformInto<T: DefinesDynChannel>: DefinesChannel {
+/// Indicates that a [channel definition](DefineChannel) can transform into another one.
+pub trait TransformInto<T: DefineDynChannel>: DefineChannel {
     fn transform_into(channel: Arc<Self::Channel>) -> Arc<T::Channel>;
 }
 
 macro_rules! define_dynamic_protocol_types {
     ($($ident:ident $(<$( $ty:ident ),*>)?),*) => {$(
         /// See [`Dyn`].
-        pub trait $ident< $($($ty: Message,)?)*>: $($( ProtocolAccepts<$ty> + )?)* {}
+        pub trait $ident< $($($ty: Message,)?)*>: $($( ProtocolFromInto<$ty> + )?)* {}
 
-        impl<$($($ty: Message + 'static,)?)*> DefinesDynChannel for Dyn<dyn $ident< $($($ty,)?)*>> {
+        impl<$($($ty: Message + 'static,)?)*> DefineDynChannel for Dyn<dyn $ident< $($($ty,)?)*>> {
             fn msg_ids() -> Box<[TypeId]> {
                 Box::new([$($(TypeId::of::<$ty>(),)?)*])
             }
@@ -31,7 +31,7 @@ macro_rules! define_dynamic_protocol_types {
 
         impl<D, $($($ty: Message + 'static,)?)*> TransformInto<Dyn<dyn $ident<$($($ty,)?)*>>> for Dyn<D>
         where
-            Dyn<D>: DefinesDynChannel $($( + ProtocolAccepts<$ty> )?)*,
+            Dyn<D>: DefineDynChannel $($( + ProtocolFromInto<$ty> )?)*,
             D: ?Sized
         {
             fn transform_into(channel: Arc<Self::Channel>) -> Arc<dyn DynChannel> {
@@ -40,14 +40,15 @@ macro_rules! define_dynamic_protocol_types {
         }
 
 
-        impl<P, $($($ty: Message + 'static,)?)*> TransformInto<Dyn<dyn $ident<$($($ty,)?)*>>> for P
-        where
-            P: Protocol $($( + ProtocolAccepts<$ty> )?)*
-        {
-            fn transform_into(channel: Arc<Self::Channel>) -> Arc<dyn DynChannel> {
-                channel
-            }
-        }
+        // todo
+        // impl<P, $($($ty: Message + 'static,)?)*> TransformInto<Dyn<dyn $ident<$($($ty,)?)*>>> for P
+        // where
+        //     P: Protocol $($( + ProtocolFromInto<$ty> )?)*
+        // {
+        //     fn transform_into(channel: Arc<Self::Channel>) -> Arc<dyn DynChannel> {
+        //         channel
+        //     }
+        // }
     )*};
 }
 
@@ -65,7 +66,7 @@ define_dynamic_protocol_types! {
     AcceptsTen<M1, M2, M3, M4, M5, M6, M7, M8, M9, M10>
 }
 
-/// Macro for writing dynamic [channel definitions](DefinesChannel):
+/// Macro for writing dynamic [channel definitions](DefineChannel):
 /// - `Accepts![]` = `Dyn<dyn AcceptsNone>`
 /// - `Accepts![u32, u64]` = `Dyn<dyn AcceptsTwo<u32, u64>`
 ///
@@ -108,6 +109,8 @@ macro_rules! Accepts {
         $crate::Dyn<dyn $crate::AcceptsTen<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8, $ty9, $ty10>>
     };
 }
+
+pub use Accepts;
 
 #[cfg(test)]
 mod test {

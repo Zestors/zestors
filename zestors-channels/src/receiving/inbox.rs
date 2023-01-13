@@ -1,4 +1,4 @@
-use crate::*;
+use zestors_core::*;
 use event_listener::EventListener;
 use futures::{stream::FusedStream, Future, FutureExt, Stream};
 use std::{
@@ -8,6 +8,8 @@ use std::{
     task::{Context, Poll},
 };
 use thiserror::Error;
+
+use crate::inbox_channel::{InboxChannel, RecvRawFut};
 
 /// An Inbox is a non clone-able receiver part of a channel.
 ///
@@ -33,10 +35,6 @@ impl<P> Inbox<P> {
         }
     }
 
-    pub(crate) fn channel_ref(&self) -> &Arc<InboxChannel<P>> {
-        &self.channel
-    }
-
     /// Attempt to receive a message from the [Inbox]. If there is no message, this
     /// returns `None`.
     pub fn try_recv(&mut self) -> Result<P, TryRecvError> {
@@ -52,34 +50,118 @@ impl<P> Inbox<P> {
     }
 
     /// Get a new [Address] to the [Channel].
-    pub fn get_address(&self) -> Address<P>
+    pub fn get_address(&self) -> Address<Inbox<P>>
     where
         P: Protocol,
     {
         self.channel.add_address();
-        Address::new(self.channel.clone())
+        Address::from_channel(self.channel.clone())
     }
 
-    gen::channel_methods!();
+    // gen::channel_methods!();
 }
 
 impl<P> Inbox<P>
 where
-    P: DefinesChannel<Channel = InboxChannel<P>>,
+    P: DefineChannel<Channel = InboxChannel<P>>,
 {
-    gen::send_methods!(P);
+    // gen::send_methods!(P);
 }
 
-impl<P: Protocol + Send> SpawnsWith for Inbox<P> {
-    type ChannelDefinition = P;
+impl<P: Protocol> ActorRef for Inbox<P> {
+    type ChannelDefinition = Inbox<P>;
+
+    fn close(&self) -> bool {
+        todo!()
+    }
+
+    fn halt_some(&self, n: u32) {
+        todo!()
+    }
+
+    fn halt(&self) {
+        todo!()
+    }
+
+    fn process_count(&self) -> usize {
+        todo!()
+    }
+
+    fn msg_count(&self) -> usize {
+        todo!()
+    }
+
+    fn address_count(&self) -> usize {
+        todo!()
+    }
+
+    fn is_closed(&self) -> bool {
+        todo!()
+    }
+
+    fn is_bounded(&self) -> bool {
+        todo!()
+    }
+
+    fn capacity(&self) -> &Capacity {
+        todo!()
+    }
+
+    fn has_exited(&self) -> bool {
+        todo!()
+    }
+
+    fn actor_id(&self) -> ActorId {
+        todo!()
+    }
+
+    fn get_address(&self) -> Address<Self::ChannelDefinition> {
+        todo!()
+    }
+
+    fn try_send<M>(&self, msg: M) -> Result<Returned<M>, TrySendError<M>>
+    where
+        M: Message,
+        Self::ChannelDefinition: Accept<M>,
+    {
+        todo!()
+    }
+
+    fn send_now<M>(&self, msg: M) -> Result<Returned<M>, TrySendError<M>>
+    where
+        M: Message,
+        Self::ChannelDefinition: Accept<M>,
+    {
+        todo!()
+    }
+
+    fn send_blocking<M>(&self, msg: M) -> Result<Returned<M>, SendError<M>>
+    where
+        M: Message,
+        Self::ChannelDefinition: Accept<M>,
+    {
+        todo!()
+    }
+
+    fn send<M>(&self, msg: M) -> <Self::ChannelDefinition as Accept<M>>::SendFut<'_>
+    where
+        M: Message,
+        Self::ChannelDefinition: Accept<M>,
+    {
+        todo!()
+    }
+}
+
+impl<P: Protocol + Send> Spawn for Inbox<P> {
     type Config = Config;
 
     fn setup_channel(
         config: Config,
         inbox_count: usize,
         address_count: usize,
+        actor_id: ActorId,
     ) -> (
-        Arc<<Self::ChannelDefinition as DefinesChannel>::Channel>,
+        Arc<<Self::ChannelDefinition as DefineChannel>::Channel>,
         Link,
     ) {
         (
@@ -87,12 +169,13 @@ impl<P: Protocol + Send> SpawnsWith for Inbox<P> {
                 address_count,
                 inbox_count,
                 config.capacity,
+                actor_id,
             )),
             config.link,
         )
     }
 
-    fn new(channel: Arc<<Self::ChannelDefinition as DefinesChannel>::Channel>) -> Self {
+    fn new(channel: Arc<<Self::ChannelDefinition as DefineChannel>::Channel>) -> Self {
         Self::new(channel)
     }
 }

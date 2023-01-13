@@ -4,7 +4,7 @@ use super::*;
 use crate::{self as zestors};
 use futures::io;
 use tokio::net::TcpListener;
-use zestors_core::*;
+use crate::core::*;
 
 //------------------------------------------------------------------------------------------------
 //  Public

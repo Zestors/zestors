@@ -584,7 +584,23 @@ dependencies = [
  "tokio",
  "tokio-util",
  "uuid",
+ "zestors-channels",
  "zestors-codegen",
+ "zestors-core",
+ "zestors-distribution",
+ "zestors-request",
+ "zestors-supervision",
+]
+
+[[package]]
+name = "zestors-channels"
+version = "0.1.0"
+dependencies = [
+ "concurrent-queue",
+ "event-listener",
+ "futures",
+ "thiserror",
+ "tokio",
  "zestors-core",
 ]
 
@@ -608,4 +624,43 @@ dependencies = [
  "thiserror",
  "tokio",
  "zestors-codegen",
+]
+
+[[package]]
+name = "zestors-distribution"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bincode",
+ "bytes",
+ "futures",
+ "pin-project",
+ "serde",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "uuid",
+ "zestors-core",
+]
+
+[[package]]
+name = "zestors-request"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "thiserror",
+ "tokio",
+ "zestors-core",
+]
+
+[[package]]
+name = "zestors-supervision"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "pin-project",
+ "thiserror",
+ "tokio",
+ "zestors-core",
 ]

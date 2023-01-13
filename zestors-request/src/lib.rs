@@ -1,6 +1,5 @@
-use crate::protocol::MessageType;
 use tokio::sync::oneshot;
-
+use zestors_core::MessageType;
 mod into_recv;
 mod tx_rx;
 pub use {into_recv::*, tx_rx::*};

@@ -9,6 +9,6 @@ Additional processes can be spawned onto an actor with:
 - [`ChildPool::try_spawn`]
 
 # SpawnWith
-Every spawn function takes an [`FnOnce`] to be spawned. One argument to this [`FnOnce`] is an [`S: SpawnsWith`](SpawnsWith). This argument can be one of:
+Every spawn function takes an [`FnOnce`] to be spawned. One argument to this [`FnOnce`] is an [`S: Spawn`](Spawn). This argument can be one of:
 - [`Halter`] : This actor will not be able to receive any messages. The config to spawn this is a [`Link`].
 - [`Inbox<P> where P: Protocol`](Inbox) : This actor is able to receive messages according to the [`Protocol`]. The config to spawn this is a [`Config`].

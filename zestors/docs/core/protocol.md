@@ -6,12 +6,11 @@ Every message sent in zestors has to implement the [Message] trait. This trait s
 Normally, the [Message] trait is not implemented manually, but is instead derived with the [`#[derive(Message)]`](macro@Message) macro. Most standard rust types like `u32`, `String` or `Vec<String>` have this automatically implemented.
 
 # Protocol
-Every actor must have one [Protocol] which defines exactly which messages it can receive using the trait [`ProtocolAccepts<Message>`]. Normally, the [Protocol] and [ProtocolAccepts] traits are not implemented manually but can be derived using the [macro@protocol] macro.
+Every actor must have one [Protocol] which defines exactly which messages it can receive using the trait [`ProtocolFromInto<Message>`]. Normally, the [Protocol] and [ProtocolFromInto] traits are not implemented manually but can be derived using the [macro@protocol] macro.
 
 # Example defining a custom protocol
 
 ```rust
-# use zestors_core::zestors;
 use zestors::core::{Message, Rx, protocol};
 
 // This message does not require a reply.

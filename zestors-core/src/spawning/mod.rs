@@ -1,5 +1,3 @@
-#![doc = include_str!("../../docs/spawning.md")]
-#[allow(unused_imports)]
 use crate::*;
 use futures::Future;
 use std::sync::Arc;
@@ -10,8 +8,7 @@ use thiserror::Error;
 //------------------------------------------------------------------------------------------------
 
 /// Anything that can be passed along as the argument to the spawn function.
-pub trait SpawnsWith: Send + 'static {
-    type ChannelDefinition: DefinesChannel;
+pub trait Spawn: ActorRef + Send + 'static {
     type Config;
 
     /// Sets up the channel, preparing for x processes to be spawned.
@@ -19,13 +16,14 @@ pub trait SpawnsWith: Send + 'static {
         config: Self::Config,
         process_count: usize,
         address_count: usize,
+        actor_id: ActorId,
     ) -> (
-        Arc<<Self::ChannelDefinition as DefinesChannel>::Channel>,
+        Arc<<Self::ChannelDefinition as DefineChannel>::Channel>,
         Link,
     );
 
     /// Creates another inbox from the channel, without adding anything to its process count.
-    fn new(channel: Arc<<Self::ChannelDefinition as DefinesChannel>::Channel>) -> Self;
+    fn new(channel: Arc<<Self::ChannelDefinition as DefineChannel>::Channel>) -> Self;
 }
 
 //------------------------------------------------------------------------------------------------
@@ -42,15 +40,15 @@ pub fn spawn<S, E, Fun, Fut>(
 where
     Fun: FnOnce(S) -> Fut + Send + 'static,
     Fut: Future<Output = E> + Send,
-    S: SpawnsWith,
+    S: Spawn,
     E: Send + 'static,
 {
-    let (channel, link) = S::setup_channel(config, 1, 1);
+    let (channel, link) = S::setup_channel(config, 1, 1, ActorId::generate_new());
     let inbox = S::new(channel.clone());
     let handle = tokio::task::spawn(async move { function(inbox).await });
     (
         Child::new(channel.clone(), handle, link),
-        Address::new(channel),
+        Address::from_channel(channel),
     )
 }
 
@@ -64,15 +62,15 @@ pub fn spawn_one<S, E, Fun, Fut>(
 where
     Fun: FnOnce(S) -> Fut + Send + 'static,
     Fut: Future<Output = E> + Send,
-    S: SpawnsWith,
+    S: Spawn,
     E: Send + 'static,
 {
-    let (channel, link) = S::setup_channel(config, 1, 1);
+    let (channel, link) = S::setup_channel(config, 1, 1, ActorId::generate_new());
     let inbox = S::new(channel.clone());
     let handle = tokio::task::spawn(async move { function(inbox).await });
     (
         Child::new(channel.clone(), vec![handle], link),
-        Address::new(channel),
+        Address::from_channel(channel),
     )
 }
 
@@ -87,11 +85,11 @@ pub fn spawn_many<S, E, I, Fun, Fut>(
 where
     Fun: FnOnce(I, S) -> Fut + Clone + Send + 'static,
     Fut: Future<Output = E> + Send,
-    S: SpawnsWith,
+    S: Spawn,
     E: Send + 'static,
     I: Send + 'static,
 {
-    let (channel, link) = S::setup_channel(config, iter.len(), 1);
+    let (channel, link) = S::setup_channel(config, iter.len(), 1, ActorId::generate_new());
     let handles = iter
         .map(|i| {
             let fun = function.clone();
@@ -101,7 +99,7 @@ where
         .collect::<Vec<_>>();
     (
         Child::new(channel.clone(), handles, link),
-        Address::new(channel),
+        Address::from_channel(channel),
     )
 }
 

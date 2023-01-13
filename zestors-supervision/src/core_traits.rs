@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::*;
+use zestors_core::*;
 use async_trait::async_trait;
 use futures::{future::BoxFuture, Future};
 use std::{
@@ -13,7 +13,7 @@ use std::{
 
 pub trait Spawnable {
     type Exit: Send + 'static;
-    type ActorType: DefinesChannel + 'static;
+    type ActorType: DefineChannel + 'static;
     type Ref: Send + 'static;
 
     fn spawn(self) -> (Child<Self::Exit, Self::ActorType>, Self::Ref);
@@ -25,7 +25,7 @@ pub trait Spawnable {
 
 pub trait Startable {
     type Exit: Send + 'static;
-    type ActorType: DefinesChannel + 'static;
+    type ActorType: DefineChannel + 'static;
     type Ref: Send + 'static;
 
     fn poll_start(
@@ -63,7 +63,7 @@ pub trait Supervisable: Startable {
 
 pub trait SupervisableV2 {
     type Exit: Send + 'static;
-    type ActorType: DefinesChannel + 'static;
+    type ActorType: DefineChannel + 'static;
     type Ref: Send + 'static;
 
     fn poll_supervise(self: Pin<&mut Self>, cx: &mut Context) -> Poll<()>;

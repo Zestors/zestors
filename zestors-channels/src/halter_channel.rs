@@ -1,5 +1,6 @@
-use crate::*;
+use zestors_core::*;
 use event_listener::{Event, EventListener};
+use zestors_core::ActorId;
 use std::{
     any::Any,
     sync::{
@@ -7,6 +8,8 @@ use std::{
         Arc,
     },
 };
+
+use crate::halter::Halter;
 
 /// A [Channel] that does not have any kind of inbox, so it cannot receive messages.
 #[derive(Debug)]
@@ -19,13 +22,25 @@ pub struct HalterChannel {
     halt_event: Event,
 }
 
+impl DefineChannel for Halter {
+    type Channel = HalterChannel;
+
+    fn into_dyn_channel(channel: Arc<Self::Channel>) -> Arc<dyn DynChannel> {
+        channel
+    }
+}
+
+impl DefineSizedChannel for Halter {
+    type Spawned = Halter;
+}
+
 impl HalterChannel {
-    pub(crate) fn new(address_count: usize, halter_count: usize) -> Self {
+    pub(crate) fn new(address_count: usize, halter_count: usize, actor_id: ActorId) -> Self {
         Self {
             address_count: AtomicUsize::new(address_count),
             halter_count: AtomicUsize::new(halter_count),
             to_halt: AtomicI32::new(0),
-            actor_id: ActorId::generate_new(),
+            actor_id,
             exit_event: Event::new(),
             halt_event: Event::new(),
         }

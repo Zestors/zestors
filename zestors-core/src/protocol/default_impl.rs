@@ -164,7 +164,7 @@ impl Protocol for () {
     }
 }
 
-impl ProtocolAccepts<()> for () {
+impl ProtocolFromInto<()> for () {
     fn from_msg(msg: Sent<()>) -> Self
     where
         Self: Sized,

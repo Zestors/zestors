@@ -29,7 +29,7 @@ fn impl_accepts(item: &ItemEnum, variants: &Vec<ProtocolVariant>) -> Result<Toke
             let variant_ty = &variant.ty;
             let variant_ident = &variant.ident;
             quote! {
-                impl #impl_generics zestors::core::protocol::ProtocolAccepts<#variant_ty> for #ident #ty_generics #where_clause {
+                impl #impl_generics zestors::core::protocol::ProtocolFromInto<#variant_ty> for #ident #ty_generics #where_clause {
                     fn from_msg(
                         msg: zestors::core::protocol::Sent<#variant_ty>
                     ) -> Self {

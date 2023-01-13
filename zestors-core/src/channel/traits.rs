@@ -1,9 +1,9 @@
 use crate::*;
 use event_listener::EventListener;
-use futures::{future::BoxFuture};
+use futures::future::BoxFuture;
 use std::{
     any::{Any, TypeId},
-    fmt::{Debug},
+    fmt::Debug,
     sync::Arc,
 };
 
@@ -126,27 +126,30 @@ impl dyn DynChannel {
         }
     }
 
-    pub(crate) async fn send_unchecked<M>(
+    pub(crate) fn send_unchecked<M>(
         &self,
         msg: M,
-    ) -> Result<Returned<M>, SendUncheckedError<M>>
+    ) -> BoxFuture<'_, Result<Returned<M>, SendUncheckedError<M>>>
     where
-        M: Message,
+        <M::Type as MessageType<M>>::Returned: Send,
+        M: Message + Send + 'static,
         Sent<M>: Send + 'static,
     {
-        let (sends, returns) = <M::Type as MessageType<M>>::create(msg);
-        let res = self.send_boxed(BoxedMessage::new::<M>(sends)).await;
+        Box::pin(async move {
+            let (sends, returns) = <M::Type as MessageType<M>>::create(msg);
+            let res = self.send_boxed(BoxedMessage::new::<M>(sends)).await;
 
-        match res {
-            Ok(()) => Ok(returns),
-            Err(e) => match e {
-                SendUncheckedError::Closed(boxed) => Err(SendUncheckedError::Closed(
-                    boxed.downcast_cancel(returns).unwrap(),
-                )),
-                SendUncheckedError::NotAccepted(boxed) => Err(SendUncheckedError::NotAccepted(
-                    boxed.downcast_cancel(returns).unwrap(),
-                )),
-            },
-        }
+            match res {
+                Ok(()) => Ok(returns),
+                Err(e) => match e {
+                    SendUncheckedError::Closed(boxed) => Err(SendUncheckedError::Closed(
+                        boxed.downcast_cancel(returns).unwrap(),
+                    )),
+                    SendUncheckedError::NotAccepted(boxed) => Err(SendUncheckedError::NotAccepted(
+                        boxed.downcast_cancel(returns).unwrap(),
+                    )),
+                },
+            }
+        })
     }
 }

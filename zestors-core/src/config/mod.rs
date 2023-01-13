@@ -1,7 +1,3 @@
-#![doc = include_str!("../../docs/config.md")]
-#[allow(unused_imports)]
-use crate::*;
-
 use std::{
     sync::atomic::{AtomicU32, AtomicU64, Ordering},
     time::Duration,
@@ -12,7 +8,7 @@ use std::{
 ///
 /// # Example
 /// ```no_run
-/// use zestors_core::*;
+/// # use zestors_core::*;
 /// Config {
 ///     link: Link::default(),
 ///     capacity: Capacity::default(),
@@ -239,7 +235,7 @@ impl BackPressure {
         }
     }
 
-    pub(crate) fn get_timeout(&self, msg_count: usize) -> Option<Duration> {
+    pub fn get_timeout(&self, msg_count: usize) -> Option<Duration> {
         if msg_count < self.starts_at {
             return None;
         }

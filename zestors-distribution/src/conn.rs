@@ -1,8 +1,7 @@
 use std::net::SocketAddr;
 
 use crate::{self as zestors, core::*};
-use tokio::net::{TcpStream};
-
+use tokio::net::TcpStream;
 
 use super::ConnectError;
 

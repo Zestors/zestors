@@ -176,20 +176,23 @@ impl<'a, M> Future for SendRawFut<'a, M> {
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use std::{sync::Arc, time::Duration};
-
     use tokio::time::Instant;
-
-    use crate::*;
 
     #[test]
     fn try_send_with_space() {
-        let channel = InboxChannel::<()>::new(1, 1, Capacity::Bounded(10));
+        let channel = InboxChannel::<()>::new(1, 1, Capacity::Bounded(10), ActorId::generate_new());
         channel.try_send_raw(()).unwrap();
         channel.send_raw_now(()).unwrap();
         assert_eq!(channel.msg_count(), 2);
 
-        let channel = InboxChannel::<()>::new(1, 1, Capacity::Unbounded(BackPressure::disabled()));
+        let channel = InboxChannel::<()>::new(
+            1,
+            1,
+            Capacity::Unbounded(BackPressure::disabled()),
+            ActorId::generate_new(),
+        );
         channel.try_send_raw(()).unwrap();
         channel.send_raw_now(()).unwrap();
         assert_eq!(channel.msg_count(), 2);
@@ -201,6 +204,7 @@ mod test {
             1,
             1,
             Capacity::Unbounded(BackPressure::linear(0, Duration::from_secs(1))),
+            ActorId::generate_new(),
         );
         assert_eq!(channel.try_send_raw(()), Err(TrySendError::Full(())));
         assert_eq!(channel.send_raw_now(()), Ok(()));
@@ -209,7 +213,7 @@ mod test {
 
     #[test]
     fn try_send_bounded_full() {
-        let channel = InboxChannel::<()>::new(1, 1, Capacity::Bounded(1));
+        let channel = InboxChannel::<()>::new(1, 1, Capacity::Bounded(1), ActorId::generate_new());
         channel.try_send_raw(()).unwrap();
         assert_eq!(channel.try_send_raw(()), Err(TrySendError::Full(())));
         assert_eq!(channel.send_raw_now(()), Err(TrySendError::Full(())));
@@ -218,11 +222,16 @@ mod test {
 
     #[tokio::test]
     async fn send_with_space() {
-        let channel = InboxChannel::<()>::new(1, 1, Capacity::Bounded(10));
+        let channel = InboxChannel::<()>::new(1, 1, Capacity::Bounded(10), ActorId::generate_new());
         channel.send_raw(()).await.unwrap();
         assert_eq!(channel.msg_count(), 1);
 
-        let channel = InboxChannel::<()>::new(1, 1, Capacity::Unbounded(BackPressure::disabled()));
+        let channel = InboxChannel::<()>::new(
+            1,
+            1,
+            Capacity::Unbounded(BackPressure::disabled()),
+            ActorId::generate_new(),
+        );
         channel.send_raw(()).await.unwrap();
         assert_eq!(channel.msg_count(), 1);
     }
@@ -233,6 +242,7 @@ mod test {
             1,
             1,
             Capacity::Unbounded(BackPressure::linear(0, Duration::from_millis(1))),
+            ActorId::generate_new(),
         );
         let time = Instant::now();
         channel.send_raw(()).await.unwrap();
@@ -244,7 +254,12 @@ mod test {
 
     #[tokio::test]
     async fn send_bounded_full() {
-        let channel = Arc::new(InboxChannel::<()>::new(1, 1, Capacity::Bounded(1)));
+        let channel = Arc::new(InboxChannel::<()>::new(
+            1,
+            1,
+            Capacity::Bounded(1),
+            ActorId::generate_new(),
+        ));
         let channel_clone = channel.clone();
 
         tokio::task::spawn(async move {

@@ -1,7 +1,8 @@
 use crate::*;
 use event_listener::EventListener;
-use futures::{Future, FutureExt};
+use futures::{future::BoxFuture, Future, FutureExt};
 use std::{
+    any::TypeId,
     fmt::Debug,
     mem::ManuallyDrop,
     pin::Pin,
@@ -20,21 +21,20 @@ use std::{
 ///
 /// An address can be awaited which returns once the actor exits.
 #[derive(Debug)]
-pub struct Address<T: DefinesChannel = Accepts![]> {
-    channel: Arc<T::Channel>,
+pub struct Address<C: DefineChannel = Accepts![]> {
+    channel: Arc<C::Channel>,
     exit_listener: Option<EventListener>,
 }
 
-impl<T: DefinesChannel> Address<T> {
-    /// Does not increment the address-count.
-    pub(crate) fn new(channel: Arc<T::Channel>) -> Self {
+impl<C: DefineChannel> Address<C> {
+    pub fn from_channel(channel: Arc<C::Channel>) -> Self {
         Self {
             channel,
             exit_listener: None,
         }
     }
 
-    fn into_parts(self) -> (Arc<T::Channel>, Option<EventListener>) {
+    fn into_parts(self) -> (Arc<C::Channel>, Option<EventListener>) {
         let manually_drop = ManuallyDrop::new(self);
         unsafe {
             let channel = std::ptr::read(&manually_drop.channel);
@@ -43,47 +43,47 @@ impl<T: DefinesChannel> Address<T> {
         }
     }
 
-    gen::channel_methods!();
-    gen::send_methods!(T);
-}
-
-impl<T: DefinesDynChannel> Address<T> {
-    pub fn transform_unchecked<T2>(self) -> Address<T2>
+    pub fn transform_unchecked_into<T>(self) -> Address<T>
     where
-        T2: DefinesDynChannel,
+        T: DefineDynChannel,
     {
         let (channel, exit_listener) = self.into_parts();
         Address {
-            channel,
+            channel: C::into_dyn_channel(channel),
             exit_listener,
         }
     }
 
-    pub fn transform<T2>(self) -> Address<T2>
+    pub fn transform_into<T>(self) -> Address<T>
     where
-        T: TransformInto<T2>,
-        T2: DefinesDynChannel,
+        C: TransformInto<T>,
+        T: DefineDynChannel,
     {
-        self.transform_unchecked()
+        self.transform_unchecked_into()
     }
 
-    pub fn try_transform<T2>(self) -> Result<Address<T2>, Self>
+    pub fn into_dyn(self) -> Address {
+        self.transform_unchecked_into()
+    }
+
+    pub fn try_transform_into<T>(self) -> Result<Address<T>, Self>
     where
-        T2: DefinesDynChannel,
+        T: DefineDynChannel,
+        C: DefineDynChannel,
     {
-        if T::msg_ids().iter().all(|id| self.accepts(id)) {
-            Ok(self.transform_unchecked())
+        if C::msg_ids().iter().all(|id| self.accepts(id)) {
+            Ok(self.transform_unchecked_into())
         } else {
             Err(self)
         }
     }
 
-    ///Whether the actor accepts a message of the given type-id.
-    pub fn accepts(&self, id: &std::any::TypeId) -> bool {
-        self.channel.accepts(id)
-    }
-
-    pub fn downcast<P: Protocol>(self) -> Result<Address<P>, Self> {
+    pub fn downcast<T>(self) -> Result<Address<T>, Self>
+    where
+        T: DefineChannel,
+        T::Channel: Sized + 'static,
+        C: DefineDynChannel,
+    {
         let (channel, exit_listener) = self.into_parts();
         match channel.clone().into_any().downcast() {
             Ok(channel) => Ok(Address {
@@ -96,25 +96,113 @@ impl<T: DefinesDynChannel> Address<T> {
             }),
         }
     }
-    gen::unchecked_send_methods!();
 }
 
-impl<P: Protocol> Address<P> {
-    /// Convert the `Address<Channel<M>>` into an `Address`.
-    pub fn into_dyn<T>(self) -> Address<T>
+impl<T: DefineChannel> ActorRef for Address<T> {
+    type ChannelDefinition = T;
+    fn close(&self) -> bool {
+        self.channel.close()
+    }
+    fn halt_some(&self, n: u32) {
+        self.channel.halt_some(n)
+    }
+    fn halt(&self) {
+        self.channel.halt()
+    }
+    fn process_count(&self) -> usize {
+        self.channel.process_count()
+    }
+    fn msg_count(&self) -> usize {
+        self.channel.msg_count()
+    }
+    fn address_count(&self) -> usize {
+        self.channel.address_count()
+    }
+    fn is_closed(&self) -> bool {
+        self.channel.is_closed()
+    }
+    fn is_bounded(&self) -> bool {
+        self.channel.capacity().is_bounded()
+    }
+    fn capacity(&self) -> &Capacity {
+        self.channel.capacity()
+    }
+    fn has_exited(&self) -> bool {
+        self.channel.has_exited()
+    }
+    fn actor_id(&self) -> ActorId {
+        self.channel.actor_id()
+    }
+    fn try_send<M>(&self, msg: M) -> Result<Returned<M>, TrySendError<M>>
     where
-        P: TransformInto<T>,
-        T: DefinesDynChannel,
+        M: Message,
+        Self::ChannelDefinition: Accept<M>,
     {
-        let (channel, exit_listener) = self.into_parts();
-        Address {
-            channel,
-            exit_listener,
-        }
+        <Self::ChannelDefinition as Accept<M>>::try_send(&self.channel, msg)
+    }
+    fn send_now<M>(&self, msg: M) -> Result<Returned<M>, TrySendError<M>>
+    where
+        M: Message,
+        Self::ChannelDefinition: Accept<M>,
+    {
+        <Self::ChannelDefinition as Accept<M>>::send_now(&self.channel, msg)
+    }
+    fn send_blocking<M>(&self, msg: M) -> Result<Returned<M>, SendError<M>>
+    where
+        M: Message,
+        Self::ChannelDefinition: Accept<M>,
+    {
+        <Self::ChannelDefinition as Accept<M>>::send_blocking(&self.channel, msg)
+    }
+    fn send<M>(&self, msg: M) -> <Self::ChannelDefinition as Accept<M>>::SendFut<'_>
+    where
+        M: Message,
+        Self::ChannelDefinition: Accept<M>,
+    {
+        <Self::ChannelDefinition as Accept<M>>::send(&self.channel, msg)
+    }
+
+    fn get_address(&self) -> Address<Self::ChannelDefinition> {
+        self.clone()
     }
 }
 
-impl<T: DefinesChannel> Future for Address<T> {
+impl<T: DefineDynChannel> DynActorRef for Address<T> {
+    fn try_send_unchecked<M>(&self, msg: M) -> Result<Returned<M>, TrySendUncheckedError<M>>
+    where
+        M: Message + Send + 'static,
+        Sent<M>: Send + 'static,
+    {
+        self.channel.try_send_unchecked(msg)
+    }
+    fn send_now_unchecked<M>(&self, msg: M) -> Result<Returned<M>, TrySendUncheckedError<M>>
+    where
+        M: Message + Send + 'static,
+        Sent<M>: Send + 'static,
+    {
+        self.channel.send_now_unchecked(msg)
+    }
+    fn send_blocking_unchecked<M>(&self, msg: M) -> Result<Returned<M>, SendUncheckedError<M>>
+    where
+        M: Message + Send + 'static,
+        Sent<M>: Send + 'static,
+    {
+        self.channel.send_blocking_unchecked(msg)
+    }
+    fn send_unchecked<M>(&self, msg: M) -> BoxFuture<'_, Result<Returned<M>, SendUncheckedError<M>>>
+    where
+        <M::Type as MessageType<M>>::Returned: Send,
+        M: Message + Send + 'static,
+        Sent<M>: Send + 'static,
+    {
+        self.channel.send_unchecked(msg)
+    }
+    fn accepts(&self, id: &TypeId) -> bool {
+        self.channel.accepts(id)
+    }
+}
+
+impl<T: DefineChannel> Future for Address<T> {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -133,9 +221,9 @@ impl<T: DefinesChannel> Future for Address<T> {
     }
 }
 
-impl<T: DefinesChannel> Unpin for Address<T> {}
+impl<T: DefineChannel> Unpin for Address<T> {}
 
-impl<T: DefinesChannel> Clone for Address<T> {
+impl<T: DefineChannel> Clone for Address<T> {
     fn clone(&self) -> Self {
         self.channel.add_address();
         Self {
@@ -145,7 +233,7 @@ impl<T: DefinesChannel> Clone for Address<T> {
     }
 }
 
-impl<T: DefinesChannel> Drop for Address<T> {
+impl<T: DefineChannel> Drop for Address<T> {
     fn drop(&mut self) {
         self.channel.remove_address();
     }
@@ -155,31 +243,31 @@ impl<T: DefinesChannel> Drop for Address<T> {
 //  IntoAddress
 //------------------------------------------------------------------------------------------------
 
-// todo: Make this like IntoChannel
-pub trait IntoAddress<T>
-where
-    T: DefinesChannel,
-{
-    fn into_address(self) -> Address<T>;
-}
+// // todo: Make this like IntoChannel
+// pub trait IntoAddress<T>
+// where
+//     T: DefineChannel,
+// {
+//     fn into_address(self) -> Address<T>;
+// }
 
-impl<P, T> IntoAddress<T> for Address<P>
-where
-    P: Protocol + TransformInto<T>,
-    T: DefinesDynChannel,
-{
-    fn into_address(self) -> Address<T> {
-        self.into_dyn()
-    }
-}
+// impl<P, T> IntoAddress<T> for Address<P>
+// where
+//     P: Protocol + TransformInto<T>,
+//     T: DefineDynChannel,
+// {
+//     fn into_address(self) -> Address<T> {
+//         self.into_dyn()
+//     }
+// }
 
-impl<T, D> IntoAddress<T> for Address<Dyn<D>>
-where
-    T: DefinesDynChannel,
-    D: ?Sized,
-    Dyn<D>: DefinesDynChannel + TransformInto<T>,
-{
-    fn into_address(self) -> Address<T> {
-        self.transform()
-    }
-}
+// impl<T, D> IntoAddress<T> for Address<Dyn<D>>
+// where
+//     T: DefineDynChannel,
+//     D: ?Sized,
+//     Dyn<D>: DefineDynChannel + TransformInto<T>,
+// {
+//     fn into_address(self) -> Address<T> {
+//         self.transform_into()
+//     }
+// }

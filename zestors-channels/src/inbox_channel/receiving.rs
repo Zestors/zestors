@@ -2,6 +2,8 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use zestors_core::*;
+use crate::receiving::{TryRecvError, RecvError};
 
 use super::*;
 use concurrent_queue::PopError;
@@ -128,11 +130,11 @@ impl<'a, M> Drop for RecvRawFut<'a, M> {
 mod test {
     use std::{future::ready, sync::Arc, time::Duration};
 
-    use crate::*;
+    use super::*;
 
     #[test]
     fn try_recv() {
-        let channel = InboxChannel::<()>::new(1, 1, Capacity::default());
+        let channel = InboxChannel::<()>::new(1, 1, Capacity::default(), ActorId::generate_new());
         channel.push_msg(()).unwrap();
         channel.push_msg(()).unwrap();
 
@@ -144,7 +146,7 @@ mod test {
 
     #[test]
     fn try_recv_closed() {
-        let channel = InboxChannel::<()>::new(1, 1, Capacity::default());
+        let channel = InboxChannel::<()>::new(1, 1, Capacity::default(), ActorId::generate_new());
         channel.push_msg(()).unwrap();
         channel.push_msg(()).unwrap();
         channel.close();
@@ -163,7 +165,7 @@ mod test {
 
     #[test]
     fn try_recv_halt() {
-        let channel = InboxChannel::<()>::new(1, 1, Capacity::default());
+        let channel = InboxChannel::<()>::new(1, 1, Capacity::default(), ActorId::generate_new());
         channel.push_msg(()).unwrap();
         channel.push_msg(()).unwrap();
         channel.halt_some(1);
@@ -177,7 +179,7 @@ mod test {
 
     #[tokio::test]
     async fn recv_immedeate() {
-        let channel = InboxChannel::<()>::new(1, 1, Capacity::default());
+        let channel = InboxChannel::<()>::new(1, 1, Capacity::default(), ActorId::generate_new());
         let mut listener = None;
         channel.push_msg(()).unwrap();
         channel.close();
@@ -191,7 +193,12 @@ mod test {
 
     #[tokio::test]
     async fn recv_delayed() {
-        let channel = Arc::new(InboxChannel::<()>::new(1, 1, Capacity::default()));
+        let channel = Arc::new(InboxChannel::<()>::new(
+            1,
+            1,
+            Capacity::default(),
+            ActorId::generate_new(),
+        ));
         let channel_clone = channel.clone();
 
         let handle = tokio::task::spawn(async move {
@@ -211,7 +218,12 @@ mod test {
 
     #[tokio::test]
     async fn dropping_recv_notifies_next() {
-        let channel = Arc::new(InboxChannel::<()>::new(1, 1, Capacity::default()));
+        let channel = Arc::new(InboxChannel::<()>::new(
+            1,
+            1,
+            Capacity::default(),
+            ActorId::generate_new(),
+        ));
         let channel_clone = channel.clone();
 
         let handle = tokio::task::spawn(async move {

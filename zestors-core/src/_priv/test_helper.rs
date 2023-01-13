@@ -33,6 +33,7 @@ macro_rules! pooled_basic_actor {
     };
 }
 pub(crate) use pooled_basic_actor;
+use zestors_codegen::protocol;
 
 #[protocol]
 pub(crate) enum U32Protocol {
