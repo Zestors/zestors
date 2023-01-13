@@ -35,7 +35,10 @@ impl SpawnsWith for Halter {
         link: Self::Config,
         halter_count: usize,
         address_count: usize,
-    ) -> (Arc<<Self::ChannelDefinition as DefinesChannel>::Channel>, Link) {
+    ) -> (
+        Arc<<Self::ChannelDefinition as DefinesChannel>::Channel>,
+        Link,
+    ) {
         (
             Arc::new(HalterChannel::new(address_count, halter_count)),
             link,

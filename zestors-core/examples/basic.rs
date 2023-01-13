@@ -29,7 +29,7 @@
 
 //     tokio::time::sleep(Duration::from_millis(10)).await;
 
-//     // And finally shut the actor down, 
+//     // And finally shut the actor down,
 //     // we give it 1 second to exit before aborting it.
 //     match child.shutdown(Duration::from_secs(1)).await {
 //         Ok(exit) => {

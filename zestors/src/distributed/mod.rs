@@ -8,7 +8,7 @@ use zestors_core::SendRecvError;
 #[derive(Debug)]
 pub enum ConnectError {
     Todo,
-    NodeDown
+    NodeDown,
 }
 
 impl<T> From<SendRecvError<T>> for ConnectError {

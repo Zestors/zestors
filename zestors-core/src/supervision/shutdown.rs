@@ -1,11 +1,12 @@
 use crate::*;
 use futures::{Future, FutureExt, Stream, StreamExt};
-use thiserror::Error;
 use std::{
+    any::Any,
     pin::Pin,
     task::{Context, Poll},
-    time::Duration, any::Any,
+    time::Duration,
 };
+use thiserror::Error;
 use tokio::time::Sleep;
 
 //------------------------------------------------------------------------------------------------
@@ -160,8 +161,7 @@ mod test {
 
     #[tokio::test]
     async fn shutdown_pool_success() {
-        let (mut child, _addr) =
-        spawn_many(0..3, Config::default(), pooled_basic_actor!());
+        let (mut child, _addr) = spawn_many(0..3, Config::default(), pooled_basic_actor!());
 
         let results = child
             .shutdown(Duration::from_millis(5))
@@ -194,11 +194,10 @@ mod test {
 
     #[tokio::test]
     async fn shutdown_pool_mixed() {
-        let (mut child, _addr) =
-            spawn_one(Config::default(), |_inbox: Inbox<()>| async move {
-                pending::<()>().await;
-                unreachable!()
-            });
+        let (mut child, _addr) = spawn_one(Config::default(), |_inbox: Inbox<()>| async move {
+            pending::<()>().await;
+            unreachable!()
+        });
         child.spawn(basic_actor!()).unwrap();
         child
             .spawn(|_inbox: Inbox<()>| async move {

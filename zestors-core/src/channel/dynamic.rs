@@ -68,7 +68,7 @@ define_dynamic_protocol_types! {
 /// Macro for writing dynamic [channel definitions](DefinesChannel):
 /// - `Accepts![]` = `Dyn<dyn AcceptsNone>`
 /// - `Accepts![u32, u64]` = `Dyn<dyn AcceptsTwo<u32, u64>`
-/// 
+///
 /// These macros can be used as a generic argument to [children](Child) and [addresses](Address):
 /// - `Address<Accepts![u32, String]>`
 /// - `Child<_, Accepts![u32, String], _>`

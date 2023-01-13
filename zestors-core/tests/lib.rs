@@ -1,8 +1,8 @@
 use futures::{future::pending, StreamExt};
-use zestors_codegen::protocol;
 use std::{collections::HashSet, time::Duration};
-use zestors_core::*;
+use zestors_codegen::protocol;
 use zestors_core::zestors;
+use zestors_core::*;
 
 #[tokio::test]
 async fn spawn_and_abort() {
