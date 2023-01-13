@@ -13,7 +13,7 @@ fn fn_only(fun: impl Fn() + Send + 'static) {
     fun()
 }
 
-fn fn_pointer(fun: fn()) {}
+fn fn_pointer(_fun: fn()) {}
 
 // #[test]
 fn test() {

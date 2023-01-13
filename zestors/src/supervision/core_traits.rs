@@ -5,7 +5,6 @@ use futures::{future::BoxFuture, Future};
 use std::{
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
 };
 
 //------------------------------------------------------------------------------------------------
@@ -122,7 +121,7 @@ async fn test() {
     let fut1 = string.test();
     let _res = fut1.await;
 
-    let mut map_test = MapTest(string, |x| true);
+    let mut map_test = MapTest(string, |_x| true);
     let fut2 = map_test.test();
     let _res = fut2.await;
 }

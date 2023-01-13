@@ -1,11 +1,9 @@
 use crate::*;
 use event_listener::EventListener;
-use futures::{future::BoxFuture, Future};
+use futures::{future::BoxFuture};
 use std::{
     any::{Any, TypeId},
-    fmt::{Debug, Display},
-    pin::Pin,
-    sync::atomic::{AtomicU64, Ordering},
+    fmt::{Debug},
     sync::Arc,
 };
 

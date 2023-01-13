@@ -161,7 +161,7 @@ impl DynChannel for HalterChannel {
         Box::pin(async move { Err(SendUncheckedError::NotAccepted(boxed)) })
     }
 
-    fn accepts(&self, id: &std::any::TypeId) -> bool {
+    fn accepts(&self, _id: &std::any::TypeId) -> bool {
         false
     }
 
