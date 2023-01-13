@@ -1,30 +1,26 @@
 use crate::*;
 use std::{any::TypeId, marker::PhantomData, sync::Arc};
 
-/// Signifies an actor that is dynamically typed by the messages that it accepts,
-/// for example:
-/// - `Address<Dyn<dyn AcceptsNone>>`
-/// - `Address<Dyn<dyn AcceptsTwo<u32, u64>>`
+/// Specifies a dynamic [Channel] which accepts certain messages:
+/// - `Dyn<dyn AcceptsNone>` -> Accepts no messages
+/// - `Dyn<dyn AcceptsTwo<u32, u64>` -> Accepts two messages:` u32` and `u64`.
 ///
-/// For most uses it is easier to use the [Accepts!] macro, for which the
-/// examples above become:
-/// - `Address<Accepts![]>`
-/// - `Address<Accepts![u32, u64]>`
-///
-/// This means that `Dyn<dyn AcceptsNone>` == `Accepts![]`, and they can be used
-/// interchangably.
+/// In general, it is easier to use the [Accepts!] macro, for which the examples above become:
+/// - `Accepts![]`
+/// - `Accepts![u32, u64]`
 pub struct Dyn<T: ?Sized>(PhantomData<*const T>);
 
 unsafe impl<T: ?Sized> Send for Dyn<T> {}
 unsafe impl<T: ?Sized> Sync for Dyn<T> {}
 
+/// Indicates that a [channel definition](DefinesChannel) can transform into another one.
 pub trait TransformInto<T: DefinesDynChannel>: DefinesChannel {
     fn transform_into(channel: Arc<Self::Channel>) -> Arc<T::Channel>;
 }
 
 macro_rules! define_dynamic_protocol_types {
     ($($ident:ident $(<$( $ty:ident ),*>)?),*) => {$(
-        /// One of the dynamic address-types, see [Dyn] for more documentation.
+        /// See [`Dyn`].
         pub trait $ident< $($($ty: Message,)?)*>: $($( ProtocolAccepts<$ty> + )?)* {}
 
         impl<$($($ty: Message + 'static,)?)*> DefinesDynChannel for Dyn<dyn $ident< $($($ty,)?)*>> {
@@ -69,17 +65,13 @@ define_dynamic_protocol_types! {
     AcceptsTen<M1, M2, M3, M4, M5, M6, M7, M8, M9, M10>
 }
 
-/// This macro makes it easier to write [`dynamic protocol types`](Dyn). Instead of writing for
-/// example:
-/// - `Address<Dyn<dyn AcceptsNone>>`
-/// - `Address<Dyn<dyn AcceptsTwo<u32, u64>>`
-///
-/// This can now be written as:
-/// - `Address<AcceptsAll![]>`
-/// - `Address<AcceptsAll![u32, u64]>`
-///
-/// This means that `Dyn<dyn AcceptsNone>` == `AcceptsAll![]`, and they can be used
-/// interchangably.
+/// Macro for writing dynamic [channel definitions](DefinesChannel):
+/// - `Accepts![]` = `Dyn<dyn AcceptsNone>`
+/// - `Accepts![u32, u64]` = `Dyn<dyn AcceptsTwo<u32, u64>`
+/// 
+/// These macros can be used as a generic argument to [children](Child) and [addresses](Address):
+/// - `Address<Accepts![u32, String]>`
+/// - `Child<_, Accepts![u32, String], _>`
 #[macro_export]
 macro_rules! Accepts {
     () => {
@@ -119,10 +111,17 @@ macro_rules! Accepts {
 
 #[cfg(test)]
 mod test {
-    use crate::{AcceptsOne, AcceptsTwo, Dyn};
-
-    type _1 = Accepts![u32];
-    type _2 = Dyn<dyn AcceptsOne<u32>>;
-    type _3 = Accepts![u32, ()];
-    type _4 = Dyn<dyn AcceptsTwo<u32, ()>>;
+    #[test]
+    fn dynamic_definitions_compile() {
+        type _1 = Accepts![()];
+        type _2 = Accepts![(), ()];
+        type _3 = Accepts![(), (), ()];
+        type _4 = Accepts![(), (), (), ()];
+        type _5 = Accepts![(), (), (), (), ()];
+        type _6 = Accepts![(), (), (), (), (), ()];
+        type _7 = Accepts![(), (), (), (), (), (), ()];
+        type _8 = Accepts![(), (), (), (), (), (), (), ()];
+        type _9 = Accepts![(), (), (), (), (), (), (), (), ()];
+        type _10 = Accepts![(), (), (), (), (), (), (), (), (), ()];
+    }
 }

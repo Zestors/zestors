@@ -3,6 +3,8 @@ use std::net::SocketAddr;
 use crate::{self as zestors, *};
 use futures::io;
 use tokio::net::TcpListener;
+use zestors_core::*;
+use super::*;
 
 //------------------------------------------------------------------------------------------------
 //  Public
@@ -20,7 +22,7 @@ impl Node {
     pub async fn spawn(sock: SocketAddr) -> Result<(Child<NodeExit>, Node), io::Error> {
         let listener = TcpListener::bind(sock).await?;
 
-        let (child, address) = spawn_process(Config::default(), move |inbox| async move {
+        let (child, address) = spawn(Config::default(), move |inbox| async move {
             NodeActor::new(inbox, listener).run().await
         });
 

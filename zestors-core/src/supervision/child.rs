@@ -38,6 +38,7 @@ use std::{
 /// ChildPool<E, C> = Child<E, C, Pool>;         // A regular childpool.
 /// ChildPool<E>    = ChildPool<E, Accepts![]>;  // A childpool that doesn't accept any messages.
 /// ```
+#[derive(Debug)]
 pub struct Child<E, C = Accepts![], P = NoPool>
 where
     E: Send + 'static,

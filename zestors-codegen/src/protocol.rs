@@ -79,7 +79,7 @@ fn impl_protocol(item: &ItemEnum, variants: &Vec<ProtocolVariant>) -> Result<Tok
         .map(|variant| {
             let variant_ty = &variant.ty;
             quote! {
-                if *msg_type_id == core::any::TypeId::of::<#variant_ty>() {
+                if *msg_type_id == std::any::TypeId::of::<#variant_ty>() {
                     return true
                 }
             }
@@ -107,7 +107,7 @@ fn impl_protocol(item: &ItemEnum, variants: &Vec<ProtocolVariant>) -> Result<Tok
                 Err(boxed)
             }
 
-            fn accepts_msg(msg_type_id: &core::any::TypeId) -> bool {
+            fn accepts_msg(msg_type_id: &std::any::TypeId) -> bool {
                 #(#accepts)*
                 false
             }

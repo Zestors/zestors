@@ -5,10 +5,13 @@ use std::{any::TypeId, sync::Arc};
 //  DefinesChannel
 //------------------------------------------------------------------------------------------------
 
+/// A channel-definition is part of any [Address] or [Child], and defines the [Channel] used in the
+/// actor and which messages the actor [trait@Accepts]. The different channel-definitions are:
+/// - A [`Protocol`]. (sized)
+/// - A [`Halter`]. (sized)
+/// - A [`Dyn<_>`] type using the [`Accepts!`] macro. (dynamic)
 pub trait DefinesChannel {
-    /// The underlying channel used.
     type Channel: DynChannel + ?Sized;
-
     fn into_dyn_channel(channel: Arc<Self::Channel>) -> Arc<dyn DynChannel>;
 }
 
@@ -36,10 +39,7 @@ impl DefinesChannel for Halter {
     }
 }
 
-//------------------------------------------------------------------------------------------------
-//  DefinesSizedChannel
-//------------------------------------------------------------------------------------------------
-
+/// A specialization of [`DefinesChannel`] for sized channels only.
 pub trait DefinesSizedChannel: DefinesChannel
 where
     Self::Channel: Sized,
@@ -55,14 +55,7 @@ impl<P: Protocol> DefinesSizedChannel for P {
     type Spawned = Inbox<P>;
 }
 
-//------------------------------------------------------------------------------------------------
-//  DefinesDynChannel
-//------------------------------------------------------------------------------------------------
-
-/// Trait implemented for all [`Dyn<...>`](Dyn) types, this never has to be implemented
-/// manually.
-pub trait DefinesDynChannel:
-    DefinesChannel<Channel = dyn DynChannel>
-{
+/// A specialization of [`DefinesChannel`] for dynamic channels only.
+pub trait DefinesDynChannel: DefinesChannel<Channel = dyn DynChannel> {
     fn msg_ids() -> Box<[TypeId]>;
 }

@@ -3,8 +3,7 @@ mod system;
 
 pub use conn::*;
 pub use system::*;
-
-use crate::request::SendRecvError;
+use zestors_core::SendRecvError;
 
 #[derive(Debug)]
 pub enum ConnectError {

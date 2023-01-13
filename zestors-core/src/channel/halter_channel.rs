@@ -8,14 +8,11 @@ use std::{
     },
 };
 
-//------------------------------------------------------------------------------------------------
-//  TaskChannel
-//------------------------------------------------------------------------------------------------
-
+/// A [Channel] that does not have any kind of inbox, so it cannot receive messages.
 #[derive(Debug)]
 pub struct HalterChannel {
     address_count: AtomicUsize,
-    halt_notifier_count: AtomicUsize,
+    halter_count: AtomicUsize,
     to_halt: AtomicI32,
     actor_id: ActorId,
     exit_event: Event,
@@ -23,10 +20,10 @@ pub struct HalterChannel {
 }
 
 impl HalterChannel {
-    pub fn new(address_count: usize, halter_count: usize) -> Self {
+    pub(crate) fn new(address_count: usize, halter_count: usize) -> Self {
         Self {
             address_count: AtomicUsize::new(address_count),
-            halt_notifier_count: AtomicUsize::new(halter_count),
+            halter_count: AtomicUsize::new(halter_count),
             to_halt: AtomicI32::new(0),
             actor_id: ActorId::generate_new(),
             exit_event: Event::new(),
@@ -61,7 +58,7 @@ impl HalterChannel {
     }
 
     pub(crate) fn decrement_halter_count(&self, n: usize) {
-        self.halt_notifier_count.fetch_sub(n, Ordering::AcqRel);
+        self.halter_count.fetch_sub(n, Ordering::AcqRel);
     }
 }
 
@@ -83,7 +80,7 @@ impl Channel for HalterChannel {
         self.halt_event.notify(usize::MAX)
     }
     fn process_count(&self) -> usize {
-        self.halt_notifier_count.load(Ordering::Acquire)
+        self.halter_count.load(Ordering::Acquire)
     }
     fn msg_count(&self) -> usize {
         0
@@ -95,7 +92,7 @@ impl Channel for HalterChannel {
         true
     }
     fn has_exited(&self) -> bool {
-        self.halt_notifier_count.load(Ordering::Acquire) == 0
+        self.halter_count.load(Ordering::Acquire) == 0
     }
     fn get_exit_listener(&self) -> EventListener {
         self.exit_event.listen()
@@ -111,10 +108,25 @@ impl Channel for HalterChannel {
         self.address_count.fetch_add(1, Ordering::Acquire)
     }
     fn remove_address(&self) -> usize {
-        self.address_count.fetch_sub(1, Ordering::Acquire)
+        let prev_address_count = self.address_count.fetch_sub(1, Ordering::Acquire);
+        assert!(prev_address_count >= 1);
+        prev_address_count
     }
     fn try_add_inbox(&self) -> Result<usize, ()> {
-        todo!()
+        let result = self
+            .halter_count
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |val| {
+                if val < 1 {
+                    None
+                } else {
+                    Some(val + 1)
+                }
+            });
+
+        match result {
+            Ok(prev) => Ok(prev),
+            Err(_) => Err(()),
+        }
     }
 }
 

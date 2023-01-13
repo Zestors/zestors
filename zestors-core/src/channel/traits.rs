@@ -9,10 +9,7 @@ use std::{
     sync::Arc,
 };
 
-//------------------------------------------------------------------------------------------------
-//  Channel
-//------------------------------------------------------------------------------------------------
-
+/// Trait that all channels must implement.
 pub trait Channel {
     fn close(&self) -> bool;
     fn halt_some(&self, n: u32);
@@ -30,10 +27,7 @@ pub trait Channel {
     fn try_add_inbox(&self) -> Result<usize, ()>;
 }
 
-//------------------------------------------------------------------------------------------------
-//  DynChannel
-//------------------------------------------------------------------------------------------------
-
+/// Trait that all dynamic channels must implement
 pub trait DynChannel: Channel + Send + Sync + Debug {
     fn try_send_boxed(
         &self,

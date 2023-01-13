@@ -1,18 +1,11 @@
-pub mod channel;
-pub mod config;
-pub mod error;
-pub mod process;
-pub mod protocol;
-pub mod request;
+#![doc = include_str!("../docs/lib.md")]
 
-pub(crate) mod _gen;
 pub mod distributed;
-// mod supervision_v2;
 pub mod supervision;
 
-pub(crate) use {
-    channel::*, config::*, distributed::*, error::*, process::*, protocol::*, request::*,
-    supervision::*,
-};
+// pub use zestors_core as core;
 
-pub use zestors_codegen::{protocol, Message};
+pub mod core {
+    #![doc = include_str!("../../zestors-core/docs/lib.md")]
+    pub use zestors_core::*;
+}

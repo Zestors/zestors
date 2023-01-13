@@ -1,10 +1,9 @@
 use super::*;
 use concurrent_queue::{ConcurrentQueue, PopError, PushError};
 use event_listener::{Event, EventListener};
-use futures::{future::BoxFuture, Future};
+use futures::future::BoxFuture;
 use std::{
     any::{Any, TypeId},
-    pin::Pin,
     sync::{atomic::Ordering, Arc},
 };
 use std::{
@@ -12,12 +11,11 @@ use std::{
     sync::atomic::{AtomicI32, AtomicUsize},
 };
 
+pub(crate) use receiving::RecvRawFut;
 mod receiving;
 mod sending;
-pub use receiving::*;
-pub use sending::*;
 
-/// Contains all data that should be shared between Addresses, Inboxes and the Child.
+/// A [Channel] with an inbox used to receive messages.
 pub struct InboxChannel<M> {
     /// The underlying queue
     queue: ConcurrentQueue<M>,

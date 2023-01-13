@@ -1,4 +1,5 @@
-use crate::*;
+use super::*;
+use crate::core::*;
 use async_trait::async_trait;
 use futures::{future::BoxFuture, Future};
 use std::{
@@ -6,7 +7,6 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-use tiny_actor::ExitError;
 
 //------------------------------------------------------------------------------------------------
 //  Spawnable
@@ -14,7 +14,7 @@ use tiny_actor::ExitError;
 
 pub trait Spawnable {
     type Exit: Send + 'static;
-    type ActorType: ActorType + 'static;
+    type ActorType: DefinesChannel + 'static;
     type Ref: Send + 'static;
 
     fn spawn(self) -> (Child<Self::Exit, Self::ActorType>, Self::Ref);
@@ -26,7 +26,7 @@ pub trait Spawnable {
 
 pub trait Startable {
     type Exit: Send + 'static;
-    type ActorType: ActorType + 'static;
+    type ActorType: DefinesChannel + 'static;
     type Ref: Send + 'static;
 
     fn poll_start(
@@ -64,7 +64,7 @@ pub trait Supervisable: Startable {
 
 pub trait SupervisableV2 {
     type Exit: Send + 'static;
-    type ActorType: ActorType + 'static;
+    type ActorType: DefinesChannel + 'static;
     type Ref: Send + 'static;
 
     fn poll_supervise(self: Pin<&mut Self>, cx: &mut Context) -> Poll<()>;

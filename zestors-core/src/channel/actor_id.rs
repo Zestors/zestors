@@ -1,5 +1,6 @@
 use std::{fmt::{Display, Debug}, sync::atomic::{AtomicU64, Ordering}};
 
+/// An actor-id is a unique id incrementally given to every actor when it is spawned.
 #[derive(PartialEq, Eq, Debug, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct ActorId(u64);
 
