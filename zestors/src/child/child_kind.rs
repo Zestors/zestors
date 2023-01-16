@@ -1,15 +1,19 @@
+#[allow(unused)]
+use crate::*;
 use tokio::task::JoinHandle;
 
-pub trait IsGroup {
+pub trait ChildKind {
     type JoinHandles<E: Send + 'static>: Send + 'static;
     fn abort<E: Send + 'static>(handles: &Self::JoinHandles<E>);
     fn is_finished<E: Send + 'static>(handles: &Self::JoinHandles<E>) -> bool;
 }
 
+/// A [ChildKind] which indicates that the [Child] concerns a single process. This is also the
+/// default parameter.
 #[derive(Debug)]
-pub struct NoGroup;
+pub struct Single;
 
-impl IsGroup for NoGroup {
+impl ChildKind for Single {
     type JoinHandles<E: Send + 'static> = JoinHandle<E>;
 
     fn abort<E: Send + 'static>(handles: &Self::JoinHandles<E>) {
@@ -21,10 +25,11 @@ impl IsGroup for NoGroup {
     }
 }
 
+/// A [ChildKind] which indicates that the [Child] concerns a group of processes.
 #[derive(Debug)]
 pub struct Group;
 
-impl IsGroup for Group {
+impl ChildKind for Group {
     type JoinHandles<E: Send + 'static> = Vec<JoinHandle<E>>;
 
     fn abort<E: Send + 'static>(handles: &Self::JoinHandles<E>) {

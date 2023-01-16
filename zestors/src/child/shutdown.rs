@@ -63,7 +63,7 @@ pub struct ShutdownStream<'a, E: Send + 'static, T: ActorKind> {
 }
 
 impl<'a, E: Send + 'static, T: ActorKind> ShutdownStream<'a, E, T> {
-    pub(crate) fn new(group: &'a mut ChildGroup<E, T>, timeout: Duration) -> Self {
+    pub(super) fn new(group: &'a mut ChildGroup<E, T>, timeout: Duration) -> Self {
         group.halt();
 
         ShutdownStream {

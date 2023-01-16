@@ -41,28 +41,31 @@ use zestors_core::inbox::InboxKind;
 /// ChildGroup<E>    = ChildGroup<E, Accepts![]>;  // A childgroup that doesn't accept any messages.
 /// ```
 #[derive(Debug)]
-pub struct Child<E, C = Accepts![], P = NoGroup>
+pub struct Child<E, A = Accepts![], C = Single>
 where
     E: Send + 'static,
-    C: ActorKind,
-    P: IsGroup,
+    A: ActorKind,
+    C: ChildKind,
 {
-    channel: Arc<C::Channel>,
-    join_handles: Option<P::JoinHandles<E>>,
+    channel: Arc<A::Channel>,
+    join_handles: Option<C::JoinHandles<E>>,
     link: Link,
     is_aborted: bool,
 }
 
+/// A `ChildGroup<E, CT>` is the same as a `Child<E, CT, Group>`.
+pub type ChildGroup<E, A = Accepts![]> = Child<E, A, Group>;
+
 /// # Methods valid for all children.
-impl<E, C, P> Child<E, C, P>
+impl<E, A, C> Child<E, A, C>
 where
     E: Send + 'static,
-    C: ActorKind,
-    P: IsGroup,
+    A: ActorKind,
+    C: ChildKind,
 {
     pub(crate) fn new(
-        channel: Arc<C::Channel>,
-        join_handle: P::JoinHandles<E>,
+        channel: Arc<A::Channel>,
+        join_handle: C::JoinHandles<E>,
         link: Link,
     ) -> Self {
         Self {
@@ -73,7 +76,7 @@ where
         }
     }
 
-    fn into_parts(self) -> (Arc<C::Channel>, Option<P::JoinHandles<E>>, Link, bool) {
+    fn into_parts(self) -> (Arc<A::Channel>, Option<C::JoinHandles<E>>, Link, bool) {
         let no_drop = mem::ManuallyDrop::new(self);
         unsafe {
             let handle = std::ptr::read(&no_drop.join_handles);
@@ -87,7 +90,7 @@ where
     /// Get the underlying [`tokio::task::JoinHandle`].
     ///
     /// This will not run the drop, and therefore the actor will not be halted/aborted.
-    pub fn into_inner(self) -> P::JoinHandles<E> {
+    pub fn into_inner(self) -> C::JoinHandles<E> {
         self.into_parts().1.take().unwrap()
     }
 
@@ -132,49 +135,49 @@ where
         self.channel.close();
         let was_aborted = self.is_aborted;
         self.is_aborted = true;
-        P::abort(self.join_handles.as_ref().unwrap());
+        C::abort(self.join_handles.as_ref().unwrap());
         !was_aborted
     }
 
     /// Whether the task is finished.
     pub fn is_finished(&self) -> bool {
-        P::is_finished(self.join_handles.as_ref().unwrap())
+        C::is_finished(self.join_handles.as_ref().unwrap())
     }
 
-    pub fn transform_unchecked_into<T>(self) -> Child<E, T, P>
+    pub fn transform_unchecked_into<T>(self) -> Child<E, T, C>
     where
         T: DynActorKind,
     {
         let (channel, join_handles, link, is_aborted) = self.into_parts();
         Child {
             join_handles,
-            channel: C::into_dyn_channel(channel),
+            channel: A::into_dyn_channel(channel),
             link,
             is_aborted,
         }
     }
 
-    pub fn transform_into<T>(self) -> Child<E, T, P>
+    pub fn transform_into<T>(self) -> Child<E, T, C>
     where
-        C: TransformInto<T>,
-        T: DynActorKind,
+        A: TransformInto<T>,
+        T: ActorKind,
     {
         let (channel, join_handles, link, is_aborted) = self.into_parts();
         Child {
             join_handles,
-            channel: C::transform_into(channel),
+            channel: A::transform_into(channel),
             link,
             is_aborted,
         }
     }
 
-    pub fn into_dyn(self) -> Child<E, Accepts!(), P> {
+    pub fn into_dyn(self) -> Child<E, Accepts!(), C> {
         self.transform_unchecked_into()
     }
 
-    pub fn try_transform<T>(self) -> Result<Child<E, T, P>, Self>
+    pub fn try_transform<T>(self) -> Result<Child<E, T, C>, Self>
     where
-        C: DynActorKind,
+        A: DynActorKind,
         T: DynActorKind,
     {
         if T::msg_ids().iter().all(|id| self.accepts(id)) {
@@ -184,7 +187,7 @@ where
         }
     }
 
-    pub fn downcast<T>(self) -> Result<Child<E, T, P>, Self>
+    pub fn downcast<T>(self) -> Result<Child<E, T, C>, Self>
     where
         T: ActorKind,
         T::Channel: Sized + 'static,
@@ -208,13 +211,13 @@ where
 }
 
 /// # Methods valid for children that are not grouped.
-impl<E, C> Child<E, C, NoGroup>
+impl<E, A> Child<E, A, Single>
 where
     E: Send + 'static,
-    C: ActorKind,
+    A: ActorKind,
 {
     /// Convert the [Child] into a [ChildGroup].
-    pub fn into_group(self) -> ChildGroup<E, C> {
+    pub fn into_group(self) -> ChildGroup<E, A> {
         let (channel, mut join_handles, link, is_aborted) = self.into_parts();
         ChildGroup {
             channel,
@@ -228,7 +231,7 @@ where
     /// result of the task, and closes the channel.
     ///
     /// If the timeout expires before the actor has exited, the actor will be aborted.
-    pub fn shutdown(&mut self, timeout: Duration) -> ShutdownFut<'_, E, C> {
+    pub fn shutdown(&mut self, timeout: Duration) -> ShutdownFut<'_, E, A> {
         ShutdownFut::new(self, timeout)
     }
 }
@@ -238,10 +241,10 @@ where
 //-------------------------------------------------
 
 /// # Methods valid for children that are grouped.
-impl<E, C> Child<E, C, Group>
+impl<E, A> Child<E, A, Group>
 where
     E: Send + 'static,
-    C: ActorKind,
+    A: ActorKind,
 {
     /// The amount of tasks that are alive.
     ///
@@ -294,7 +297,7 @@ where
         }
     }
 
-    pub fn shutdown(&mut self, timeout: Duration) -> ShutdownStream<'_, E, C> {
+    pub fn shutdown(&mut self, timeout: Duration) -> ShutdownStream<'_, E, A> {
         ShutdownStream::new(self, timeout)
     }
 
@@ -303,15 +306,15 @@ where
     /// This method fails if the channel has already exited.
     pub fn spawn<Fun, Fut>(&mut self, fun: Fun) -> Result<(), SpawnError<Fun>>
     where
-        Fun: FnOnce(C) -> Fut + Send + 'static,
+        Fun: FnOnce(A) -> Fut + Send + 'static,
         Fut: Future<Output = E> + Send + 'static,
         E: Send + 'static,
-        C: InboxKind,
-        C::Channel: Sized,
+        A: InboxKind,
+        A::Channel: Sized,
     {
         match self.channel.try_add_inbox() {
             Ok(_) => {
-                let inbox = C::new(self.channel.clone());
+                let inbox = A::new(self.channel.clone());
                 let handle = tokio::task::spawn(async move { fun(inbox).await });
                 self.join_handles.as_mut().unwrap().push(handle);
                 Ok(())
@@ -321,130 +324,31 @@ where
     }
 }
 
-impl<C, E, P> ActorRef for Child<E, C, P>
+impl<E, A, C> ActorRef for Child<E, A, C>
 where
-    C: ActorKind,
     E: Send + 'static,
-    P: IsGroup,
+    A: ActorKind,
+    C: ChildKind,
 {
-    type ActorKind = C;
-    fn close(&self) -> bool {
-        self.channel.close()
-    }
-    fn halt_some(&self, n: u32) {
-        self.channel.halt_some(n)
-    }
-    fn halt(&self) {
-        self.channel.halt()
-    }
-    fn process_count(&self) -> usize {
-        self.channel.process_count()
-    }
-    fn msg_count(&self) -> usize {
-        self.channel.msg_count()
-    }
-    fn address_count(&self) -> usize {
-        self.channel.address_count()
-    }
-    fn is_closed(&self) -> bool {
-        self.channel.is_closed()
-    }
-    fn capacity(&self) -> &Capacity {
-        self.channel.capacity()
-    }
-    fn has_exited(&self) -> bool {
-        self.channel.has_exited()
-    }
-    fn actor_id(&self) -> ActorId {
-        self.channel.actor_id()
-    }
-    fn try_send<M>(&self, msg: M) -> Result<M::Returned, TrySendError<M>>
-    where
-        M: Message,
-        Self::ActorKind: Accept<M>,
-    {
-        <Self::ActorKind as Accept<M>>::try_send(&self.channel, msg)
-    }
-    fn send_now<M>(&self, msg: M) -> Result<M::Returned, TrySendError<M>>
-    where
-        M: Message,
-        Self::ActorKind: Accept<M>,
-    {
-        <Self::ActorKind as Accept<M>>::send_now(&self.channel, msg)
-    }
-    fn send_blocking<M>(&self, msg: M) -> Result<M::Returned, SendError<M>>
-    where
-        M: Message,
-        Self::ActorKind: Accept<M>,
-    {
-        <Self::ActorKind as Accept<M>>::send_blocking(&self.channel, msg)
-    }
-    fn send<M>(&self, msg: M) -> <Self::ActorKind as Accept<M>>::SendFut<'_>
-    where
-        M: Message,
-        Self::ActorKind: Accept<M>,
-    {
-        <Self::ActorKind as Accept<M>>::send(&self.channel, msg)
-    }
-
+    type ActorKind = A;
     fn channel(actor_ref: &Self) -> &Arc<<Self::ActorKind as ActorKind>::Channel> {
         &actor_ref.channel
     }
 }
 
-impl<C, E, P> DynActorRef for Child<E, C, P>
-where
-    C: DynActorKind,
-    E: Send + 'static,
-    P: IsGroup,
-{
-    fn try_send_unchecked<M>(&self, msg: M) -> Result<M::Returned, TrySendUncheckedError<M>>
-    where
-        M: Message + Send + 'static,
-        M::Payload: Send + 'static,
-    {
-        self.channel.try_send_unchecked(msg)
-    }
-    fn send_now_unchecked<M>(&self, msg: M) -> Result<M::Returned, TrySendUncheckedError<M>>
-    where
-        M: Message + Send + 'static,
-        M::Payload: Send + 'static,
-    {
-        self.channel.send_now_unchecked(msg)
-    }
-    fn send_blocking_unchecked<M>(&self, msg: M) -> Result<M::Returned, SendUncheckedError<M>>
-    where
-        M: Message + Send + 'static,
-        M::Payload: Send + 'static,
-    {
-        self.channel.send_blocking_unchecked(msg)
-    }
-    fn send_unchecked<M>(&self, msg: M) -> BoxFuture<'_, Result<M::Returned, SendUncheckedError<M>>>
-    where
-        M::Returned: Send,
-        M: Message + Send + 'static,
-        M::Payload: Send + 'static,
-    {
-        self.channel.send_unchecked(msg)
-    }
-    fn accepts(&self, id: &TypeId) -> bool {
-        self.channel.accepts(id)
-    }
-}
-
-impl<E, C, P> Unpin for Child<E, C, P>
+impl<E, A, C> Unpin for Child<E, A, C>
 where
     E: Send + 'static,
-    C: ActorKind,
-    P: IsGroup,
+    A: ActorKind,
+    C: ChildKind,
 {
 }
 
 /// # Future is implemented for non-grouped children only.
-impl<E, C> Future for Child<E, C, NoGroup>
+impl<E, A> Future for Child<E, A, Single>
 where
     E: Send + 'static,
-    C: ActorKind,
+    A: ActorKind,
 {
     type Output = Result<E, ExitError>;
 
@@ -458,10 +362,10 @@ where
 }
 
 /// # Stream is implemented for grouped children only.
-impl<E, C> Stream for Child<E, C, Group>
+impl<E, A> Stream for Child<E, A, Group>
 where
     E: Send + 'static,
-    C: ActorKind,
+    A: ActorKind,
 {
     type Item = Result<E, ExitError>;
 
@@ -481,11 +385,11 @@ where
     }
 }
 
-impl<E, C, P> Drop for Child<E, C, P>
+impl<E, A, C> Drop for Child<E, A, C>
 where
     E: Send + 'static,
-    C: ActorKind,
-    P: IsGroup,
+    A: ActorKind,
+    C: ChildKind,
 {
     fn drop(&mut self) {
         if let Link::Attached(abort_timer) = self.link {
@@ -497,7 +401,7 @@ where
                     let handles = self.join_handles.take().unwrap();
                     tokio::task::spawn(async move {
                         tokio::time::sleep(abort_timer).await;
-                        P::abort(&handles)
+                        C::abort(&handles)
                     });
                 }
             }
@@ -506,54 +410,47 @@ where
 }
 
 //------------------------------------------------------------------------------------------------
-//  ChildGroup
-//------------------------------------------------------------------------------------------------
-
-/// A `ChildGroup<E, CT>` is the same as a `Child<E, CT, Group>`.
-pub type ChildGroup<E, CT = Accepts![]> = Child<E, CT, Group>;
-
-//------------------------------------------------------------------------------------------------
 //  IntoChild
 //------------------------------------------------------------------------------------------------
 
-pub trait IntoChild<E, T, R>
+pub trait IntoChild<E, A, C>
+where
+    E: Send + 'static,
+    A: ActorKind,
+    C: ChildKind,
+{
+    fn into_child(self) -> Child<E, A, C>;
+}
+
+impl<E, T, A> IntoChild<E, T, Single> for Child<E, A, Single>
 where
     E: Send + 'static,
     T: ActorKind,
-    R: IsGroup,
+    A: TransformInto<T>,
 {
-    fn into_child(self) -> Child<E, T, R>;
-}
-
-impl<E, P, T2> IntoChild<E, T2, NoGroup> for Child<E, P>
-where
-    E: Send + 'static,
-    P: TransformInto<T2>,
-    T2: DynActorKind,
-{
-    fn into_child(self) -> Child<E, T2> {
+    fn into_child(self) -> Child<E, T, Single> {
         self.transform_into()
     }
 }
 
-impl<E, P, T2> IntoChild<E, T2, Group> for Child<E, P>
+impl<E, T, A> IntoChild<E, T, Group> for Child<E, A, Single>
 where
     E: Send + 'static,
-    P: TransformInto<T2>,
-    T2: DynActorKind,
+    T: ActorKind,
+    A: TransformInto<T>,
 {
-    fn into_child(self) -> ChildGroup<E, T2> {
+    fn into_child(self) -> Child<E, T, Group> {
         self.into_group().transform_into()
     }
 }
 
-impl<E, P, T2> IntoChild<E, T2, Group> for ChildGroup<E, P>
+impl<E, G, T> IntoChild<E, T, Group> for Child<E, G, Group>
 where
     E: Send + 'static,
-    P: TransformInto<T2>,
-    T2: DynActorKind,
+    T: ActorKind,
+    G: TransformInto<T>,
 {
-    fn into_child(self) -> ChildGroup<E, T2> {
+    fn into_child(self) -> Child<E, T, Group> {
         self.transform_into()
     }
 }
@@ -565,7 +462,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::_priv::test_helper::basic_actor;
-    use crate::all::*;
+    use crate::all::{ActorRef, *};
     use std::{future::pending, time::Duration};
     use tokio::sync::oneshot;
 

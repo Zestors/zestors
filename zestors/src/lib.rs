@@ -1,22 +1,19 @@
 //! Zestors is a dynamic actor-framework built for Rust applications.
-//! 
+//!
 //! # Documentation
-//! All modules are self-documented. For a new user it is recommended to read the documentation in 
+//! All modules are self-documented. For a new user it is recommended to read the documentation in
 //! the following order.
 //! - [`messaging`] : This explains the basis of how messaging works within zestors. It explains how
 //! what protocols and messages are and how to define new ones.
 //! - [`child`] : This explains what children are, and how a child can be supervised and shut down
 //! manually.
 //! - [`inbox`] : This explains the concept of different actor-inboxes.
-//! - [`channel`] : 
+//! - [`channel`] :
 //! - [`spawning`] : How to spawn an actor.
 //! - [`config`] : The configuration of actors.
 //! - [`supervision`] : todo
 //! - [`distribution`] : todo
-//! 
-//! 
-pub(crate) mod _priv;
-pub(crate) use _priv::*;
+
 pub mod messaging;
 #[doc(inline)]
 pub use messaging::{
@@ -41,13 +38,17 @@ pub mod inbox;
 #[doc(inline)]
 pub use inbox::{basic::Inbox, halter::Halter};
 
+pub mod address;
+#[doc(inline)]
+pub use address::{Address};
+
 pub mod actor_kind;
 #[doc(inline)]
-pub use actor_kind::{Accept, Accepts};
+pub use actor_kind::Accept;
 
 pub mod channel;
 #[doc(inline)]
-pub use channel::{ActorId, ActorRef};
+pub use channel::{ActorId, ActorRefExt};
 
 /// # TODO
 pub mod distribution;
@@ -65,3 +66,5 @@ pub mod all {
     pub use crate::spawning::*;
     pub use crate::supervision::*;
 }
+
+pub(crate) mod _priv;

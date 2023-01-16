@@ -4,10 +4,11 @@ use futures::{ready, Future, FutureExt};
 use std::{sync::Arc, task::Poll};
 use zestors_core::{
     actor_kind::{Accept, ActorKind},
+    channel::{ActorId, ActorRef},
     config::{Capacity, Link},
     inbox::InboxKind,
     messaging::{Message, SendError, TrySendError},
-    *, channel::{ActorRef, ActorId},
+    *,
 };
 
 /// A halter can be used for processes that do not handle any messages, but that should still be
@@ -28,81 +29,8 @@ impl Halter {
 impl ActorRef for Halter {
     type ActorKind = Self;
 
-    fn close(&self) -> bool {
-        todo!()
-    }
-
-    fn halt_some(&self, n: u32) {
-        todo!()
-    }
-
-    fn halt(&self) {
-        todo!()
-    }
-
-    fn process_count(&self) -> usize {
-        todo!()
-    }
-
-    fn msg_count(&self) -> usize {
-        todo!()
-    }
-
-    fn address_count(&self) -> usize {
-        todo!()
-    }
-
-    fn is_closed(&self) -> bool {
-        todo!()
-    }
-
-
-    fn capacity(&self) -> &Capacity {
-        todo!()
-    }
-
-    fn has_exited(&self) -> bool {
-        todo!()
-    }
-
-    fn actor_id(&self) -> ActorId {
-        todo!()
-    }
-
     fn channel(actor_ref: &Self) -> &Arc<<Self::ActorKind as ActorKind>::Channel> {
         &actor_ref.channel
-    }
-
-    fn try_send<M>(&self, msg: M) -> Result<M::Returned, TrySendError<M>>
-    where
-        M: Message,
-        Self::ActorKind: Accept<M>,
-    {
-        todo!()
-    }
-
-    fn send_now<M>(&self, msg: M) -> Result<M::Returned, TrySendError<M>>
-    where
-        M: Message,
-        Self::ActorKind: Accept<M>,
-    {
-        todo!()
-    }
-
-    fn send_blocking<M>(&self, msg: M) -> Result<M::Returned, SendError<M>>
-    where
-        M: Message,
-        Self::ActorKind: Accept<M>,
-    {
-        todo!()
-    }
-
-    fn send<M>(&self, msg: M) -> <Self::ActorKind as Accept<M>>::SendFut<'_>
-    where
-        M: Message,
-        Self::ActorKind: Accept<M>,
-    {
-        todo!()
     }
 }
 

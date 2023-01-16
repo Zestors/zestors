@@ -1,6 +1,12 @@
-use std::sync::Arc;
+#[doc(inline)]
+pub use zestors_core::inbox::*;
 
-use crate::*;
+pub mod halter {
+    #[doc(inline)]
+    pub use zestors_channels::halter::*;
+}
 
-pub use zestors_channels::halter;
-pub use zestors_channels::inbox as basic;
+pub mod basic {
+    #[doc(inline)]
+    pub use zestors_channels::inbox::*;
+}

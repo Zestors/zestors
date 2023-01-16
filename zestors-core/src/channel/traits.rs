@@ -25,7 +25,7 @@ pub trait Channel {
     fn try_add_inbox(&self) -> Result<usize, ()>;
 }
 
-/// Trait that all dynamic channels must implement
+/// Specialization of a [`Channel`] that all dynamic channels must implement
 pub trait DynChannel: Channel + Send + Sync + Debug {
     fn try_send_boxed(
         &self,

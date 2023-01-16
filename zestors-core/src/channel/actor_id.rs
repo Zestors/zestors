@@ -14,6 +14,7 @@ impl Display for ActorId {
 }
 
 impl ActorId {
+    /// Generate a new unique actor-id.
     pub fn generate() -> Self {
         static NEXT_ACTOR_ID: AtomicU64 = AtomicU64::new(0);
         ActorId(NEXT_ACTOR_ID.fetch_add(1, Ordering::AcqRel))

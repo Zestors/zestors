@@ -65,9 +65,9 @@ impl<P> InboxChannel<P> {
 
 /// The send-future, this can be `.await`-ed to send the message.
 #[derive(Debug)]
-pub(crate) struct SendRawFut<'a, P> {
-    channel: &'a InboxChannel<P>,
-    msg: Option<P>,
+pub(crate) struct SendRawFut<'a, M> {
+    channel: &'a InboxChannel<M>,
+    msg: Option<M>,
     fut: Option<InnerSendFut>,
 }
 

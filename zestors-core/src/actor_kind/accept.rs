@@ -1,6 +1,12 @@
 use crate::*;
-use futures::{future::BoxFuture, Future, FutureExt};
+use futures::{future::BoxFuture, Future};
 
+/// Accept is implemented for any [`ActorKind`] which accepts the message. If a type implements,
+/// then messages of type `M` can be sent to it.
+/// 
+/// This trait can be implemented for:
+/// - [Dynamic actor kinds](DynActorKind) (See [`Dyn`]).
+/// - Sized actor kinds which implement [`InboxKind`].
 pub trait Accept<M: Message>: ActorKind {
     type SendFut<'a>: Future<Output = Result<M::Returned, SendError<M>>> + Send + 'a;
     fn try_send(channel: &Self::Channel, msg: M) -> Result<M::Returned, TrySendError<M>>;
@@ -11,7 +17,7 @@ pub trait Accept<M: Message>: ActorKind {
 
 impl<M, D> Accept<M> for Dyn<D>
 where
-    Self: DynActorKind + TransformInto<Accepts![M]>,
+    Self: DynActorKind + TransformInto<Dyn<dyn AcceptsNone>>,
     M: Message + Send + 'static,
     M::Payload: Send,
     M::Returned: Send,
@@ -59,4 +65,3 @@ where
         })
     }
 }
-

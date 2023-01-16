@@ -1,10 +1,6 @@
 use crate::*;
 use std::{any::TypeId, sync::Arc};
 
-//------------------------------------------------------------------------------------------------
-//  ActorKind
-//------------------------------------------------------------------------------------------------
-
 /// A channel-definition is part of any [Address] or [Child], and defines the [Channel] used in the
 /// actor and which messages the actor [Accept]. The different channel-definitions are:
 /// - A [`Protocol`]. (sized)

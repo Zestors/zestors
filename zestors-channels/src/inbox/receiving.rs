@@ -28,8 +28,8 @@ impl<M> InboxChannel<M> {
         &'a self,
         signaled_halt: &'a mut bool,
         listener: &'a mut Option<EventListener>,
-    ) -> RecvRawFut<'a, M> {
-        RecvRawFut {
+    ) -> RecvFut<'a, M> {
+        RecvFut {
             channel: self,
             signaled_halt,
             listener,
@@ -65,15 +65,15 @@ impl<M> InboxChannel<M> {
 ///
 /// This can be awaited or streamed to get the messages.
 #[derive(Debug)]
-pub(crate) struct RecvRawFut<'a, P> {
+pub struct RecvFut<'a, P> {
     channel: &'a InboxChannel<P>,
     signaled_halt: &'a mut bool,
     listener: &'a mut Option<EventListener>,
 }
 
-impl<'a, M> Unpin for RecvRawFut<'a, M> {}
+impl<'a, M> Unpin for RecvFut<'a, M> {}
 
-impl<'a, M> Future for RecvRawFut<'a, M> {
+impl<'a, M> Future for RecvFut<'a, M> {
     type Output = Result<M, RecvError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -117,7 +117,7 @@ impl<'a, M> Future for RecvRawFut<'a, M> {
     }
 }
 
-impl<'a, M> Drop for RecvRawFut<'a, M> {
+impl<'a, M> Drop for RecvFut<'a, M> {
     fn drop(&mut self) {
         *self.listener = None;
     }

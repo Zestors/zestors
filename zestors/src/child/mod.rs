@@ -1,7 +1,7 @@
 mod child;
-mod is_group;
+mod child_kind;
 mod shutdown;
 
 pub use child::*;
-pub use is_group::*;
+pub use child_kind::*;
 pub use shutdown::*;

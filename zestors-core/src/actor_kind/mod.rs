@@ -1,6 +1,6 @@
-mod accepts;
-pub use accepts::*;
-mod dynamic;
-pub use dynamic::*;
+mod accept;
+pub use accept::*;
+mod transform;
+pub use transform::*;
 mod actor_kind;
 pub use actor_kind::*;

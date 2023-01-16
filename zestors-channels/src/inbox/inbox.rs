@@ -43,10 +43,8 @@ impl<P> Inbox<P> {
 
     /// Wait until there is a message in the [Inbox], or until the channel is closed.
     pub fn recv(&mut self) -> RecvFut<'_, P> {
-        RecvFut(
-            self.channel
-                .recv(&mut self.signaled_halt, &mut self.recv_listener),
-        )
+        self.channel
+            .recv(&mut self.signaled_halt, &mut self.recv_listener)
     }
 
     /// Get a new [Address] to the [Channel].
@@ -58,90 +56,11 @@ impl<P> Inbox<P> {
     }
 }
 
-impl<P> Inbox<P>
-where
-    P: ActorKind<Channel = InboxChannel<P>>,
-{
-    // gen::send_methods!(P);
-}
-
 impl<P: Protocol> ActorRef for Inbox<P> {
     type ActorKind = Inbox<P>;
 
-    fn close(&self) -> bool {
-        todo!()
-    }
-
-    fn halt_some(&self, n: u32) {
-        todo!()
-    }
-
-    fn halt(&self) {
-        todo!()
-    }
-
-    fn process_count(&self) -> usize {
-        todo!()
-    }
-
-    fn msg_count(&self) -> usize {
-        todo!()
-    }
-
-    fn address_count(&self) -> usize {
-        todo!()
-    }
-
-    fn is_closed(&self) -> bool {
-        todo!()
-    }
-
-    fn capacity(&self) -> &Capacity {
-        todo!()
-    }
-
-    fn has_exited(&self) -> bool {
-        todo!()
-    }
-
-    fn actor_id(&self) -> ActorId {
-        todo!()
-    }
-
     fn channel(actor_ref: &Self) -> &Arc<<Self::ActorKind as ActorKind>::Channel> {
         &actor_ref.channel
-    }
-
-    fn try_send<M>(&self, msg: M) -> Result<M::Returned, TrySendError<M>>
-    where
-        M: Message,
-        Self::ActorKind: Accept<M>,
-    {
-        todo!()
-    }
-
-    fn send_now<M>(&self, msg: M) -> Result<M::Returned, TrySendError<M>>
-    where
-        M: Message,
-        Self::ActorKind: Accept<M>,
-    {
-        todo!()
-    }
-
-    fn send_blocking<M>(&self, msg: M) -> Result<M::Returned, SendError<M>>
-    where
-        M: Message,
-        Self::ActorKind: Accept<M>,
-    {
-        todo!()
-    }
-
-    fn send<M>(&self, msg: M) -> <Self::ActorKind as Accept<M>>::SendFut<'_>
-    where
-        M: Message,
-        Self::ActorKind: Accept<M>,
-    {
-        todo!()
     }
 }
 
@@ -196,23 +115,6 @@ impl<P> FusedStream for Inbox<P> {
 impl<P> Drop for Inbox<P> {
     fn drop(&mut self) {
         self.channel.remove_inbox();
-    }
-}
-
-//------------------------------------------------------------------------------------------------
-//  RecvFut
-//------------------------------------------------------------------------------------------------
-
-#[derive(Debug)]
-pub struct RecvFut<'a, P>(RecvRawFut<'a, P>);
-
-impl<'a, M> Unpin for RecvFut<'a, M> {}
-
-impl<'a, M> Future for RecvFut<'a, M> {
-    type Output = Result<M, RecvError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.0.poll_unpin(cx)
     }
 }
 

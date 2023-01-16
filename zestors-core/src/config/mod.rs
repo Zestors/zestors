@@ -3,24 +3,19 @@ use std::{
     time::Duration,
 };
 
-/// The config used for spawning new processes, made up of a [Link] and a [Capacity]. This
-/// decides whether the actor will be attached/detached and unbounded/bounded.
+/// The config used for spawning new actor, made up of a [Link] and a [Capacity]. This
+/// decides whether the actor will be attached/detached and bounded/unbounded.
 ///
 /// # Example
 /// ```no_run
 /// # use zestors_core::config::*;
 ///
-/// Config {
+/// let config = Config {
 ///     link: Link::default(),
 ///     capacity: Capacity::default(),
 /// };
 /// ```
-///
-/// # Default
-/// Attached with an abort-timer of `1 sec`.
-///
-/// The capacity is `unbounded`, with `exponential` backoff starting `5 messages` in the inbox
-/// at `25 ns`, with a growth-factor of `1.3`.
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Config {
     pub link: Link,
@@ -112,9 +107,6 @@ impl Config {
 
 /// This decides whether the actor is attached or detached. If it is attached, then the
 /// abort-timer is specified here as well.
-///
-/// # Default
-/// Attached with an abort-timer of 1 second.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Link {
     Detached,
@@ -185,10 +177,6 @@ pub fn get_default_abort_timer() -> Duration {
 
 /// This decides whether the actor is bounded or unbounded. If it is unbounded,
 /// then a [BackPressure] must be given.
-///
-/// # Default
-/// `unbounded`, with `exponential` backoff starting `5 messages` in the inbox
-/// at `25 ns`, with a growth-factor of `1.3`
 #[derive(Debug, Clone, PartialEq)]
 pub enum Capacity {
     Bounded(usize),
@@ -209,10 +197,6 @@ impl Default for Capacity {
 }
 
 /// The backpressure mechanism for unbounded inboxes.
-///
-/// # Default
-/// `exponential` backoff starting `5 messages` in the inbox at `25 ns`, with a
-/// growth-factor of `1.3`
 #[derive(Debug, Clone, PartialEq)]
 pub struct BackPressure {
     starts_at: usize,
