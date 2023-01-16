@@ -6,7 +6,7 @@
 // async fn main() {
 //     // First we spawn an actor with a custom config, and an inbox which receives u32 messages.
 //     // This will spawn 3 processes, with i = {0, 1, 2}.
-//     let (mut pool, address) = spawn_many_processes(
+//     let (mut group, address) = spawn_many_processes(
 //         0..3,
 //         Config {
 //             link: Link::Attached(Duration::from_secs(1)),
@@ -44,7 +44,7 @@
 //     }
 
 //     // And finally shut the actor down, giving it 1 second before aborting.
-//     let exits = pool
+//     let exits = group
 //         .shutdown(Duration::from_secs(1))
 //         .collect::<Vec<_>>() // Await all processes (using `futures::StreamExt::collect`)
 //         .await;

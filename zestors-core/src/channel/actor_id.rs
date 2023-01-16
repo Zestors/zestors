@@ -14,7 +14,7 @@ impl Display for ActorId {
 }
 
 impl ActorId {
-    pub fn generate_new() -> Self {
+    pub fn generate() -> Self {
         static NEXT_ACTOR_ID: AtomicU64 = AtomicU64::new(0);
         ActorId(NEXT_ACTOR_ID.fetch_add(1, Ordering::AcqRel))
     }
@@ -26,9 +26,9 @@ mod test {
 
     #[test]
     fn actor_ids_increase() {
-        let mut old_id = ActorId::generate_new();
+        let mut old_id = ActorId::generate();
         for _ in 0..100 {
-            let id = ActorId::generate_new();
+            let id = ActorId::generate();
             assert!(id > old_id);
             old_id = id;
         }

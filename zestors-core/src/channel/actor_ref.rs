@@ -1,10 +1,12 @@
 use crate::*;
 use futures::future::BoxFuture;
-use std::any::TypeId;
+use std::{any::TypeId, sync::Arc};
+
+
 
 pub trait ActorRef {
-    type ChannelDefinition: DefineChannel;
-
+    type ActorKind: ActorKind;
+    
     fn close(&self) -> bool;
     fn halt_some(&self, n: u32);
     fn halt(&self);
@@ -12,53 +14,51 @@ pub trait ActorRef {
     fn msg_count(&self) -> usize;
     fn address_count(&self) -> usize;
     fn is_closed(&self) -> bool;
-    fn is_bounded(&self) -> bool;
     fn capacity(&self) -> &Capacity;
     fn has_exited(&self) -> bool;
     fn actor_id(&self) -> ActorId;
-    fn get_address(&self) -> Address<Self::ChannelDefinition>;
-
-    fn try_send<M>(&self, msg: M) -> Result<Returned<M>, TrySendError<M>>
+    fn channel(actor_ref: &Self) -> &Arc<<Self::ActorKind as ActorKind>::Channel>;
+    fn try_send<M>(&self, msg: M) -> Result<M::Returned, TrySendError<M>>
     where
         M: Message,
-        Self::ChannelDefinition: Accept<M>;
-    fn send_now<M>(&self, msg: M) -> Result<Returned<M>, TrySendError<M>>
+        Self::ActorKind: Accept<M>;
+    fn send_now<M>(&self, msg: M) -> Result<M::Returned, TrySendError<M>>
     where
         M: Message,
-        Self::ChannelDefinition: Accept<M>;
-    fn send_blocking<M>(&self, msg: M) -> Result<Returned<M>, SendError<M>>
+        Self::ActorKind: Accept<M>;
+    fn send_blocking<M>(&self, msg: M) -> Result<M::Returned, SendError<M>>
     where
         M: Message,
-        Self::ChannelDefinition: Accept<M>;
-    fn send<M>(&self, msg: M) -> <Self::ChannelDefinition as Accept<M>>::SendFut<'_>
+        Self::ActorKind: Accept<M>;
+    fn send<M>(&self, msg: M) -> <Self::ActorKind as Accept<M>>::SendFut<'_>
     where
         M: Message,
-        Self::ChannelDefinition: Accept<M>;
+        Self::ActorKind: Accept<M>;
 }
 
 pub trait DynActorRef: ActorRef
 where
-    Self::ChannelDefinition: DefineDynChannel,
+    Self::ActorKind: DynActorKind,
 {
-    fn try_send_unchecked<M>(&self, msg: M) -> Result<Returned<M>, TrySendUncheckedError<M>>
+    fn try_send_unchecked<M>(&self, msg: M) -> Result<M::Returned, TrySendUncheckedError<M>>
     where
         M: Message + Send + 'static,
-        Sent<M>: Send + 'static;
-    fn send_now_unchecked<M>(&self, msg: M) -> Result<Returned<M>, TrySendUncheckedError<M>>
+        M::Payload: Send + 'static;
+    fn send_now_unchecked<M>(&self, msg: M) -> Result<M::Returned, TrySendUncheckedError<M>>
     where
         M: Message + Send + 'static,
-        Sent<M>: Send + 'static;
-    fn send_blocking_unchecked<M>(&self, msg: M) -> Result<Returned<M>, SendUncheckedError<M>>
+        M::Payload: Send + 'static;
+    fn send_blocking_unchecked<M>(&self, msg: M) -> Result<M::Returned, SendUncheckedError<M>>
     where
         M: Message + Send + 'static,
-        Sent<M>: Send + 'static;
+        M::Payload: Send + 'static;
     fn send_unchecked<M>(
         &self,
         msg: M,
-    ) -> BoxFuture<'_, Result<Returned<M>, SendUncheckedError<M>>>
+    ) -> BoxFuture<'_, Result<M::Returned, SendUncheckedError<M>>>
     where
         M: Message + Send + 'static,
-        <M::Type as MessageType<M>>::Returned: Send,
-        Sent<M>: Send + 'static;
+        M::Returned: Send,
+        M::Payload: Send + 'static;
     fn accepts(&self, id: &TypeId) -> bool;
 }

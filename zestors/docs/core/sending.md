@@ -1,8 +1,8 @@
 # Accepts
-Any [channel_definition](DefineChannel) can implement [`Accept<M>`]: This means that the actor accepts messages of type `M`. The channel definition is the parameter `C` in the following structs: [`Child<_, C, _>`], [`Address<C>`] and [`Inbox<C>`]. If this parameter accepts the messages then messages can be sent to that actor.
+Any [channel_definition](ActorKind) can implement [`Accept<M>`]: This means that the actor accepts messages of type `M`. The channel definition is the parameter `C` in the following structs: [`Child<_, C, _>`], [`Address<C>`] and [`Inbox<C>`]. If this parameter accepts the messages then messages can be sent to that actor.
 
 The following types implement [`Accept<M>`]:
-- __Protocol__: Any [`Protocol`] `P` automatically implements [`Accept<M>`] if it implements [`ProtocolFromInto<M>`].
+- __Protocol__: Any [`Protocol`] `P` automatically implements [`Accept<M>`] if it implements [`ProtocolFrom<M>`].
 - __Dynamic__: Any [`Accepts![msg1, ..]`](Accepts!) automatically implements [`Accept<msg1> + Accept<_> + ..`](Accept).
 
 Examples of items to which messages can be sent:

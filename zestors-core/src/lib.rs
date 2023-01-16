@@ -1,23 +1,7 @@
 pub mod channel;
+pub mod messaging;
 pub mod config;
-pub mod protocol;
-pub mod sending;
-pub mod spawning;
-pub mod supervision;
+pub mod actor_kind;
+pub mod inbox;
 
-pub use channel::*;
-pub use config::*;
-pub use protocol::*;
-pub use sending::*;
-pub use spawning::*;
-pub use supervision::*;
-
-mod _priv;
-pub(crate) use _priv::gen;
-
-#[cfg(test)]
-pub(crate) use _priv::test_helper::*;
-#[cfg(test)]
-pub mod zestors {
-    pub use crate as core;
-}
+pub(crate) use {channel::*, messaging::*, config::*, actor_kind::*, inbox::*};

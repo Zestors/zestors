@@ -9,7 +9,7 @@ The following gives a visual overview of a channel and how it relates to some ot
 |¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯|
 |                            Channel                          |
 |  |¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯|  |¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯|  |
-|  |              actor                |  |   Child(Pool)  |  |
+|  |              actor                |  |   Child(Group)  |  |
 |  |  |¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯|  |  |________________|  |
 |  |  |         process(es)         |  |                      |
 |  |  |  |¯¯¯¯¯¯¯¯¯|  |¯¯¯¯¯¯¯¯¯¯|  |  |                      |
@@ -42,7 +42,7 @@ Every actor has a unique [ActorId] generated incrementally when a new actor is s
 An actor can use different channels depending on its need. Currently two channels are supported: An [InboxChannel] and a [HalterChannel]. The difference is that an inbox-channel can be used to send messages while a halter-channel can not. Both channels can be transformed into a [dyn DynChannel](DynChannel) which allows different channels to be used as the same type for addresses and children.
 
 ### Channel definition
-The parameter `C` in a [`Child<_, C, _>`] and an [`Address<C>`](Address) both implement [`DefineChannel`], and define which channel the actor uses. Depending on the parameter `C`, we can send different types of messages to an actor. `C` can either be a sized channel of:
+The parameter `C` in a [`Child<_, C, _>`] and an [`Address<C>`](Address) both implement [`ActorKind`], and define which channel the actor uses. Depending on the parameter `C`, we can send different types of messages to an actor. `C` can either be a sized channel of:
 - [`Halter`] : Indicates that the channel is a [HalterChannel] which does not accept any messages.
 - [`P where P: Protocol`](Protocol) : Indicates that the channel is an [InboxChannel] which accepts messages that the protocol `P` accepts.
 
@@ -52,7 +52,7 @@ Or a dynamic channel specified by:
 ### Transforming a channel definition
 A channel-definition can be transformed into a dynamic channel-definition `C` as long as it implements [`TransformInto<C>`]. 
 - A [Halter] channel-definition can be transformed into [`Accepts![]`](Accepts!): A channel which does not accept any methods.
-- A [Protocol] channel-definition can be transformed into [`Accepts![msg1, ..]`](Accepts!) where the protocol [accepts](ProtocolFromInto) messages `msg1, ..`.
+- A [Protocol] channel-definition can be transformed into [`Accepts![msg1, ..]`](Accepts!) where the protocol [accepts](ProtocolFrom) messages `msg1, ..`.
 - A dynamic channel-definition can be transformed into another one where the messages it accepts are a subset of the original messages.
 
 ### Downcasting a channel

@@ -2,7 +2,13 @@ use crate::halter_channel::HalterChannel;
 use event_listener::EventListener;
 use futures::{ready, Future, FutureExt};
 use std::{sync::Arc, task::Poll};
-use zestors_core::*;
+use zestors_core::{
+    actor_kind::{Accept, ActorKind},
+    config::{Capacity, Link},
+    inbox::InboxKind,
+    messaging::{Message, SendError, TrySendError},
+    *, channel::{ActorRef, ActorId},
+};
 
 /// A halter can be used for processes that do not handle any messages, but that should still be
 /// supervisable. The halter can be awaited, and returns when the task should halt.
@@ -20,7 +26,7 @@ impl Halter {
 }
 
 impl ActorRef for Halter {
-    type ChannelDefinition = Self;
+    type ActorKind = Self;
 
     fn close(&self) -> bool {
         todo!()
@@ -50,9 +56,6 @@ impl ActorRef for Halter {
         todo!()
     }
 
-    fn is_bounded(&self) -> bool {
-        todo!()
-    }
 
     fn capacity(&self) -> &Capacity {
         todo!()
@@ -66,62 +69,59 @@ impl ActorRef for Halter {
         todo!()
     }
 
-    fn get_address(&self) -> Address<Self::ChannelDefinition> {
-        todo!()
+    fn channel(actor_ref: &Self) -> &Arc<<Self::ActorKind as ActorKind>::Channel> {
+        &actor_ref.channel
     }
 
-    fn try_send<M>(&self, msg: M) -> Result<Returned<M>, TrySendError<M>>
+    fn try_send<M>(&self, msg: M) -> Result<M::Returned, TrySendError<M>>
     where
         M: Message,
-        Self::ChannelDefinition: Accept<M>,
+        Self::ActorKind: Accept<M>,
     {
         todo!()
     }
 
-    fn send_now<M>(&self, msg: M) -> Result<Returned<M>, TrySendError<M>>
+    fn send_now<M>(&self, msg: M) -> Result<M::Returned, TrySendError<M>>
     where
         M: Message,
-        Self::ChannelDefinition: Accept<M>,
+        Self::ActorKind: Accept<M>,
     {
         todo!()
     }
 
-    fn send_blocking<M>(&self, msg: M) -> Result<Returned<M>, SendError<M>>
+    fn send_blocking<M>(&self, msg: M) -> Result<M::Returned, SendError<M>>
     where
         M: Message,
-        Self::ChannelDefinition: Accept<M>,
+        Self::ActorKind: Accept<M>,
     {
         todo!()
     }
 
-    fn send<M>(&self, msg: M) -> <Self::ChannelDefinition as Accept<M>>::SendFut<'_>
+    fn send<M>(&self, msg: M) -> <Self::ActorKind as Accept<M>>::SendFut<'_>
     where
         M: Message,
-        Self::ChannelDefinition: Accept<M>,
+        Self::ActorKind: Accept<M>,
     {
         todo!()
     }
 }
 
-impl Spawn for Halter {
-    type Config = Link;
+impl InboxKind for Halter {
+    type Cfg = Link;
 
     fn setup_channel(
-        link: Self::Config,
+        link: Self::Cfg,
         halter_count: usize,
         address_count: usize,
         actor_id: ActorId,
-    ) -> (
-        Arc<<Self::ChannelDefinition as DefineChannel>::Channel>,
-        Link,
-    ) {
+    ) -> (Arc<<Self::ActorKind as ActorKind>::Channel>, Link) {
         (
             Arc::new(HalterChannel::new(address_count, halter_count, actor_id)),
             link,
         )
     }
 
-    fn new(channel: Arc<<Self::ChannelDefinition as DefineChannel>::Channel>) -> Self {
+    fn new(channel: Arc<<Self::ActorKind as ActorKind>::Channel>) -> Self {
         Self {
             channel,
             halt_event_listener: None,

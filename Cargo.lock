@@ -577,6 +577,7 @@ dependencies = [
  "async-trait",
  "bincode",
  "bytes",
+ "event-listener",
  "futures",
  "pin-project",
  "serde",
@@ -587,9 +588,7 @@ dependencies = [
  "zestors-channels",
  "zestors-codegen",
  "zestors-core",
- "zestors-distribution",
  "zestors-request",
- "zestors-supervision",
 ]
 
 [[package]]
@@ -623,24 +622,6 @@ dependencies = [
  "spin_sleep",
  "thiserror",
  "tokio",
- "zestors-codegen",
-]
-
-[[package]]
-name = "zestors-distribution"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bincode",
- "bytes",
- "futures",
- "pin-project",
- "serde",
- "thiserror",
- "tokio",
- "tokio-util",
- "uuid",
- "zestors-core",
 ]
 
 [[package]]
@@ -648,18 +629,6 @@ name = "zestors-request"
 version = "0.1.0"
 dependencies = [
  "futures",
- "thiserror",
- "tokio",
- "zestors-core",
-]
-
-[[package]]
-name = "zestors-supervision"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "futures",
- "pin-project",
  "thiserror",
  "tokio",
  "zestors-core",

@@ -4,6 +4,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
+use zestors_core::{*, messaging::{TrySendRecvError, SendRecvError}};
 
 //------------------------------------------------------------------------------------------------
 //  Tx
@@ -76,6 +77,18 @@ pub struct RxError;
 impl From<oneshot::error::RecvError> for RxError {
     fn from(_: oneshot::error::RecvError) -> Self {
         Self
+    }
+}
+
+impl<M> Into<TrySendRecvError<M>> for RxError {
+    fn into(self) -> TrySendRecvError<M> {
+        TrySendRecvError::NoReply
+    }
+}
+
+impl<M> Into<SendRecvError<M>> for RxError {
+    fn into(self) -> SendRecvError<M> {
+        SendRecvError::NoReply
     }
 }
 

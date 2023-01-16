@@ -29,124 +29,124 @@ pub trait Channel {
 pub trait DynChannel: Channel + Send + Sync + Debug {
     fn try_send_boxed(
         &self,
-        boxed: BoxedMessage,
-    ) -> Result<(), TrySendUncheckedError<BoxedMessage>>;
+        boxed: AnyMessage,
+    ) -> Result<(), TrySendUncheckedError<AnyMessage>>;
     fn send_now_boxed(
         &self,
-        boxed: BoxedMessage,
-    ) -> Result<(), TrySendUncheckedError<BoxedMessage>>;
+        boxed: AnyMessage,
+    ) -> Result<(), TrySendUncheckedError<AnyMessage>>;
     fn send_blocking_boxed(
         &self,
-        boxed: BoxedMessage,
-    ) -> Result<(), SendUncheckedError<BoxedMessage>>;
+        boxed: AnyMessage,
+    ) -> Result<(), SendUncheckedError<AnyMessage>>;
     fn send_boxed(
         &self,
-        boxed: BoxedMessage,
-    ) -> BoxFuture<'_, Result<(), SendUncheckedError<BoxedMessage>>>;
+        boxed: AnyMessage,
+    ) -> BoxFuture<'_, Result<(), SendUncheckedError<AnyMessage>>>;
     fn accepts(&self, id: &TypeId) -> bool;
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
 }
 
 impl dyn DynChannel {
-    pub(crate) fn try_send_unchecked<M>(
+    pub fn try_send_unchecked<M>(
         &self,
         msg: M,
-    ) -> Result<Returned<M>, TrySendUncheckedError<M>>
+    ) -> Result<M::Returned, TrySendUncheckedError<M>>
     where
         M: Message,
-        Sent<M>: Send + 'static,
+        M::Payload: Send + 'static,
     {
-        let (sends, returns) = <M::Type as MessageType<M>>::create(msg);
-        let res = self.try_send_boxed(BoxedMessage::new::<M>(sends));
+        let (sends, returns) = M::create(msg);
+        let res = self.try_send_boxed(AnyMessage::new::<M>(sends));
 
         match res {
             Ok(()) => Ok(returns),
             Err(e) => match e {
                 TrySendUncheckedError::Full(boxed) => Err(TrySendUncheckedError::Full(
-                    boxed.downcast_cancel(returns).unwrap(),
+                    boxed.downcast_then_cancel(returns).unwrap(),
                 )),
                 TrySendUncheckedError::Closed(boxed) => Err(TrySendUncheckedError::Closed(
-                    boxed.downcast_cancel(returns).unwrap(),
+                    boxed.downcast_then_cancel(returns).unwrap(),
                 )),
                 TrySendUncheckedError::NotAccepted(boxed) => Err(
-                    TrySendUncheckedError::NotAccepted(boxed.downcast_cancel(returns).unwrap()),
+                    TrySendUncheckedError::NotAccepted(boxed.downcast_then_cancel(returns).unwrap()),
                 ),
             },
         }
     }
 
-    pub(crate) fn send_now_unchecked<M>(
+    pub fn send_now_unchecked<M>(
         &self,
         msg: M,
-    ) -> Result<Returned<M>, TrySendUncheckedError<M>>
+    ) -> Result<M::Returned, TrySendUncheckedError<M>>
     where
         M: Message,
-        Sent<M>: Send + 'static,
+        M::Payload: Send + 'static,
     {
-        let (sends, returns) = <M::Type as MessageType<M>>::create(msg);
-        let res = self.send_now_boxed(BoxedMessage::new::<M>(sends));
+        let (sends, returns) = M::create(msg);
+        let res = self.send_now_boxed(AnyMessage::new::<M>(sends));
 
         match res {
             Ok(()) => Ok(returns),
             Err(e) => match e {
                 TrySendUncheckedError::Full(boxed) => Err(TrySendUncheckedError::Full(
-                    boxed.downcast_cancel(returns).unwrap(),
+                    boxed.downcast_then_cancel(returns).unwrap(),
                 )),
                 TrySendUncheckedError::Closed(boxed) => Err(TrySendUncheckedError::Closed(
-                    boxed.downcast_cancel(returns).unwrap(),
+                    boxed.downcast_then_cancel(returns).unwrap(),
                 )),
                 TrySendUncheckedError::NotAccepted(boxed) => Err(
-                    TrySendUncheckedError::NotAccepted(boxed.downcast_cancel(returns).unwrap()),
+                    TrySendUncheckedError::NotAccepted(boxed.downcast_then_cancel(returns).unwrap()),
                 ),
             },
         }
     }
 
-    pub(crate) fn send_blocking_unchecked<M>(
+    pub fn send_blocking_unchecked<M>(
         &self,
         msg: M,
-    ) -> Result<Returned<M>, SendUncheckedError<M>>
+    ) -> Result<M::Returned, SendUncheckedError<M>>
     where
         M: Message,
-        Sent<M>: Send + 'static,
+        M::Payload: Send + 'static,
     {
-        let (sends, returns) = <M::Type as MessageType<M>>::create(msg);
-        let res = self.send_blocking_boxed(BoxedMessage::new::<M>(sends));
+        let (sends, returns) = M::create(msg);
+        let res = self.send_blocking_boxed(AnyMessage::new::<M>(sends));
 
         match res {
             Ok(()) => Ok(returns),
             Err(e) => match e {
                 SendUncheckedError::Closed(boxed) => Err(SendUncheckedError::Closed(
-                    boxed.downcast_cancel(returns).unwrap(),
+                    boxed.downcast_then_cancel(returns).unwrap(),
                 )),
                 SendUncheckedError::NotAccepted(boxed) => Err(SendUncheckedError::NotAccepted(
-                    boxed.downcast_cancel(returns).unwrap(),
+                    boxed.downcast_then_cancel(returns).unwrap(),
                 )),
             },
         }
     }
 
-    pub(crate) fn send_unchecked<M>(
+    pub fn send_unchecked<M>(
         &self,
         msg: M,
-    ) -> BoxFuture<'_, Result<Returned<M>, SendUncheckedError<M>>>
+    ) -> BoxFuture<'_, Result<M::Returned, SendUncheckedError<M>>>
     where
-        <M::Type as MessageType<M>>::Returned: Send,
+        M::Returned: Send,
         M: Message + Send + 'static,
-        Sent<M>: Send + 'static,
+        M::Payload: Send + 'static,
     {
         Box::pin(async move {
-            let (sends, returns) = <M::Type as MessageType<M>>::create(msg);
-            let res = self.send_boxed(BoxedMessage::new::<M>(sends)).await;
+            let (sends, returns) = M::create(msg);
+            let res = self.send_boxed(AnyMessage::new::<M>(sends)).await;
 
             match res {
                 Ok(()) => Ok(returns),
                 Err(e) => match e {
                     SendUncheckedError::Closed(boxed) => Err(SendUncheckedError::Closed(
-                        boxed.downcast_cancel(returns).unwrap(),
+                        boxed.downcast_then_cancel(returns).unwrap(),
                     )),
                     SendUncheckedError::NotAccepted(boxed) => Err(SendUncheckedError::NotAccepted(
-                        boxed.downcast_cancel(returns).unwrap(),
+                        boxed.downcast_then_cancel(returns).unwrap(),
                     )),
                 },
             }

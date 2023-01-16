@@ -1,12 +1,17 @@
-use zestors_core::*;
 use event_listener::{Event, EventListener};
-use zestors_core::ActorId;
 use std::{
     any::Any,
     sync::{
         atomic::{AtomicI32, AtomicUsize, Ordering},
         Arc,
     },
+};
+use zestors_core::{
+    actor_kind::ActorKind,
+    channel::{ActorId, Channel, DynChannel},
+    config::Capacity,
+    messaging::{AnyMessage, SendUncheckedError, TrySendUncheckedError},
+    *,
 };
 
 use crate::halter::Halter;
@@ -22,16 +27,12 @@ pub struct HalterChannel {
     halt_event: Event,
 }
 
-impl DefineChannel for Halter {
+impl ActorKind for Halter {
     type Channel = HalterChannel;
 
     fn into_dyn_channel(channel: Arc<Self::Channel>) -> Arc<dyn DynChannel> {
         channel
     }
-}
-
-impl DefineSizedChannel for Halter {
-    type Spawned = Halter;
 }
 
 impl HalterChannel {
@@ -146,32 +147,23 @@ impl Channel for HalterChannel {
 }
 
 impl DynChannel for HalterChannel {
-    fn try_send_boxed(
-        &self,
-        boxed: BoxedMessage,
-    ) -> Result<(), TrySendUncheckedError<BoxedMessage>> {
+    fn try_send_boxed(&self, boxed: AnyMessage) -> Result<(), TrySendUncheckedError<AnyMessage>> {
         Err(TrySendUncheckedError::NotAccepted(boxed))
     }
 
-    fn send_now_boxed(
-        &self,
-        boxed: BoxedMessage,
-    ) -> Result<(), TrySendUncheckedError<BoxedMessage>> {
+    fn send_now_boxed(&self, boxed: AnyMessage) -> Result<(), TrySendUncheckedError<AnyMessage>> {
         Err(TrySendUncheckedError::NotAccepted(boxed))
     }
 
-    fn send_blocking_boxed(
-        &self,
-        boxed: BoxedMessage,
-    ) -> Result<(), SendUncheckedError<BoxedMessage>> {
+    fn send_blocking_boxed(&self, boxed: AnyMessage) -> Result<(), SendUncheckedError<AnyMessage>> {
         Err(SendUncheckedError::NotAccepted(boxed))
     }
 
     fn send_boxed<'a>(
         &'a self,
-        boxed: BoxedMessage,
+        boxed: AnyMessage,
     ) -> std::pin::Pin<
-        Box<dyn futures::Future<Output = Result<(), SendUncheckedError<BoxedMessage>>> + Send + 'a>,
+        Box<dyn futures::Future<Output = Result<(), SendUncheckedError<AnyMessage>>> + Send + 'a>,
     > {
         Box::pin(async move { Err(SendUncheckedError::NotAccepted(boxed)) })
     }

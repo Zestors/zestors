@@ -4,7 +4,7 @@ Supervising an actor can be done by waiting for it to exit using it's [Child]. T
 # Child
 A [`Child`] is a unique reference to an actor, similar to a [tokio JoinHandle](tokio::task::JoinHandle), but different in that it could refer to multiple processes instead of just one. By default, when a child is dropped the processes that the child referred to are shut down; this allows for the creation of supervision trees.
 
-If an actor contains multiple processes, then instead of a [`Child`] it is refered to as a [`ChildPool`]. A childpool can't be awaited, but instead the childpool can be [streamed](futures::Stream) to collect the exit-values of the processes.
+If an actor contains multiple processes, then instead of a [`Child`] it is refered to as a [`ChildGroup`]. A childgroup can't be awaited, but instead the childgroup can be [streamed](futures::Stream) to collect the exit-values of the processes.
 
 # Stopping
 

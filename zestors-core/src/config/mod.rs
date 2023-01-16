@@ -8,7 +8,8 @@ use std::{
 ///
 /// # Example
 /// ```no_run
-/// # use zestors_core::*;
+/// # use zestors_core::config::*;
+///
 /// Config {
 ///     link: Link::default(),
 ///     capacity: Capacity::default(),
@@ -31,14 +32,16 @@ impl Config {
         Self { link, capacity }
     }
 
-    /// A config for a default bounded channel.
-    /// ```no_run
-    /// # use zestors_core::*;
-    /// # let capacity = 1;
-    /// Config {
-    ///     link: Link::default(),
-    ///     capacity: Capacity::Bounded(capacity),
-    /// };
+    /// A config for a default bounded channel:
+    /// ```
+    /// # use zestors_core::config::*;
+    /// assert_eq!(
+    ///     Config::bounded(10),
+    ///     Config {
+    ///         link: Link::default(),
+    ///         capacity: Capacity::Bounded(10),
+    ///     }
+    /// );
     /// ```
     pub fn bounded(capacity: usize) -> Self {
         Self {
@@ -47,14 +50,38 @@ impl Config {
         }
     }
 
+    /// A config for an unbounded channel:
+    /// ```
+    /// # use zestors_core::config::*;
+    /// assert_eq!(
+    ///     Config::unbounded(),
+    ///     Config {
+    ///         link: Link::default(),
+    ///         capacity: Capacity::default(),
+    ///     }
+    /// );
+    /// assert_eq!(
+    ///     Config::unbounded(),
+    ///     Config::default()
+    /// );
+    /// ```
+    pub fn unbounded() -> Self {
+        Self {
+            link: Link::default(),
+            capacity: Capacity::default(),
+        }
+    }
+
     /// A default bounded inbox:
-    /// ```no_run
-    /// # use zestors_core::*;
-    /// # let capacity = 1;
-    /// Config {
-    ///     link: Link::Detached,
-    ///     capacity: Capacity::default(),
-    /// };
+    /// ```
+    /// # use zestors_core::config::*;
+    /// assert_eq!(
+    ///     Config::detached(),
+    ///     Config {
+    ///         link: Link::Detached,
+    ///         capacity: Capacity::default(),
+    ///     }
+    /// );
     /// ```
     pub fn detached() -> Self {
         Self {
@@ -63,6 +90,18 @@ impl Config {
         }
     }
 
+    /// A default bounded inbox:
+    /// ```
+    /// # use zestors_core::config::*;
+    /// # use std::time::Duration;
+    /// assert_eq!(
+    ///     Config::attached(Duration::from_secs(1)),
+    ///     Config {
+    ///         link: Link::Attached(Duration::from_secs(1)),
+    ///         capacity: Capacity::default(),
+    ///     }
+    /// );
+    /// ```
     pub fn attached(timeout: Duration) -> Self {
         Self {
             link: Link::Attached(timeout),
@@ -83,7 +122,7 @@ pub enum Link {
 }
 
 impl Link {
-    pub(crate) fn attach(&mut self, mut duration: Duration) -> Option<Duration> {
+    pub fn attach(&mut self, mut duration: Duration) -> Option<Duration> {
         match self {
             Link::Detached => {
                 *self = Link::Attached(duration);
@@ -96,7 +135,7 @@ impl Link {
         }
     }
 
-    pub(crate) fn detach(&mut self) -> Option<Duration> {
+    pub fn detach(&mut self) -> Option<Duration> {
         match self {
             Link::Detached => {
                 *self = Link::Detached;

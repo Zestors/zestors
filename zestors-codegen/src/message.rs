@@ -48,8 +48,15 @@ pub fn derive_message(item: TokenStream) -> Result<TokenStream, Error> {
     };
 
     Ok(quote! {
-        impl #impl_generics zestors::core::protocol::Message for #ident #ty_generics #where_clause {
-            type Type = #returns;
+        impl #impl_generics zestors::messaging::Message for #ident #ty_generics #where_clause {
+            type Returned = <#returns as zestors::messaging::MessageDerive<Self>>::Returned;
+            type Payload = <#returns as zestors::messaging::MessageDerive<Self>>::Payload;
+            fn create(self) -> (Self::Payload, Self::Returned) {
+                <#returns as zestors::messaging::MessageDerive<Self>>::create(self)
+            }
+            fn cancel(payload: Self::Payload, returned: Self::Returned) -> Self {
+                <#returns as zestors::messaging::MessageDerive<Self>>::cancel(payload, returned)
+            }
         }
     })
 }
