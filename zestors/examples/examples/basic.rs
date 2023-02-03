@@ -4,7 +4,7 @@
 // #[tokio::main]
 // async fn main() {
 //     // First we spawn an actor with a default config, and an inbox which receives u32 messages.
-//     let (mut child, address) = spawn_process(Config::default(), |mut inbox: Inbox<u32>| async move {
+//     let (mut child, address) = spawn_process( |mut inbox: Inbox<u32>| async move {
 //         loop {
 //             // This loops and receives messages
 //             match inbox.recv().await {

@@ -1,8 +1,11 @@
 mod any_message;
-mod protocol;
+mod errors;
+mod into_recv;
 mod message;
-mod rest;
-pub use rest::*;
+mod protocol;
+
 pub use any_message::*;
-pub use protocol::*;
+pub use errors::*;
+pub use into_recv::*;
 pub use message::*;
+pub use protocol::*;

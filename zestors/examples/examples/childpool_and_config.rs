@@ -6,7 +6,7 @@
 // async fn main() {
 //     // First we spawn an actor with a custom config, and an inbox which receives u32 messages.
 //     // This will spawn 3 processes, with i = {0, 1, 2}.
-//     let (mut group, address) = spawn_many_processes(
+//     let (mut group, address) = spawn_group_processes(
 //         0..3,
 //         Config {
 //             link: Link::Attached(Duration::from_secs(1)),

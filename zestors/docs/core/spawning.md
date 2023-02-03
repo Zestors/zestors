@@ -2,7 +2,7 @@
 A new actor can be spawned using one of the following methods:
 - [`spawn`] : Spawn an actor consisting of one process that returns a [`Child`].
 - [`spawn_one`] : Spawn an actor consisting of one process that returns a [`ChildGroup`].
-- [`spawn_many`] : Spawn an actor consisting of multiple processes that returns a [`ChildGroup`].
+- [`spawn_group`] : Spawn an actor consisting of multiple processes that returns a [`ChildGroup`].
 
 Additional processes can be spawned onto an actor with:
 - [`ChildGroup::spawn`]

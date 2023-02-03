@@ -75,7 +75,7 @@ impl Supervisor {
             supervisees.push(spec.start().await?);
         }
 
-        let (child, address) = spawn_process(Config::default(), move |inbox| async move {
+        let (child, address) = spawn_process( move |inbox| async move {
             Self { supervisees, inbox }.await
         });
 

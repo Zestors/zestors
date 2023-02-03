@@ -4,7 +4,7 @@ use zestors::all::*;
 
 #[tokio::test]
 async fn spawn_and_abort() {
-    let (mut child, _address) = spawn(Config::default(), |_: Inbox<()>| async move {
+    let (mut child, _address) = spawn(|_: Inbox<()>| async move {
         let () = pending().await;
     });
     child.abort();
@@ -13,7 +13,7 @@ async fn spawn_and_abort() {
 
 #[tokio::test]
 async fn spawn_await_address() {
-    let (mut child, address) = spawn(Config::default(), |_: Inbox<()>| async move {
+    let (mut child, address) = spawn(|_: Inbox<()>| async move {
         let () = pending().await;
     });
     child.abort();
@@ -22,19 +22,19 @@ async fn spawn_await_address() {
 
 #[tokio::test]
 async fn spawn_and_panic() {
-    let (child, _address) = spawn(Config::default(), |_: Inbox<()>| async move { panic!() });
+    let (child, _address) = spawn(|_: Inbox<()>| async move { panic!() });
     assert!(child.await.unwrap_err().is_panic());
 }
 
 #[tokio::test]
 async fn spawn_and_normal_exit() {
-    let (child, _address) = spawn(Config::default(), |_: Inbox<()>| async move {});
+    let (child, _address) = spawn(|_: Inbox<()>| async move {});
     assert!(child.await.is_ok());
 }
 
 #[tokio::test]
 async fn spawn_and_halt() {
-    let (child, _address) = spawn(Config::default(), |mut inbox: Inbox<()>| async move {
+    let (child, _address) = spawn(|mut inbox: Inbox<()>| async move {
         assert_eq!(inbox.recv().await.unwrap_err(), RecvError::Halted);
     });
     child.halt();
@@ -43,11 +43,9 @@ async fn spawn_and_halt() {
 
 #[tokio::test]
 async fn spawn_and_drop() {
-    let (child, address) = spawn(
-        Config {
-            link: Link::Attached(Duration::from_millis(10)),
-            capacity: Capacity::Bounded(10),
-        },
+    let (child, address) = spawn_with(
+        Link::Attached(Duration::from_millis(10)),
+        Capacity::Bounded(10),
         |mut inbox: Inbox<()>| async move {
             assert_eq!(inbox.recv().await.unwrap_err(), RecvError::Halted);
             let () = pending().await;
@@ -59,8 +57,9 @@ async fn spawn_and_drop() {
 
 #[tokio::test]
 async fn spawn_and_drop_detached() {
-    let (child, address) = spawn(
-        Config::new(Link::Detached, Capacity::Unbounded(BackPressure::default())),
+    let (child, address) = spawn_with(
+        Link::Detached,
+        Capacity::Unbounded(BackPressure::default()),
         |mut inbox: Inbox<()>| async move {
             assert_eq!(inbox.recv().await.unwrap(), ());
         },
@@ -73,7 +72,7 @@ async fn spawn_and_drop_detached() {
 
 #[tokio::test]
 async fn base_counts() {
-    let (mut child, address) = spawn(Config::default(), |inbox: Inbox<()>| async move {
+    let (mut child, address) = spawn(|inbox: Inbox<()>| async move {
         pending::<()>().await;
         drop(inbox);
     });
@@ -85,7 +84,7 @@ async fn base_counts() {
 
 #[tokio::test]
 async fn address_counts() {
-    let (mut child, address) = spawn(Config::default(), |inbox: Inbox<()>| async move {
+    let (mut child, address) = spawn(|inbox: Inbox<()>| async move {
         pending::<()>().await;
         drop(inbox);
     });
@@ -99,13 +98,9 @@ async fn address_counts() {
 
 #[tokio::test]
 async fn inbox_counts() {
-    let (group, _address) = spawn_many(
-        0..4,
-        Config::default(),
-        |_, mut inbox: Inbox<()>| async move {
-            inbox.recv().await.unwrap_err();
-        },
-    );
+    let (group, _address) = spawn_group(0..4, |_, mut inbox: Inbox<()>| async move {
+        inbox.recv().await.unwrap_err();
+    });
     let mut group = group.into_dyn();
     assert_eq!(group.process_count(), 4);
 
@@ -113,10 +108,11 @@ async fn inbox_counts() {
     tokio::time::sleep(Duration::from_millis(10)).await;
     assert_eq!(group.process_count(), 3);
 
-    group.try_spawn(|mut inbox: Inbox<()>| async move {
-        inbox.recv().await.unwrap_err();
-    })
-    .unwrap();
+    group
+        .try_spawn_onto(|mut inbox: Inbox<()>| async move {
+            inbox.recv().await.unwrap_err();
+        })
+        .unwrap();
     assert_eq!(group.process_count(), 4);
 
     group.halt_some(2);
@@ -135,9 +131,10 @@ enum U32Protocol {
 
 #[tokio::test]
 async fn grouped_messaging_split() {
-    let (group, address) = spawn_many(
+    let (group, address) = spawn_group_with(
+        Link::default(),
+        Capacity::Bounded(5),
         0..3,
-        Config::bounded(5),
         |_, mut inbox: Inbox<U32Protocol>| async move {
             let mut numbers = Vec::new();
             loop {

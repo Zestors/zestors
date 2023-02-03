@@ -1,5 +1,5 @@
 use super::*;
-use std::any::TypeId;
+use std::{any::TypeId, sync::Arc};
 
 /// This trait must be implemented for all channels through which (messages)[Message] will be sent.
 ///
@@ -64,6 +64,36 @@ impl ProtocolFrom<()> for () {
     }
 
     fn try_into_msg(self) -> Result<(), Self>
+    where
+        Self: Sized,
+    {
+        Ok(self)
+    }
+}
+
+impl Protocol for Arc<()> {
+    fn into_msg(self) -> AnyMessage {
+        AnyMessage::new::<Arc<()>>(self)
+    }
+
+    fn try_from_msg(boxed: AnyMessage) -> Result<Self, AnyMessage> {
+        boxed.downcast::<Arc<()>>()
+    }
+
+    fn accepts_msg(msg_id: &std::any::TypeId) -> bool {
+        *msg_id == TypeId::of::<Arc<()>>()
+    }
+}
+
+impl ProtocolFrom<Arc<()>> for Arc<()> {
+    fn from_msg(msg: <Arc<()> as Message>::Payload) -> Self
+    where
+        Self: Sized,
+    {
+        msg
+    }
+
+    fn try_into_msg(self) -> Result<<Arc<()> as Message>::Payload, Self>
     where
         Self: Sized,
     {

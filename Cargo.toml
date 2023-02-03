@@ -3,6 +3,5 @@ members = [
     "zestors", 
     "zestors-codegen", 
     "zestors-core", 
-    "zestors-channels", 
-    "zestors-request",
+    "zestors-extra", 
 ]

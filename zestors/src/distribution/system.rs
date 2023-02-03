@@ -22,7 +22,7 @@ impl Node {
     pub async fn spawn(sock: SocketAddr) -> Result<(Child<NodeExit>, Node), io::Error> {
         let listener = TcpListener::bind(sock).await?;
 
-        let (child, address) = spawn(Config::default(), move |inbox| async move {
+        let (child, address) = spawn( move |inbox| async move {
             NodeActor::new(inbox, listener).run().await
         });
 

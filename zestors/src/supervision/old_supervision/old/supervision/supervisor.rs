@@ -70,7 +70,7 @@ impl SupervisorBuilder {
     }
 
     pub fn spawn(self) -> (Child<()>, SupervisorRef) {
-        let (child, address) = spawn_process(Config::default(), |inbox: Inbox<()>| async move {
+        let (child, address) = spawn_process( |inbox: Inbox<()>| async move {
             Supervisor {
                 children: self.children.into_iter().map(|child| child()).collect(),
                 inbox,

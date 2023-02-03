@@ -42,7 +42,7 @@ Every actor has a unique [ActorId] generated incrementally when a new actor is s
 An actor can use different channels depending on its need. Currently two channels are supported: An [InboxChannel] and a [HalterChannel]. The difference is that an inbox-channel can be used to send messages while a halter-channel can not. Both channels can be transformed into a [dyn DynChannel](DynChannel) which allows different channels to be used as the same type for addresses and children.
 
 ### Channel definition
-The parameter `C` in a [`Child<_, C, _>`] and an [`Address<C>`](Address) both implement [`ActorKind`], and define which channel the actor uses. Depending on the parameter `C`, we can send different types of messages to an actor. `C` can either be a sized channel of:
+The parameter `C` in a [`Child<_, C, _>`] and an [`Address<C>`](Address) both implement [`ActorType`], and define which channel the actor uses. Depending on the parameter `C`, we can send different types of messages to an actor. `C` can either be a sized channel of:
 - [`Halter`] : Indicates that the channel is a [HalterChannel] which does not accept any messages.
 - [`P where P: Protocol`](Protocol) : Indicates that the channel is an [InboxChannel] which accepts messages that the protocol `P` accepts.
 

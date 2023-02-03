@@ -54,7 +54,7 @@ where
             Ok(init) => {
                 let spawn_fn = self.spawn_fn;
                 let (child, _address) =
-                    spawn_process(Config::default(), move |inbox: Inbox<P>| async move {
+                    spawn_process( move |inbox: Inbox<P>| async move {
                         spawn_fn(inbox, init).await
                     });
                 let mut child = child.into_dyn();

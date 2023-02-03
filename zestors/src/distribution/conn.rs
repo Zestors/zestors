@@ -19,7 +19,7 @@ pub struct ConnExit;
 
 impl Conn {
     pub(crate) fn spawn_incoming(stream: TcpStream) -> (Child<ConnExit, ConnProtocol>, Conn) {
-        let (child, address) = spawn(Config::default(), move |inbox| async move {
+        let (child, address) = spawn( move |inbox| async move {
             ConnActor::new(inbox, stream).run().await
         });
 
@@ -32,7 +32,7 @@ impl Conn {
     ) -> (Child<ConnExit, ConnProtocol>, Conn) {
         let (conn_tx, conn_rx) = new::<Conn>();
 
-        let (child, address) = spawn(Config::default(), move |inbox| async move {
+        let (child, address) = spawn( move |inbox| async move {
             if let Ok(stream) = TcpStream::connect(peer_sock).await {
                 let conn = conn_rx.await.unwrap();
                 let _ = tx.send(Ok(conn));

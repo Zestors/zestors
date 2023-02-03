@@ -81,7 +81,7 @@ impl Supervisor {
         }
 
         // Now we can spawn and run the supervisor.
-        let (child, address) = spawn_process(Config::default(), move |inbox| async move {
+        let (child, address) = spawn_process( move |inbox| async move {
             Self {
                 children,
                 inbox,
