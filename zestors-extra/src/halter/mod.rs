@@ -86,6 +86,6 @@ impl Future for Halter {
 
 impl Drop for Halter {
     fn drop(&mut self) {
-        self.channel.decrement_halter_count(1)
+        self.channel.remove_halter();
     }
 }

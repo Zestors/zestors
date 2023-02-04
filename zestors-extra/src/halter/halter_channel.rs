@@ -8,9 +8,9 @@ use std::{
 };
 use zestors_core::{
     actor_type::ActorType,
-    monitoring::{ActorId, Channel},
     inboxes::Capacity,
     messaging::{AnyMessage, SendCheckedError, TrySendCheckedError},
+    monitoring::{ActorId, Channel},
     *,
 };
 
@@ -43,12 +43,30 @@ impl HalterChannel {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn to_halt(&self) -> i32 {
+        self.to_halt.load(Ordering::Acquire)
+    }
+
     pub(crate) fn get_halt_listener(&self) -> EventListener {
         self.halt_event.listen()
     }
 
     pub(crate) fn should_halt(&self) -> bool {
-        let halt_count = self.to_halt.fetch_sub(1, Ordering::AcqRel);
+        //     // If the count is bigger than 0, we might have to halt.
+        //     if self.halt_count.load(Ordering::Acquire) > 0 {
+        //         // Now subtract 1 from the count
+        //         let prev_count = self.halt_count.fetch_sub(1, Ordering::AcqRel);
+        //         // If the count before updating was bigger than 0, we halt.
+        //         // If this decrements below 0, we treat it as if it's 0.
+        //         if prev_count > 0 {
+        //             return true;
+        //         }
+        //     }
+
+        //     // Otherwise, just continue
+        //     false
+        let halt_count = dbg!(self.to_halt.fetch_sub(1, Ordering::AcqRel));
         if halt_count > 0 {
             true
         } else {
@@ -69,8 +87,22 @@ impl HalterChannel {
         }
     }
 
-    pub(crate) fn decrement_halter_count(&self, n: usize) {
-        self.halter_count.fetch_sub(n, Ordering::AcqRel);
+    pub(crate) fn decrement_halter_count(&self, n: usize) -> usize {
+        self.halter_count.fetch_sub(n, Ordering::AcqRel)
+    }
+
+    /// Removes a halter and returns the previous halter_count.
+    ///
+    /// - Panics if the old count was 0.
+    /// - Triggers an exit if the old count was 1.
+    pub(crate) fn remove_halter(&self) -> usize {
+        let prev_count = self.decrement_halter_count(1);
+        match prev_count {
+            0 => panic!(),
+            1 => self.exit_event.notify(usize::MAX),
+            _ => (),
+        };
+        prev_count
     }
 }
 
@@ -79,10 +111,15 @@ impl Channel for HalterChannel {
         false
     }
     fn halt_some(&self, n: u32) {
-        let n = n.try_into().unwrap_or(i32::MAX);
-        self.to_halt
+        let n = dbg!(n.try_into().unwrap_or(i32::MAX));
+        let res = self
+            .to_halt
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |x| {
-                Some(x.saturating_add(n))
+                if x <= 0 {
+                    Some(n)
+                } else {
+                    Some(x.saturating_add(n))
+                }
             })
             .unwrap();
         self.halt_event.notify(n as usize)

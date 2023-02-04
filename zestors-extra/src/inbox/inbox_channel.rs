@@ -1,3 +1,5 @@
+use crate::halter::HalterChannel;
+
 use super::*;
 use concurrent_queue::{ConcurrentQueue, PopError, PushError};
 use event_listener::{Event, EventListener};
@@ -14,37 +16,38 @@ use std::{
 };
 use tokio::{task::yield_now, time::Sleep};
 use zestors_core::{
-    monitoring::{ActorId, Channel},
     inboxes::Capacity,
     messaging::{
-        AnyMessage, Protocol, SendError, SendCheckedError, TrySendError, TrySendCheckedError,
+        AnyMessage, Protocol, SendCheckedError, SendError, TrySendCheckedError, TrySendError,
     },
+    monitoring::{ActorId, Channel},
 };
 
 /// A [Channel] with an inbox used to receive messages.
 pub struct InboxChannel<M> {
+    halter_channel: HalterChannel,
     /// The underlying queue
     queue: ConcurrentQueue<M>,
     /// The capacity of the channel
     capacity: Capacity,
     /// The amount of addresses associated to this channel.
     /// Once this is 0, not more addresses can be created and the Channel is closed.
-    address_count: AtomicUsize,
+    // address_count: AtomicUsize,
     /// The amount of inboxes associated to this channel.
     /// Once this is 0, it is impossible to spawn new processes, and the Channel.
     /// has exited.
-    inbox_count: AtomicUsize,
+    // inbox_count: AtomicUsize,
     /// Subscribe when trying to receive a message from this channel.
     recv_event: Event,
     /// Subscribe when trying to send a message into this channel.
     send_event: Event,
-    /// Subscribe when waiting for Actor to exit.
-    exit_event: Event,
-    /// The amount of processes that should still be halted.
-    /// Can be negative bigger than amount of processes in total.
-    halt_count: AtomicI32,
-    /// The actor_id, generated once and cannot be changed afterwards.
-    actor_id: ActorId,
+    // Subscribe when waiting for Actor to exit.
+    // exit_event: Event,
+    // The amount of processes that should still be halted.
+    // Can be negative bigger than amount of processes in total.
+    // halt_count: AtomicI32,
+    // The actor_id, generated once and cannot be changed afterwards.
+    // actor_id: ActorId,
 }
 
 impl<P: Protocol> InboxChannel<P> {
@@ -63,14 +66,14 @@ impl<P: Protocol> InboxChannel<P> {
                 Capacity::Unbounded(_) => ConcurrentQueue::unbounded(),
             },
             capacity,
-            address_count: AtomicUsize::new(address_count),
-            inbox_count: AtomicUsize::new(inbox_count),
+            halter_channel: HalterChannel::new(address_count, inbox_count, actor_id),
             recv_event: Event::new(),
             send_event: Event::new(),
-            exit_event: Event::new(),
-            halt_count: AtomicI32::new(0),
-            actor_id,
         }
+    }
+
+    pub(crate) fn empty_inbox(&self) {
+        while self.pop_msg().is_ok() {}
     }
 
     /// Remove an Inbox from the channel, decrementing inbox-count by 1. This should be
@@ -88,19 +91,10 @@ impl<P: Protocol> InboxChannel<P> {
     /// ## Panics
     /// * `prev-inbox-count == 0`
     pub(crate) fn remove_inbox(&self) -> usize {
-        // Subtract one from the inbox count
-        let prev_count = self.inbox_count.fetch_sub(1, Ordering::AcqRel);
-        assert!(prev_count != 0);
-
-        // If previous count was 1, then all inboxes have been dropped.
+        let prev_count = dbg!(self.halter_channel.remove_halter());
         if prev_count == 1 {
-            self.close();
-            // Also notify the exit-listeners, since the process exited.
-            self.exit_event.notify(usize::MAX);
-            // drop all messages, since no more inboxes exist.
-            while self.pop_msg().is_ok() {}
+            self.empty_inbox()
         }
-
         prev_count
     }
 
@@ -135,27 +129,6 @@ impl<P: Protocol> InboxChannel<P> {
         }
     }
 
-    /// Can be called by an inbox to know whether it should halt.
-    ///
-    /// This decrements the halt-counter by one when it is called, therefore every
-    /// inbox should only receive true from this method once! The inbox keeps it's own
-    /// local state about whether it has received true from this method.
-    pub(crate) fn inbox_should_halt(&self) -> bool {
-        // If the count is bigger than 0, we might have to halt.
-        if self.halt_count.load(Ordering::Acquire) > 0 {
-            // Now subtract 1 from the count
-            let prev_count = self.halt_count.fetch_sub(1, Ordering::AcqRel);
-            // If the count before updating was bigger than 0, we halt.
-            // If this decrements below 0, we treat it as if it's 0.
-            if prev_count > 0 {
-                return true;
-            }
-        }
-
-        // Otherwise, just continue
-        false
-    }
-
     /// Get a new recv-event listener
     pub(crate) fn get_recv_listener(&self) -> EventListener {
         self.recv_event.listen()
@@ -166,15 +139,10 @@ impl<P: Protocol> InboxChannel<P> {
         self.send_event.listen()
     }
 
-    /// Get a new exit-event listener
-    pub(crate) fn get_exit_listener(&self) -> EventListener {
-        self.exit_event.listen()
-    }
-
     /// This will attempt to receive a message from the [Inbox]. If there is no message, this
     /// will return `None`.
     pub(crate) fn try_recv(&self, signaled_halt: &mut bool) -> Result<P, TryRecvError> {
-        if !(*signaled_halt) && self.inbox_should_halt() {
+        if !(*signaled_halt) && self.halter_channel.should_halt() {
             *signaled_halt = true;
             Err(TryRecvError::Halted)
         } else {
@@ -299,26 +267,12 @@ impl<P: Protocol> Channel for InboxChannel<P> {
     /// # Notifies
     /// * all recv-listeners
     fn halt_some(&self, n: u32) {
-        let n = i32::try_from(n).unwrap_or(i32::MAX);
-
-        self.halt_count
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                // If the count < 0, act as if it's 0.
-                if count < 0 {
-                    Some(n)
-                } else {
-                    // Otherwise, add both together.
-                    Some(count.saturating_add(n))
-                }
-            })
-            .unwrap();
-
-        self.recv_event.notify(usize::MAX);
+        self.halter_channel.halt_some(n)
     }
 
     /// Returns the amount of inboxes this channel has.
     fn process_count(&self) -> usize {
-        self.inbox_count.load(Ordering::Acquire)
+        self.halter_channel.process_count()
     }
 
     /// Returns the amount of messages currently in the channel.
@@ -328,7 +282,7 @@ impl<P: Protocol> Channel for InboxChannel<P> {
 
     /// Returns the amount of addresses this channel has.
     fn address_count(&self) -> usize {
-        self.address_count.load(Ordering::Acquire)
+        self.halter_channel.address_count()
     }
 
     /// Whether the queue asscociated to the channel has been closed.
@@ -343,7 +297,7 @@ impl<P: Protocol> Channel for InboxChannel<P> {
 
     /// Whether all inboxes linked to this channel have exited.
     fn has_exited(&self) -> bool {
-        self.inbox_count.load(Ordering::Acquire) == 0
+        self.halter_channel.has_exited()
     }
 
     /// Add an Address to the channel, incrementing address-count by 1. Afterwards,
@@ -351,7 +305,7 @@ impl<P: Protocol> Channel for InboxChannel<P> {
     ///
     /// Returns the previous inbox-count
     fn add_address(&self) -> usize {
-        self.address_count.fetch_add(1, Ordering::AcqRel)
+        self.halter_channel.add_address()
     }
 
     /// Remove an Address from the channel, decrementing address-count by 1. This should
@@ -363,18 +317,16 @@ impl<P: Protocol> Channel for InboxChannel<P> {
     /// ## Panics
     /// * `prev-address-count == 0`
     fn remove_address(&self) -> usize {
-        let prev_address_count = self.address_count.fetch_sub(1, Ordering::AcqRel);
-        assert!(prev_address_count >= 1);
-        prev_address_count
+        self.halter_channel.remove_address()
     }
 
     fn get_exit_listener(&self) -> EventListener {
-        self.get_exit_listener()
+        self.halter_channel.get_exit_listener()
     }
 
     /// Get the actor_id.
     fn actor_id(&self) -> ActorId {
-        self.actor_id
+        self.halter_channel.actor_id()
     }
 
     // Closes the channel and halts all actors.
@@ -384,20 +336,7 @@ impl<P: Protocol> Channel for InboxChannel<P> {
     }
 
     fn try_add_inbox(&self) -> Result<usize, ()> {
-        let result = self
-            .inbox_count
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |val| {
-                if val < 1 {
-                    None
-                } else {
-                    Some(val + 1)
-                }
-            });
-
-        match result {
-            Ok(prev) => Ok(prev),
-            Err(_) => Err(()),
-        }
+        self.halter_channel.try_add_inbox()
     }
 
     fn try_send_boxed(&self, boxed: AnyMessage) -> Result<(), TrySendCheckedError<AnyMessage>> {
@@ -459,12 +398,12 @@ impl<P: Protocol> Channel for InboxChannel<P> {
 
 impl<M> Debug for InboxChannel<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Channel")
+        f.debug_struct("InboxChannel")
+            .field("halter_channel", &self.halter_channel)
             .field("queue", &self.queue)
             .field("capacity", &self.capacity)
-            .field("address_count", &self.address_count)
-            .field("inbox_count", &self.inbox_count)
-            .field("halt_count", &self.halt_count)
+            .field("recv_event", &self.recv_event)
+            .field("send_event", &self.send_event)
             .finish()
     }
 }
@@ -1096,7 +1035,7 @@ mod test2 {
 
         channel.halt();
 
-        assert_eq!(channel.halt_count.load(Ordering::Acquire), i32::MAX);
+        assert_eq!(channel.halter_channel.to_halt(), i32::MAX);
         listeners.assert_notified(Assert {
             recv: 10,
             exit: 0,
@@ -1118,7 +1057,7 @@ mod test2 {
 
         channel.halt_some(2);
 
-        assert_eq!(channel.halt_count.load(Ordering::Acquire), 2);
+        assert_eq!(channel.halter_channel.to_halt(), 2);
         listeners.assert_notified(Assert {
             recv: 10,
             exit: 0,
@@ -1131,9 +1070,9 @@ mod test2 {
         let channel = InboxChannel::<()>::new(1, 3, Capacity::default(), ActorId::generate());
         channel.halt_some(2);
 
-        assert!(channel.inbox_should_halt());
-        assert!(channel.inbox_should_halt());
-        assert!(!channel.inbox_should_halt());
+        assert!(channel.halter_channel.should_halt());
+        assert!(channel.halter_channel.should_halt());
+        assert!(!channel.halter_channel.should_halt());
     }
 
     struct Listeners {

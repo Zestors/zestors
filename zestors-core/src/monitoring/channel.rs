@@ -7,6 +7,8 @@ use std::{
     sync::Arc,
 };
 
+
+
 /// Trait that all channels must implement.
 pub trait Channel: Send + Sync + Debug {
     fn into_dyn(self: Arc<Self>) -> Arc<dyn Channel>;

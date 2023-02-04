@@ -115,6 +115,7 @@ async fn inbox_counts() {
         .unwrap();
     assert_eq!(group.process_count(), 4);
 
+    println!("____THIS IS THE POINT____");
     group.halt_some(2);
     tokio::time::sleep(Duration::from_millis(10)).await;
     assert_eq!(group.process_count(), 2);
