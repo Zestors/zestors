@@ -22,7 +22,7 @@ pub trait ActorRefExt: ActorRef {
     fn halt(&self) {
         <Self as ActorRef>::channel(self).halt()
     }
-    fn process_count(&self) -> usize {
+    fn inbox_count(&self) -> usize {
         <Self as ActorRef>::channel(self).process_count()
     }
     fn msg_count(&self) -> usize {

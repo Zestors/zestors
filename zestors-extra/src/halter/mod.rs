@@ -11,7 +11,7 @@ use zestors_core::{
 /// A halter can be used for processes that do not handle any messages, but that should still be
 /// supervisable. The halter can be awaited, and returns when the task should halt.
 pub struct Halter {
-    channel: Arc<HalterChannel>,
+    channel: Arc<CoreChannel>,
     halt_event_listener: Option<EventListener>,
     halted: bool,
 }
@@ -21,6 +21,10 @@ impl Halter {
     pub fn halted(&self) -> bool {
         self.halted
     }
+}
+
+impl ActorType for Halter {
+    type Channel = CoreChannel;
 }
 
 impl ActorRef for Halter {
@@ -39,7 +43,7 @@ impl InboxType for Halter {
         address_count: usize,
         actor_id: ActorId,
     ) -> Arc<<Self::ActorType as ActorType>::Channel> {
-        Arc::new(HalterChannel::new(address_count, halter_count, actor_id))
+        Arc::new(CoreChannel::new(address_count, halter_count, actor_id))
     }
 
     fn new(channel: Arc<<Self::ActorType as ActorType>::Channel>) -> Self {
@@ -86,6 +90,6 @@ impl Future for Halter {
 
 impl Drop for Halter {
     fn drop(&mut self) {
-        self.channel.remove_halter();
+        self.channel.remove_process();
     }
 }

@@ -186,6 +186,6 @@ impl<P: Protocol> FusedStream for Inbox<P> {
 
 impl<P: Protocol> Drop for Inbox<P> {
     fn drop(&mut self) {
-        self.channel.remove_inbox();
+        self.channel.remove_process();
     }
 }

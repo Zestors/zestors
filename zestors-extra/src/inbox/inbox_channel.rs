@@ -1,4 +1,4 @@
-use crate::halter::HalterChannel;
+use crate::halter::CoreChannel;
 
 use super::*;
 use concurrent_queue::{ConcurrentQueue, PopError, PushError};
@@ -8,10 +8,7 @@ use std::{
     any::{Any, TypeId},
     fmt::Debug,
     pin::Pin,
-    sync::{
-        atomic::{AtomicI32, AtomicUsize, Ordering},
-        Arc,
-    },
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::{task::yield_now, time::Sleep};
@@ -25,29 +22,15 @@ use zestors_core::{
 
 /// A [Channel] with an inbox used to receive messages.
 pub struct InboxChannel<M> {
-    halter_channel: HalterChannel,
+    halter_channel: CoreChannel,
     /// The underlying queue
     queue: ConcurrentQueue<M>,
-    /// The capacity of the channel
+    /// The capacity of the queue
     capacity: Capacity,
-    /// The amount of addresses associated to this channel.
-    /// Once this is 0, not more addresses can be created and the Channel is closed.
-    // address_count: AtomicUsize,
-    /// The amount of inboxes associated to this channel.
-    /// Once this is 0, it is impossible to spawn new processes, and the Channel.
-    /// has exited.
-    // inbox_count: AtomicUsize,
     /// Subscribe when trying to receive a message from this channel.
     recv_event: Event,
     /// Subscribe when trying to send a message into this channel.
     send_event: Event,
-    // Subscribe when waiting for Actor to exit.
-    // exit_event: Event,
-    // The amount of processes that should still be halted.
-    // Can be negative bigger than amount of processes in total.
-    // halt_count: AtomicI32,
-    // The actor_id, generated once and cannot be changed afterwards.
-    // actor_id: ActorId,
 }
 
 impl<P: Protocol> InboxChannel<P> {
@@ -66,7 +49,7 @@ impl<P: Protocol> InboxChannel<P> {
                 Capacity::Unbounded(_) => ConcurrentQueue::unbounded(),
             },
             capacity,
-            halter_channel: HalterChannel::new(address_count, inbox_count, actor_id),
+            halter_channel: CoreChannel::new(address_count, inbox_count, actor_id),
             recv_event: Event::new(),
             send_event: Event::new(),
         }
@@ -90,12 +73,14 @@ impl<P: Protocol> InboxChannel<P> {
     ///
     /// ## Panics
     /// * `prev-inbox-count == 0`
-    pub(crate) fn remove_inbox(&self) -> usize {
-        let prev_count = dbg!(self.halter_channel.remove_halter());
-        if prev_count == 1 {
-            self.empty_inbox()
+    pub(crate) fn remove_process(&self) -> bool {
+        if self.halter_channel.remove_process() {
+            self.close();
+            self.empty_inbox();
+            true
+        } else {
+            false
         }
-        prev_count
     }
 
     /// Takes the next message out of the channel.
@@ -267,7 +252,8 @@ impl<P: Protocol> Channel for InboxChannel<P> {
     /// # Notifies
     /// * all recv-listeners
     fn halt_some(&self, n: u32) {
-        self.halter_channel.halt_some(n)
+        self.halter_channel.halt_some(n);
+        self.recv_event.notify(usize::MAX)
     }
 
     /// Returns the amount of inboxes this channel has.
@@ -436,9 +422,6 @@ impl<'a, P: Protocol> Future for RecvFut<'a, P> {
 
         // First try to receive once, and yield if successful
         if let Some(res) = channel.poll_try_recv(signaled_halt, listener) {
-            let fut = yield_now();
-            pin_mut!(fut);
-            let _ = fut.poll(cx);
             return Poll::Ready(res);
         }
 
@@ -686,17 +669,17 @@ mod test {
         let channel_clone = channel.clone();
 
         tokio::task::spawn(async move {
-            let time = Instant::now();
+            let time = tokio::time::Instant::now();
             channel_clone.send_protocol(()).await.unwrap();
             channel_clone.send_protocol(()).await.unwrap();
             channel_clone.send_protocol(()).await.unwrap();
-            assert!(time.elapsed().as_millis() > 2);
+            assert!(time.elapsed().as_millis() > 5);
         });
 
         channel.recv(&mut false, &mut None).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(1)).await;
+        tokio::time::sleep(Duration::from_millis(5)).await;
         channel.recv(&mut false, &mut None).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(1)).await;
+        tokio::time::sleep(Duration::from_millis(5)).await;
         channel.recv(&mut false, &mut None).await.unwrap();
     }
 }
@@ -890,9 +873,9 @@ mod test2 {
         assert_eq!(channel.process_count(), 1);
         channel.try_add_inbox().unwrap();
         assert_eq!(channel.process_count(), 2);
-        channel.remove_inbox();
+        channel.remove_process();
         assert_eq!(channel.process_count(), 1);
-        channel.remove_inbox();
+        channel.remove_process();
         assert_eq!(channel.process_count(), 0);
     }
 
@@ -900,7 +883,7 @@ mod test2 {
     #[should_panic]
     fn remove_inbox_below_0() {
         let channel = InboxChannel::<()>::new(1, 0, Capacity::default(), ActorId::generate());
-        channel.remove_inbox();
+        channel.remove_process();
     }
 
     #[test]
@@ -926,7 +909,7 @@ mod test2 {
         let channel = InboxChannel::<()>::new(1, 1, Capacity::default(), ActorId::generate());
         let listeners = Listeners::size_10(&channel);
 
-        channel.remove_inbox();
+        channel.remove_process();
 
         assert!(channel.is_closed());
         assert!(channel.has_exited());
@@ -968,7 +951,7 @@ mod test2 {
         channel.send_protocol_now(msg.clone()).unwrap();
 
         assert_eq!(Arc::strong_count(&msg), 2);
-        channel.remove_inbox();
+        channel.remove_process();
         assert_eq!(Arc::strong_count(&msg), 1);
     }
 
@@ -985,7 +968,7 @@ mod test2 {
     #[test]
     fn add_inbox_with_0_inboxes_is_err() {
         let channel = InboxChannel::<Arc<()>>::new(1, 1, Capacity::default(), ActorId::generate());
-        channel.remove_inbox();
+        channel.remove_process();
         assert_eq!(channel.try_add_inbox(), Err(()));
         assert_eq!(channel.process_count(), 0);
     }
@@ -993,7 +976,7 @@ mod test2 {
     #[test]
     fn add_inbox_with_0_addresses_is_ok() {
         let channel = InboxChannel::<Arc<()>>::new(1, 1, Capacity::default(), ActorId::generate());
-        channel.remove_inbox();
+        channel.remove_process();
         assert!(matches!(channel.try_add_inbox(), Err(_)));
         assert_eq!(channel.process_count(), 0);
     }
@@ -1035,7 +1018,7 @@ mod test2 {
 
         channel.halt();
 
-        assert_eq!(channel.halter_channel.to_halt(), i32::MAX);
+        assert_eq!(channel.halter_channel.halt_count(), i32::MAX);
         listeners.assert_notified(Assert {
             recv: 10,
             exit: 0,
@@ -1057,7 +1040,7 @@ mod test2 {
 
         channel.halt_some(2);
 
-        assert_eq!(channel.halter_channel.to_halt(), 2);
+        assert_eq!(channel.halter_channel.halt_count(), 2);
         listeners.assert_notified(Assert {
             recv: 10,
             exit: 0,

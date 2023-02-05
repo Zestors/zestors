@@ -131,7 +131,7 @@ where
         !was_aborted
     }
 
-    /// Whether the task is finished.
+    /// Whether underlying tokio task is finished.
     pub fn is_finished(&self) -> bool {
         C::is_finished(self.join_handles.as_ref().unwrap())
     }
@@ -536,7 +536,7 @@ mod test {
         let (child, _addr) = spawn(basic_actor!());
         let group = child.into_group();
         assert_eq!(group.task_count(), 1);
-        assert_eq!(group.process_count(), 1);
+        assert_eq!(group.inbox_count(), 1);
         assert_eq!(group.is_aborted(), false);
 
         let (mut child, _addr) = spawn(basic_actor!());
