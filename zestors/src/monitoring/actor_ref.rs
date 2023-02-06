@@ -50,12 +50,12 @@ pub trait ActorRefExt: ActorRef {
     {
         <Self::ActorType as Accept<M>>::try_send(<Self as ActorRef>::channel(self), msg)
     }
-    fn send_now<M>(&self, msg: M) -> Result<M::Returned, TrySendError<M>>
+    fn force_send<M>(&self, msg: M) -> Result<M::Returned, TrySendError<M>>
     where
         M: Message,
         Self::ActorType: Accept<M>,
     {
-        <Self::ActorType as Accept<M>>::send_now(<Self as ActorRef>::channel(self), msg)
+        <Self::ActorType as Accept<M>>::force_send(<Self as ActorRef>::channel(self), msg)
     }
     fn send_blocking<M>(&self, msg: M) -> Result<M::Returned, SendError<M>>
     where
@@ -87,12 +87,12 @@ where
     {
         <Self as ActorRef>::channel(self).try_send_checked(msg)
     }
-    fn send_now_unchecked<M>(&self, msg: M) -> Result<M::Returned, TrySendCheckedError<M>>
+    fn force_send_unchecked<M>(&self, msg: M) -> Result<M::Returned, TrySendCheckedError<M>>
     where
         M: Message + Send + 'static,
         M::Payload: Send + 'static,
     {
-        <Self as ActorRef>::channel(self).send_now_unchecked(msg)
+        <Self as ActorRef>::channel(self).force_send_unchecked(msg)
     }
     fn send_blocking_checked<M>(&self, msg: M) -> Result<M::Returned, SendCheckedError<M>>
     where

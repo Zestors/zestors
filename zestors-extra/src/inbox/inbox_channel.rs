@@ -14,10 +14,10 @@ use std::{
 };
 use tokio::{task::yield_now, time::Sleep};
 use zestors_core::{
-    monitoring::{ActorId, Channel},
+    monitoring::{ActorId, Channel, TryAddProcessError},
     inboxes::Capacity,
     messaging::{
-        AnyMessage, Protocol, SendError, SendCheckedError, TrySendError, TrySendCheckedError,
+        AnyPayload, Protocol, SendError, SendCheckedError, TrySendError, TrySendCheckedError,
     },
 };
 
@@ -383,7 +383,7 @@ impl<P: Protocol> Channel for InboxChannel<P> {
         self.halt_some(u32::MAX);
     }
 
-    fn try_add_inbox(&self) -> Result<usize, ()> {
+    fn try_add_process(&self) -> Result<usize, TryAddProcessError> {
         let result = self
             .inbox_count
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |val| {
@@ -396,11 +396,11 @@ impl<P: Protocol> Channel for InboxChannel<P> {
 
         match result {
             Ok(prev) => Ok(prev),
-            Err(_) => Err(()),
+            Err(_) => Err(TryAddProcessError::ActorHasExited),
         }
     }
 
-    fn try_send_boxed(&self, boxed: AnyMessage) -> Result<(), TrySendCheckedError<AnyMessage>> {
+    fn try_send_any(&self, boxed: AnyPayload) -> Result<(), TrySendCheckedError<AnyPayload>> {
         match P::try_from_msg(boxed) {
             Ok(prot) => self.try_send_protocol(prot).map_err(|e| match e {
                 TrySendError::Full(prot) => TrySendCheckedError::Full(prot.into_msg()),
@@ -410,7 +410,7 @@ impl<P: Protocol> Channel for InboxChannel<P> {
         }
     }
 
-    fn send_now_boxed(&self, boxed: AnyMessage) -> Result<(), TrySendCheckedError<AnyMessage>> {
+    fn force_send_any(&self, boxed: AnyPayload) -> Result<(), TrySendCheckedError<AnyPayload>> {
         match P::try_from_msg(boxed) {
             Ok(prot) => self.send_protocol_now(prot).map_err(|e| match e {
                 TrySendError::Full(prot) => TrySendCheckedError::Full(prot.into_msg()),
@@ -420,7 +420,7 @@ impl<P: Protocol> Channel for InboxChannel<P> {
         }
     }
 
-    fn send_blocking_boxed(&self, boxed: AnyMessage) -> Result<(), SendCheckedError<AnyMessage>> {
+    fn send_any_blocking(&self, boxed: AnyPayload) -> Result<(), SendCheckedError<AnyPayload>> {
         match P::try_from_msg(boxed) {
             Ok(prot) => self
                 .send_protocol_blocking(prot)
@@ -429,10 +429,10 @@ impl<P: Protocol> Channel for InboxChannel<P> {
         }
     }
 
-    fn send_boxed(
+    fn send_any(
         &self,
-        boxed: AnyMessage,
-    ) -> BoxFuture<'_, Result<(), SendCheckedError<AnyMessage>>> {
+        boxed: AnyPayload,
+    ) -> BoxFuture<'_, Result<(), SendCheckedError<AnyPayload>>> {
         Box::pin(async move {
             match P::try_from_msg(boxed) {
                 Ok(prot) => self
@@ -949,7 +949,7 @@ mod test2 {
     fn adding_removing_inboxes() {
         let channel = InboxChannel::<()>::new(1, 1, Capacity::default(), ActorId::generate());
         assert_eq!(channel.process_count(), 1);
-        channel.try_add_inbox().unwrap();
+        channel.try_add_process().unwrap();
         assert_eq!(channel.process_count(), 2);
         channel.remove_inbox();
         assert_eq!(channel.process_count(), 1);
@@ -1047,7 +1047,7 @@ mod test2 {
     fn add_inbox_with_0_inboxes_is_err() {
         let channel = InboxChannel::<Arc<()>>::new(1, 1, Capacity::default(), ActorId::generate());
         channel.remove_inbox();
-        assert_eq!(channel.try_add_inbox(), Err(()));
+        assert_eq!(channel.try_add_process(), Err(TryAddProcessError::ActorHasExited));
         assert_eq!(channel.process_count(), 0);
     }
 
@@ -1055,7 +1055,7 @@ mod test2 {
     fn add_inbox_with_0_addresses_is_ok() {
         let channel = InboxChannel::<Arc<()>>::new(1, 1, Capacity::default(), ActorId::generate());
         channel.remove_inbox();
-        assert!(matches!(channel.try_add_inbox(), Err(_)));
+        assert!(matches!(channel.try_add_process(), Err(_)));
         assert_eq!(channel.process_count(), 0);
     }
 

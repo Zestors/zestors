@@ -31,7 +31,7 @@ pub use monitoring::{ActorId, ActorRefExt, ActorRefExtDyn, Address, Child, Child
 
 pub mod inboxes;
 #[doc(inline)]
-pub use inboxes::{BackPressure, Capacity, Halter, Inbox};
+pub use inboxes::{BackPressure, Capacity, MultiHalter, Inbox, Halter};
 
 pub mod actor_type;
 #[doc(inline)]

@@ -272,9 +272,9 @@ where
             Err(_) => return Err(TrySpawnError::IncorrectType(fun)),
         };
 
-        match channel.try_add_inbox() {
+        match channel.try_add_process() {
             Ok(_) => {
-                let inbox = I::new(channel);
+                let inbox = I::from_channel(channel);
                 let handle = tokio::task::spawn(async move { fun(inbox).await });
                 self.join_handles.as_mut().unwrap().push(handle);
                 Ok(())
@@ -295,17 +295,22 @@ where
         Fun: FnOnce(A) -> Fut + Send + 'static,
         Fut: Future<Output = E> + Send + 'static,
         E: Send + 'static,
-        A: InboxType,
+        A: GroupInboxType,
         A::Channel: Sized,
     {
-        match self.channel.try_add_inbox() {
+        match self.channel.try_add_process() {
             Ok(_) => {
-                let inbox = A::new(self.channel.clone());
+                let inbox = A::from_channel(self.channel.clone());
                 let handle = tokio::task::spawn(async move { fun(inbox).await });
                 self.join_handles.as_mut().unwrap().push(handle);
                 Ok(())
             }
-            Err(_) => Err(SpawnError(fun)),
+            Err(e) => match e {
+                TryAddProcessError::ActorHasExited => Err(SpawnError(fun)),
+                TryAddProcessError::SingleInboxOnly => {
+                    panic!("Error with implementation `try_add_process()` of the inboxtype")
+                }
+            },
         }
     }
 }
@@ -629,7 +634,10 @@ mod test_grouped {
         let (mut child, addr) = spawn_group(0..1, grouped_basic_actor!());
         addr.halt();
         addr.await;
-        assert!(matches!(child.spawn_onto(basic_actor!()), Err(SpawnError(_))));
+        assert!(matches!(
+            child.spawn_onto(basic_actor!()),
+            Err(SpawnError(_))
+        ));
         assert!(matches!(
             child
                 .transform_into::<Accepts![]>()

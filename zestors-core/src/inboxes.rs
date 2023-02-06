@@ -2,20 +2,28 @@ use crate::*;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Anything that can be passed along as the argument to the spawn function.
-pub trait InboxType: ActorType + ActorRef<ActorType = Self> + Send + 'static {
-    type Config;
-
+pub trait GroupInboxType: InboxType {
     /// Sets up the channel, preparing for x processes to be spawned.
-    fn setup_channel(
+    fn setup_multi_channel(
         config: Self::Config,
         process_count: usize,
         address_count: usize,
         actor_id: ActorId,
     ) -> Arc<Self::Channel>;
+}
+
+/// Anything that can be passed along as the argument to the spawn function.
+pub trait InboxType: ActorType + ActorRef<ActorType = Self> + Send + 'static {
+    type Config;
+
+    fn setup_channel(
+        config: Self::Config,
+        address_count: usize,
+        actor_id: ActorId,
+    ) -> Arc<Self::Channel>;
 
     /// Creates another inbox from the channel, without adding anything to its process count.
-    fn new(channel: Arc<Self::Channel>) -> Self;
+    fn from_channel(channel: Arc<Self::Channel>) -> Self;
 }
 
 //------------------------------------------------------------------------------------------------

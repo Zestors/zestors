@@ -41,7 +41,7 @@ pub trait DynActorType: ActorType<Channel = dyn Channel> {
 pub trait Accept<M: Message>: ActorType {
     type SendFut<'a>: Future<Output = Result<M::Returned, SendError<M>>> + Send + 'a;
     fn try_send(channel: &Self::Channel, msg: M) -> Result<M::Returned, TrySendError<M>>;
-    fn send_now(channel: &Self::Channel, msg: M) -> Result<M::Returned, TrySendError<M>>;
+    fn force_send(channel: &Self::Channel, msg: M) -> Result<M::Returned, TrySendError<M>>;
     fn send_blocking(channel: &Self::Channel, msg: M) -> Result<M::Returned, SendError<M>>;
     fn send(channel: &Self::Channel, msg: M) -> Self::SendFut<'_>;
 }
@@ -64,8 +64,8 @@ where
         })
     }
 
-    fn send_now(channel: &Self::Channel, msg: M) -> Result<M::Returned, TrySendError<M>> {
-        channel.send_now_unchecked(msg).map_err(|e| match e {
+    fn force_send(channel: &Self::Channel, msg: M) -> Result<M::Returned, TrySendError<M>> {
+        channel.force_send_unchecked(msg).map_err(|e| match e {
             TrySendCheckedError::Full(msg) => TrySendError::Full(msg),
             TrySendCheckedError::Closed(msg) => TrySendError::Closed(msg),
             TrySendCheckedError::NotAccepted(_) => {

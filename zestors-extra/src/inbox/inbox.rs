@@ -4,9 +4,10 @@ use futures::{future::BoxFuture, stream::FusedStream, FutureExt, Stream};
 use std::{fmt::Debug, sync::Arc};
 use zestors_core::{
     actor_type::{Accept, ActorType},
+    inboxes::{Capacity, InboxType, GroupInboxType},
+    messaging::{Message, Protocol, ProtocolFrom, SendError, TrySendError},
     monitoring::{ActorId, Channel},
-    inboxes::{Capacity, InboxType},
-    messaging::{Message, Protocol, ProtocolFrom, SendError, TrySendError}, spawning::ActorRef,
+    spawning::ActorRef,
 };
 
 /// An Inbox is a non clone-able receiver part of a channel.
@@ -70,24 +71,34 @@ impl<P: Protocol> ActorRef for Inbox<P> {
     }
 }
 
+impl<P: Protocol + Send> GroupInboxType for Inbox<P> {
+    fn setup_multi_channel(
+        config: Self::Config,
+        process_count: usize,
+        address_count: usize,
+        actor_id: ActorId,
+    ) -> Arc<Self::Channel> {
+        Arc::new(InboxChannel::new(
+            address_count,
+            process_count,
+            config,
+            actor_id,
+        ))
+    }
+}
+
 impl<P: Protocol + Send> InboxType for Inbox<P> {
     type Config = Capacity;
 
     fn setup_channel(
-        capacity: Capacity,
-        inbox_count: usize,
+        config: Capacity,
         address_count: usize,
         actor_id: ActorId,
     ) -> Arc<<Self::ActorType as ActorType>::Channel> {
-        Arc::new(InboxChannel::new(
-            address_count,
-            inbox_count,
-            capacity,
-            actor_id,
-        ))
+        Self::setup_multi_channel(config, 1, address_count, actor_id)
     }
 
-    fn new(channel: Arc<<Self::ActorType as ActorType>::Channel>) -> Self {
+    fn from_channel(channel: Arc<<Self::ActorType as ActorType>::Channel>) -> Self {
         Self::new(channel)
     }
 }
@@ -124,7 +135,7 @@ where
         }
     }
 
-    fn send_now(address: &Self::Channel, msg: M) -> Result<M::Returned, TrySendError<M>> {
+    fn force_send(address: &Self::Channel, msg: M) -> Result<M::Returned, TrySendError<M>> {
         let (sends, returns) = M::create(msg);
 
         match address.send_protocol_now(P::from_msg(sends)) {

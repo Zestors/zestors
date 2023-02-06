@@ -42,7 +42,7 @@ the child can be dropped without halting or aborting the actor.
         }
     }
 
-    async fn halter_actor(halter: Halter) {
+    async fn halter_actor(halter: MultiHalter) {
         halter.await
     }
 
@@ -63,9 +63,9 @@ the child can be dropped without halting or aborting the actor.
         // But if we spawn a child that is not linked...
         let (child, address) = spawn_with(Link::Detached, Capacity::default(), inbox_actor);
         drop(child);
-        sleep(Duration::from_millis(10)).await; 
-        // the actor does not get halted 
-        assert!(!address.has_exited()); 
+        sleep(Duration::from_millis(10)).await;
+        // the actor does not get halted
+        assert!(!address.has_exited());
 
         // It is also possible to spawn a process-group using an `Inbox`...
         let _ = spawn_group(0..10, |i, inbox| async move {
@@ -218,8 +218,8 @@ where
     I: InboxType,
     E: Send + 'static,
 {
-    let channel = I::setup_channel(config, 1, 1, ActorId::generate());
-    let inbox = I::new(channel.clone());
+    let channel = I::setup_channel(config, 1, ActorId::generate());
+    let inbox = I::from_channel(channel.clone());
     let handle = tokio::task::spawn(async move { function(inbox).await });
     (
         Child::new(channel.clone(), handle, link),
@@ -234,7 +234,7 @@ pub fn spawn_group<I, E, Itm, Fun, Fut>(
 where
     Fun: FnOnce(Itm, I) -> Fut + Clone + Send + 'static,
     Fut: Future<Output = E> + Send,
-    I: InboxType,
+    I: GroupInboxType,
     I::Config: Default,
     E: Send + 'static,
     Itm: Send + 'static,
@@ -251,15 +251,15 @@ pub fn spawn_group_with<I, E, Itm, Fun, Fut>(
 where
     Fun: FnOnce(Itm, I) -> Fut + Clone + Send + 'static,
     Fut: Future<Output = E> + Send,
-    I: InboxType,
+    I: GroupInboxType,
     E: Send + 'static,
     Itm: Send + 'static,
 {
-    let channel = I::setup_channel(config, iter.len(), 1, ActorId::generate());
+    let channel = I::setup_multi_channel(config, iter.len(), 1, ActorId::generate());
     let handles = iter
         .map(|i| {
             let fun = function.clone();
-            let inbox = I::new(channel.clone());
+            let inbox = I::from_channel(channel.clone());
             tokio::task::spawn(async move { fun(i, inbox).await })
         })
         .collect::<Vec<_>>();
@@ -282,6 +282,8 @@ pub enum TrySpawnError<T> {
     /// The spawned inbox does not have the correct type
     #[error("Couldn't spawn process because the given inbox-type is incorrect")]
     IncorrectType(T),
+    #[error("This channel does not allow spawning of multiple processes")]
+    NotPermitted(T),
 }
 
 impl<T> std::fmt::Debug for TrySpawnError<T> {
@@ -289,6 +291,7 @@ impl<T> std::fmt::Debug for TrySpawnError<T> {
         match self {
             Self::Exited(_) => f.debug_tuple("Exited").finish(),
             Self::IncorrectType(_) => f.debug_tuple("IncorrectType").finish(),
+            Self::NotPermitted(_) => f.debug_tuple("NotPermitted").finish(),
         }
     }
 }

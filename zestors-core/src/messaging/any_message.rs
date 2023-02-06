@@ -1,11 +1,11 @@
 use super::*;
 use std::any::Any;
 
-/// A wrapper-type around a `Box<dyn Any + Send>`;
+/// A wrapper-type around a `Box<dyn Any + Send>` for a [`Message::Payload`].
 #[derive(Debug)]
-pub struct AnyMessage(Box<dyn Any + Send>);
+pub struct AnyPayload(Box<dyn Any + Send>);
 
-impl AnyMessage {
+impl AnyPayload {
     /// Create a new [AnyMessage] from [`Sent<M>`].
     pub fn new<M>(sent: M::Payload) -> Self
     where
@@ -71,10 +71,10 @@ mod test {
             }
         }
 
-        let boxed = AnyMessage::new::<Msg1>(Msg1);
+        let boxed = AnyPayload::new::<Msg1>(Msg1);
         assert!(boxed.downcast::<Msg1>().is_ok());
 
-        let boxed = AnyMessage::new::<Msg1>(Msg1);
+        let boxed = AnyPayload::new::<Msg1>(Msg1);
         assert!(boxed.downcast::<Msg2>().is_err());
     }
 }

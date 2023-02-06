@@ -5,69 +5,85 @@ use event_listener::EventListener;
 use futures::{ready, Future, FutureExt};
 use std::{sync::Arc, task::Poll};
 use zestors_core::{
-    actor_type::ActorType, inboxes::InboxType, monitoring::ActorId, spawning::ActorRef,
+    actor_type::ActorType,
+    inboxes::{InboxType, GroupInboxType},
+    monitoring::ActorId,
+    spawning::ActorRef,
 };
 
 /// A halter can be used for processes that do not handle any messages, but that should still be
 /// supervisable. The halter can be awaited, and returns when the task should halt.
 /// 
-/// For a halter that can contain multiple processes, see [GroupHalter]
-pub struct Halter {
-    channel: Arc<HalterChannel>,
+/// If you only need a single process for the actor, use a [Halter] instead.
+pub struct MultiHalter {
+    channel: Arc<GroupHalterChannel>,
     halt_event_listener: Option<EventListener>,
+    halted: bool,
 }
 
-impl Halter {
-    pub fn should_halt(&self) -> bool {
-        self.channel.should_halt()
+impl MultiHalter {
+    /// Whether this task has been halted.
+    pub fn halted(&self) -> bool {
+        self.halted
     }
 }
 
-impl ActorType for Halter {
-    type Channel = HalterChannel;
+impl ActorType for MultiHalter {
+    type Channel = GroupHalterChannel;
 }
 
-impl ActorRef for Halter {
+impl ActorRef for MultiHalter {
     type ActorType = Self;
     fn channel(&self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
         &self.channel
     }
 }
 
-impl InboxType for Halter {
+impl GroupInboxType for MultiHalter {
+    fn setup_multi_channel(
+        config: Self::Config,
+        process_count: usize,
+        address_count: usize,
+        actor_id: ActorId,
+    ) -> Arc<Self::Channel> {
+        Arc::new(GroupHalterChannel::new(address_count, process_count, actor_id))
+    }
+}
+
+impl InboxType for MultiHalter {
     type Config = ();
 
     fn setup_channel(
-        _config: (),
+        config: Self::Config,
         address_count: usize,
         actor_id: ActorId,
     ) -> Arc<<Self::ActorType as ActorType>::Channel> {
-        Arc::new(HalterChannel::new(address_count, actor_id))
+        Self::setup_multi_channel(config, 1, address_count, actor_id)
     }
 
     fn from_channel(channel: Arc<<Self::ActorType as ActorType>::Channel>) -> Self {
         Self {
             channel,
             halt_event_listener: None,
+            halted: false,
         }
     }
 }
 
-impl Unpin for Halter {}
+impl Unpin for MultiHalter {}
 
-impl Future for Halter {
+impl Future for MultiHalter {
     type Output = ();
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
+        // If we have already halted before, then return immeadeately..
+        if self.halted {
+            return Poll::Ready(());
+        }
         loop {
-            // If we have already halted before, then return immeadeately..
-            if self.should_halt() {
-                return Poll::Ready(());
-            }
-
             // Acquire a halt listener if not set.
             let listener = if let Some(listener) = &mut self.halt_event_listener {
                 listener
@@ -79,12 +95,16 @@ impl Future for Halter {
             // If it is pending return, otherwise remove the listener.
             ready!(listener.poll_unpin(cx));
             self.halt_event_listener = None;
+
+            if self.channel.should_halt() {
+                break Poll::Ready(());
+            }
         }
     }
 }
 
-impl Drop for Halter {
+impl Drop for MultiHalter {
     fn drop(&mut self) {
-        self.channel.exit();
+        self.channel.decrement_halter_count(1)
     }
 }
