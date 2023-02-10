@@ -2,63 +2,135 @@ use super::*;
 use futures::{ready, Future, FutureExt, StreamExt};
 use pin_project::pin_project;
 use std::{
+    mem::swap,
     pin::Pin,
     task::{Context, Poll},
 };
 use tokio::time::{sleep, Sleep};
 
-pub struct SupervisorSpec<SS: Spec> {
-    supervision_spec: SS,
+//------------------------------------------------------------------------------------------------
+//  SupervisorFut
+//------------------------------------------------------------------------------------------------
+
+#[pin_project]
+pub struct SupervisorFut<S: Specification> {
+    to_shutdown: bool,
+    #[pin]
+    state: SupervisorFutState<S>,
 }
 
-pub struct SupervisorSupervisee<SS: Spec + Send + 'static> {
-    child: Child<SuperviseeExit<SS>>,
+#[pin_project]
+enum SupervisorFutState<S: Specification> {
+    NotStarted(S),
+    Starting(Pin<Box<S::Fut>>, Pin<Box<Sleep>>),
+    Supervising(Pin<Box<S::Supervisee>>, Option<(Pin<Box<Sleep>>, bool)>),
+    Exited,
 }
 
-impl<SS: Spec> SupervisorSpec<SS> {
-    pub fn new(spec: SS) -> Self {
+impl<S: Specification> SupervisorFut<S> {
+    pub fn new(spec: S) -> Self {
         Self {
-            supervision_spec: spec,
+            to_shutdown: false,
+            state: SupervisorFutState::NotStarted(spec),
         }
     }
+
+    pub fn shutdown(&mut self) {
+        self.to_shutdown = true;
+    }
+
+    pub fn to_shutdown(&self) -> bool {
+        self.to_shutdown
+    }
+
+    pub fn spawn_supervisor(self) -> (Child<ExitResult<S>>, SupervisorRef)
+    where
+        S: Sized + Send + 'static,
+        S::Supervisee: Send,
+        S::Fut: Send,
+    {
+        SupervisorProcess::spawn_supervisor(self)
+    }
 }
 
-impl<SS: Spec + Send + 'static> Spec for SupervisorSpec<SS> {
-    type Ref = ();
-    type Supervisee = SupervisorSupervisee<SS>;
+impl<S: Specification> Future for SupervisorFut<S> {
+    type Output = ExitResult<S>;
 
-    fn poll_start(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<SuperviseeStart<(Self::Supervisee, Self::Ref), Self>> {
-        todo!()
-    }
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = &mut *self;
 
-    fn start_timeout(self: Pin<&Self>) -> Duration {
-        todo!()
-    }
-}
+        loop {
+            match &mut this.state {
+                SupervisorFutState::NotStarted(spec) => {
+                    let timeout = Box::pin(sleep(spec.start_timeout()));
 
-impl<SS: Spec + Send + 'static> Supervisee for SupervisorSupervisee<SS> {
-    type Spec = SupervisorSpec<SS>;
+                    let spec = {
+                        let mut state = SupervisorFutState::Exited;
+                        swap(&mut this.state, &mut state);
+                        let SupervisorFutState::NotStarted (spec) = state else {
+                            panic!()
+                        };
+                        spec
+                    };
 
-    fn poll_supervise(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<SuperviseeExit<Self::Spec>> {
-        todo!()
-    }
+                    this.state = SupervisorFutState::Starting(Box::pin(spec.start()), timeout)
+                }
+                SupervisorFutState::Starting(fut, start_timer) => {
+                    if let Poll::Ready(res) = fut.as_mut().poll(cx) {
+                        match res {
+                            Err(StartError::Finished) => {
+                                this.state = SupervisorFutState::Exited;
+                                break Poll::Ready(Ok(None));
+                            }
+                            Ok((supervisee, _reference)) => {
+                                this.state =
+                                    SupervisorFutState::Supervising(Box::pin(supervisee), None);
+                            }
+                            Err(StartError::Failure(child_spec)) => {
+                                this.state = SupervisorFutState::Exited;
+                                break Poll::Ready(Ok(Some(child_spec)));
+                            }
+                            Err(StartError::Unhandled(e)) => {
+                                this.state = SupervisorFutState::Exited;
+                                break Poll::Ready(Err(e));
+                            }
+                        };
+                    } else {
+                        break match start_timer.as_mut().poll_unpin(cx) {
+                            Poll::Ready(()) => {
+                                this.state = SupervisorFutState::Exited;
+                                Poll::Ready(todo!())
+                            }
+                            Poll::Pending => Poll::Pending,
+                        };
+                    }
+                }
 
-    fn abort_timeout(self: Pin<&Self>) -> Duration {
-        todo!()
-    }
+                SupervisorFutState::Supervising(supervisee, aborting) => match aborting {
+                    Some((sleep, aborted)) => {
+                        if let Poll::Ready(exit) = supervisee.as_mut().poll(cx) {
+                            return Poll::Ready(exit);
+                        }
+                        if let Poll::Ready(()) = sleep.poll_unpin(cx) {
+                            supervisee.as_mut().abort();
+                            *aborted = true;
+                        }
+                        return Poll::Pending;
+                    }
+                    None => {
+                        if this.to_shutdown {
+                            supervisee.as_mut().halt();
+                            *aborting =
+                                Some((Box::pin(sleep(supervisee.as_ref().abort_timeout())), false));
+                        } else {
+                            return supervisee.as_mut().poll(cx);
+                        }
+                    }
+                },
 
-    fn halt(self: Pin<&mut Self>) {
-        todo!()
-    }
-
-    fn abort(self: Pin<&mut Self>) {
-        todo!()
+                SupervisorFutState::Exited => panic!("Already exited."),
+            }
+        }
     }
 }
 
@@ -67,11 +139,11 @@ impl<SS: Spec + Send + 'static> Supervisee for SupervisorSupervisee<SS> {
 //------------------------------------------------------------------------------------------------
 
 #[pin_project]
-pub(super) struct SupervisorProcess<SS: Spec> {
+pub(super) struct SupervisorProcess<Sp: Specification> {
     #[pin]
     inbox: Inbox<SupervisorProtocol>,
     #[pin]
-    supervision_fut: SupervisionFut<SS>,
+    supervision_fut: SupervisorFut<Sp>,
 }
 
 pub struct SupervisorRef {
@@ -81,13 +153,14 @@ pub struct SupervisorRef {
 #[protocol]
 enum SupervisorProtocol {}
 
-impl<SS: Spec> SupervisorProcess<SS> {
+impl<Sp: Specification> SupervisorProcess<Sp> {
     pub fn spawn_supervisor(
-        supervision_fut: SupervisionFut<SS>,
-    ) -> (Child<SuperviseeExit<SS>>, SupervisorRef)
+        supervision_fut: SupervisorFut<Sp>,
+    ) -> (Child<ExitResult<Sp>>, SupervisorRef)
     where
-        SS: Send + 'static,
-        SS::Supervisee: Send,
+        Sp: Send + 'static,
+        Sp::Supervisee: Send,
+        Sp::Fut: Send,
     {
         let (child, address) = spawn(|inbox: Inbox<SupervisorProtocol>| SupervisorProcess {
             inbox,
@@ -97,8 +170,8 @@ impl<SS: Spec> SupervisorProcess<SS> {
     }
 }
 
-impl<SS: Spec> Future for SupervisorProcess<SS> {
-    type Output = SuperviseeExit<SS>;
+impl<S: Specification> Future for SupervisorProcess<S> {
+    type Output = ExitResult<S>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut proj = self.as_mut().project();
@@ -123,137 +196,5 @@ impl<SS: Spec> Future for SupervisorProcess<SS> {
         }
 
         proj.supervision_fut.poll(cx)
-    }
-}
-
-//------------------------------------------------------------------------------------------------
-//  Supervisor
-//------------------------------------------------------------------------------------------------
-
-#[pin_project]
-pub struct SupervisionFut<SS: Spec> {
-    to_shutdown: bool,
-    #[pin]
-    state: SupervisorState<SS>,
-}
-
-#[pin_project]
-enum SupervisorState<SS: Spec> {
-    Starting {
-        supervisee_spec: Pin<Box<SS>>,
-        canceling: Option<Pin<Box<Sleep>>>,
-    },
-    Supervising {
-        supervisee: Pin<Box<SS::Supervisee>>,
-        aborting: Option<(Pin<Box<Sleep>>, bool)>,
-    },
-    Exited,
-}
-
-impl<SS: Spec> SupervisionFut<SS> {
-    pub fn new(supervision_spec: SS) -> Self {
-        Self {
-            to_shutdown: false,
-            state: SupervisorState::Starting {
-                supervisee_spec: Box::pin(supervision_spec),
-                canceling: None,
-            },
-        }
-    }
-
-    pub fn shutdown(&mut self) {
-        self.to_shutdown = true;
-    }
-
-    pub fn to_shutdown(&self) -> bool {
-        self.to_shutdown
-    }
-
-    pub fn spawn_supervisor(self) -> (Child<SuperviseeExit<SS>>, SupervisorRef)
-    where
-        SS: Sized + Send + 'static,
-        SS::Supervisee: Send,
-    {
-        SupervisorProcess::spawn_supervisor(self)
-    }
-}
-
-impl<Sp: Spec> Future for SupervisionFut<Sp> {
-    type Output = SuperviseeExit<Sp>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut proj = self.project();
-
-        loop {
-            match &mut *proj.state {
-                SupervisorState::Starting {
-                    supervisee_spec,
-                    canceling,
-                } => match canceling {
-                    Some(start_timer) => {
-                        if let Poll::Ready(start) = supervisee_spec.as_mut().poll_start(cx) {
-                            match start {
-                                SuperviseeStart::Finished => {
-                                    *proj.state = SupervisorState::Exited;
-                                    return Poll::Ready(SuperviseeExit::Finished);
-                                }
-                                SuperviseeStart::Succesful((supervisee, _reference)) => {
-                                    *proj.state = SupervisorState::Supervising {
-                                        supervisee: Box::pin(supervisee),
-                                        aborting: None,
-                                    };
-                                }
-                                SuperviseeStart::Failure(child_spec) => {
-                                    *proj.state = SupervisorState::Exited;
-                                    return Poll::Ready(SuperviseeExit::Exit(child_spec));
-                                }
-                                SuperviseeStart::UnrecoverableFailure(e) => {
-                                    *proj.state = SupervisorState::Exited;
-                                    return Poll::Ready(SuperviseeExit::UnrecoverableFailure(e));
-                                }
-                            };
-                        } else {
-                            return match start_timer.as_mut().poll_unpin(cx) {
-                                Poll::Ready(()) => {
-                                    *proj.state = SupervisorState::Exited;
-                                    Poll::Ready(SuperviseeExit::UnrecoverableFailure(todo!()))
-                                }
-                                Poll::Pending => Poll::Pending,
-                            };
-                        }
-                    }
-                    None => {
-                        *canceling = Some(Box::pin(sleep(supervisee_spec.as_ref().start_timeout())))
-                    }
-                },
-
-                SupervisorState::Supervising {
-                    supervisee,
-                    aborting,
-                } => match aborting {
-                    Some((sleep, aborted)) => {
-                        if let Poll::Ready(exit) = supervisee.as_mut().poll_supervise(cx) {
-                            return Poll::Ready(exit);
-                        }
-                        if let Poll::Ready(()) = sleep.poll_unpin(cx) {
-                            supervisee.as_mut().abort();
-                            *aborted = true;
-                        }
-                        return Poll::Pending;
-                    }
-                    None => {
-                        if *proj.to_shutdown {
-                            supervisee.as_mut().halt();
-                            *aborting =
-                                Some((Box::pin(sleep(supervisee.as_ref().abort_timeout())), false));
-                        } else {
-                            return supervisee.as_mut().poll_supervise(cx);
-                        }
-                    }
-                },
-
-                SupervisorState::Exited => panic!("Already exited."),
-            }
-        }
     }
 }

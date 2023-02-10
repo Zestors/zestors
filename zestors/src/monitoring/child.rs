@@ -341,7 +341,7 @@ where
     E: Send + 'static,
     A: ActorType,
 {
-    type Output = Result<E, ExitError>;
+    type Output = Result<E, ProcessExitError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.join_handles
@@ -358,7 +358,7 @@ where
     E: Send + 'static,
     A: ActorType,
 {
-    type Item = Result<E, ExitError>;
+    type Item = Result<E, ProcessExitError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.join_handles.as_ref().unwrap().len() == 0 {
@@ -525,7 +525,7 @@ mod test {
         assert!(!child.is_aborted());
         child.abort();
         assert!(child.is_aborted());
-        assert!(matches!(child.await, Err(ExitError::Abort)));
+        assert!(matches!(child.await, Err(ProcessExitError::Abort)));
     }
 
     #[tokio::test]

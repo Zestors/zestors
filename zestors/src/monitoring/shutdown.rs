@@ -32,7 +32,7 @@ impl<'a, E: Send + 'static, T: ActorType> ShutdownFut<'a, E, T> {
 impl<'a, E: Send + 'static, T: ActorType> Unpin for ShutdownFut<'a, E, T> {}
 
 impl<'a, E: Send + 'static, T: ActorType> Future for ShutdownFut<'a, E, T> {
-    type Output = Result<E, ExitError>;
+    type Output = Result<E, ProcessExitError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.child.poll_unpin(cx) {
@@ -74,7 +74,7 @@ impl<'a, E: Send + 'static, T: ActorType> ShutdownStream<'a, E, T> {
 }
 
 impl<'a, E: Send + 'static, T: ActorType> Stream for ShutdownStream<'a, E, T> {
-    type Item = Result<E, ExitError>;
+    type Item = Result<E, ProcessExitError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if let Some(sleep) = &mut self.sleep {
@@ -94,7 +94,7 @@ impl<'a, E: Send + 'static, T: ActorType> Stream for ShutdownStream<'a, E, T> {
 
 /// An error returned from an exiting process.
 #[derive(Debug, Error)]
-pub enum ExitError {
+pub enum ProcessExitError {
     /// Process panicked.
     #[error("Process has exited because of a panic")]
     Panic(Box<dyn Any + Send>),
@@ -103,29 +103,29 @@ pub enum ExitError {
     Abort,
 }
 
-impl ExitError {
+impl ProcessExitError {
     /// Whether the error is a panic.
     pub fn is_panic(&self) -> bool {
         match self {
-            ExitError::Panic(_) => true,
-            ExitError::Abort => false,
+            ProcessExitError::Panic(_) => true,
+            ProcessExitError::Abort => false,
         }
     }
 
     /// Whether the error is an abort.
     pub fn is_abort(&self) -> bool {
         match self {
-            ExitError::Panic(_) => false,
-            ExitError::Abort => true,
+            ProcessExitError::Panic(_) => false,
+            ProcessExitError::Abort => true,
         }
     }
 }
 
-impl From<tokio::task::JoinError> for ExitError {
+impl From<tokio::task::JoinError> for ProcessExitError {
     fn from(e: tokio::task::JoinError) -> Self {
         match e.try_into_panic() {
-            Ok(panic) => ExitError::Panic(panic),
-            Err(_) => ExitError::Abort,
+            Ok(panic) => ProcessExitError::Panic(panic),
+            Err(_) => ProcessExitError::Abort,
         }
     }
 }
@@ -154,7 +154,7 @@ mod test {
         });
         assert!(matches!(
             child.shutdown(Duration::from_millis(5)).await,
-            Err(ExitError::Abort)
+            Err(ProcessExitError::Abort)
         ));
     }
 
@@ -186,7 +186,7 @@ mod test {
         assert_eq!(results.len(), 3);
 
         for result in results {
-            assert!(matches!(result, Err(ExitError::Abort)));
+            assert!(matches!(result, Err(ProcessExitError::Abort)));
         }
     }
 

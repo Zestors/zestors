@@ -1,90 +1,107 @@
-use super::*;
-use futures::Future;
-use pin_project::pin_project;
 use std::{
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
 };
-use tokio::sync::mpsc;
+
+use super::*;
+use futures::{pin_mut, Future};
+use pin_project::pin_project;
 
 //------------------------------------------------------------------------------------------------
 //  Spec
 //------------------------------------------------------------------------------------------------
 
 #[pin_project]
-pub struct RefSenderSpec<S: Specification> {
-    #[pin]
+pub struct OnStartSpec<S, F, T>
+where
+    S: Specification,
+    F: FnMut(S::Ref) -> T,
+{
     spec: S,
-    sender: Option<mpsc::UnboundedSender<S::Ref>>,
+    map: Option<F>,
 }
 
 #[pin_project]
-pub struct RefSenderSpecFut<S: Specification> {
+pub struct OnStartSpecFut<S, F, T>
+where
+    S: Specification,
+    F: FnMut(S::Ref) -> T,
+{
     #[pin]
     fut: S::Fut,
-    sender: Option<mpsc::UnboundedSender<S::Ref>>,
+    map: Option<F>,
 }
 
 #[pin_project]
-pub struct RefSenderSupervisee<S: Specification> {
+pub struct OnStartSupervisee<S, F, T>
+where
+    S: Specification,
+    F: FnMut(S::Ref) -> T,
+{
     #[pin]
     supervisee: S::Supervisee,
-    sender: Option<mpsc::UnboundedSender<S::Ref>>,
+    map: Option<F>,
 }
 
-impl<Sp: Specification> RefSenderSpec<Sp> {
-    pub fn new(spec: Sp) -> (Self, mpsc::UnboundedReceiver<Sp::Ref>) {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        (Self::new_with_channel(spec, sender), receiver)
-    }
-
-    pub fn new_with_channel(spec: Sp, sender: mpsc::UnboundedSender<Sp::Ref>) -> Self {
+impl<Sp, F, T> OnStartSpec<Sp, F, T>
+where
+    Sp: Specification,
+    F: FnMut(Sp::Ref) -> T,
+{
+    pub fn new(spec: Sp, map: F) -> Self {
         Self {
             spec,
-            sender: Some(sender),
+            map: Some(map),
         }
     }
 }
 
-impl<Sp: Specification> Specification for RefSenderSpec<Sp> {
-    type Ref = ();
-    type Supervisee = RefSenderSupervisee<Sp>;
+impl<Sp, F, T> Specification for OnStartSpec<Sp, F, T>
+where
+    Sp: Specification,
+    F: FnMut(Sp::Ref) -> T,
+{
+    type Ref = T;
+    type Supervisee = OnStartSupervisee<Sp, F, T>;
+    type Fut = OnStartSpecFut<Sp, F, T>;
+
+    fn start(self) -> Self::Fut {
+        OnStartSpecFut {
+            fut: self.spec.start(),
+            map: self.map,
+        }
+    }
 
     fn start_timeout(&self) -> Duration {
         self.spec.start_timeout()
     }
-
-    fn start(self) -> Self::Fut {
-        RefSenderSpecFut {
-            fut: self.spec.start(),
-            sender: self.sender,
-        }
-    }
-
-    type Fut = RefSenderSpecFut<Sp>;
 }
 
-impl<Sp: Specification> Future for RefSenderSpecFut<Sp> {
-    type Output = StartResult<RefSenderSpec<Sp>>;
+impl<Sp, F, T> Future for OnStartSpecFut<Sp, F, T>
+where
+    Sp: Specification,
+    F: FnMut(Sp::Ref) -> T,
+{
+    type Output = StartResult<OnStartSpec<Sp, F, T>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let proj = self.project();
         proj.fut.poll(cx).map(|start| match start {
             Ok((supervisee, reference)) => {
-                let sender = proj.sender.take().unwrap();
-                let _ = sender.send(reference);
+                let mut map = proj.map.take().unwrap();
+                let reference = map(reference);
                 Ok((
-                    RefSenderSupervisee {
+                    OnStartSupervisee {
                         supervisee,
-                        sender: Some(sender),
+                        map: Some(map),
                     },
-                    (),
+                    reference,
                 ))
             }
-            Err(StartError::Failure(spec)) => Err(StartError::Failure(RefSenderSpec {
+            Err(StartError::Failure(spec)) => Err(StartError::Failure(OnStartSpec {
                 spec,
-                sender: Some(proj.sender.take().unwrap()),
+                map: Some(proj.map.take().unwrap()),
             })),
             Err(StartError::Finished) => Err(StartError::Finished),
             Err(StartError::Unhandled(e)) => Err(StartError::Unhandled(e)),
@@ -96,8 +113,12 @@ impl<Sp: Specification> Future for RefSenderSpecFut<Sp> {
 //  Supervisee
 //------------------------------------------------------------------------------------------------
 
-impl<S: Specification> Supervisee for RefSenderSupervisee<S> {
-    type Spec = RefSenderSpec<S>;
+impl<S, F, T> Supervisee for OnStartSupervisee<S, F, T>
+where
+    S: Specification,
+    F: FnMut(S::Ref) -> T,
+{
+    type Spec = OnStartSpec<S, F, T>;
 
     fn abort_timeout(self: Pin<&Self>) -> Duration {
         self.project_ref().supervisee.abort_timeout()
@@ -112,16 +133,20 @@ impl<S: Specification> Supervisee for RefSenderSupervisee<S> {
     }
 }
 
-impl<S: Specification> Future for RefSenderSupervisee<S> {
-    type Output = ExitResult<RefSenderSpec<S>>;
+impl<S, F, T> Future for OnStartSupervisee<S, F, T>
+where
+    S: Specification,
+    F: FnMut(S::Ref) -> T,
+{
+    type Output = ExitResult<OnStartSpec<S, F, T>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let proj = self.project();
         proj.supervisee.poll(cx).map(|res| {
             res.map(|spec| {
-                spec.map(|spec| RefSenderSpec {
+                spec.map(|spec| OnStartSpec {
                     spec,
-                    sender: proj.sender.take(),
+                    map: proj.map.take(),
                 })
             })
         })

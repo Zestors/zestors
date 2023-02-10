@@ -2,7 +2,7 @@ use std::time::Duration;
 use tokio::time::Instant;
 
 #[derive(Debug)]
-pub struct RestartLimiter {
+pub(crate) struct RestartLimiter {
     limit: usize,
     within: Duration,
     values: Vec<Instant>,
