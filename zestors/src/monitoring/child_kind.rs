@@ -2,7 +2,7 @@
 use crate::*;
 use tokio::task::JoinHandle;
 
-pub trait ChildKind {
+pub trait ChildType {
     type JoinHandles<E: Send + 'static>: Send + 'static;
     fn abort<E: Send + 'static>(handles: &Self::JoinHandles<E>);
     fn is_finished<E: Send + 'static>(handles: &Self::JoinHandles<E>) -> bool;
@@ -13,7 +13,7 @@ pub trait ChildKind {
 #[derive(Debug)]
 pub struct Single;
 
-impl ChildKind for Single {
+impl ChildType for Single {
     type JoinHandles<E: Send + 'static> = JoinHandle<E>;
 
     fn abort<E: Send + 'static>(handles: &Self::JoinHandles<E>) {
@@ -25,11 +25,11 @@ impl ChildKind for Single {
     }
 }
 
-/// A [ChildKind] which indicates that the [Child] concerns a group of processes.
+/// A [ChildKind] which indicates that the [Child] concerns a pool of processes.
 #[derive(Debug)]
-pub struct Group;
+pub struct Pool;
 
-impl ChildKind for Group {
+impl ChildType for Pool {
     type JoinHandles<E: Send + 'static> = Vec<JoinHandle<E>>;
 
     fn abort<E: Send + 'static>(handles: &Self::JoinHandles<E>) {

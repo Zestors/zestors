@@ -98,30 +98,30 @@ async fn address_counts() {
 
 #[tokio::test]
 async fn inbox_counts() {
-    let (group, _address) = spawn_group(0..4, |_, mut inbox: Inbox<()>| async move {
+    let (pool, _address) = spawn_pool(0..4, |_, mut inbox: Inbox<()>| async move {
         inbox.recv().await.unwrap_err();
     });
-    let mut group = group.into_dyn();
-    assert_eq!(group.process_count(), 4);
+    let mut pool = pool.into_dyn();
+    assert_eq!(pool.process_count(), 4);
 
-    group.halt_some(1);
+    pool.halt_some(1);
     tokio::time::sleep(Duration::from_millis(10)).await;
-    assert_eq!(group.process_count(), 3);
+    assert_eq!(pool.process_count(), 3);
 
-    group
+    pool
         .try_spawn_onto(|mut inbox: Inbox<()>| async move {
             inbox.recv().await.unwrap_err();
         })
         .unwrap();
-    assert_eq!(group.process_count(), 4);
+    assert_eq!(pool.process_count(), 4);
 
-    group.halt_some(2);
+    pool.halt_some(2);
     tokio::time::sleep(Duration::from_millis(10)).await;
-    assert_eq!(group.process_count(), 2);
+    assert_eq!(pool.process_count(), 2);
 
-    group.halt();
+    pool.halt();
     tokio::time::sleep(Duration::from_millis(10)).await;
-    assert_eq!(group.process_count(), 0);
+    assert_eq!(pool.process_count(), 0);
 }
 
 #[protocol]
@@ -130,8 +130,8 @@ enum U32Protocol {
 }
 
 #[tokio::test]
-async fn grouped_messaging_split() {
-    let (group, address) = spawn_group_with(
+async fn pooled_messaging_split() {
+    let (pool, address) = spawn_pool_with(
         Link::default(),
         Capacity::Bounded(5),
         0..3,
@@ -159,7 +159,7 @@ async fn grouped_messaging_split() {
     tokio::time::sleep(Duration::from_millis(20)).await;
     address.halt();
 
-    let res = group
+    let res = pool
         .map(|e| e.unwrap().unwrap())
         .fold(HashSet::new(), |mut acc, vals| async move {
             assert!(vals.len() >= 9);

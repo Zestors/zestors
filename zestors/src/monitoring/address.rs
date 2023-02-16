@@ -1,15 +1,13 @@
-use crate::all::*;
+use crate::{all::*, Accepts};
 use event_listener::EventListener;
-use futures::{future::BoxFuture, Future, FutureExt};
+use futures::{Future, FutureExt};
 use std::{
-    any::TypeId,
     fmt::Debug,
     mem::ManuallyDrop,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
-use zestors_core::actor_type::ActorType;
 
 /// An address is a reference to the actor, used to send messages.
 ///
@@ -103,7 +101,7 @@ impl<A: ActorType> Address<A> {
     }
 }
 
-impl<A: ActorType> ActorRef for Address<A> {
+impl<A: ActorType> ChannelRef for Address<A> {
     type ActorType = A;
     fn channel(&self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
         &self.channel

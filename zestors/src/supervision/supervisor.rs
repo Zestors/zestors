@@ -1,5 +1,5 @@
 use super::*;
-use futures::{ready, Future, FutureExt, StreamExt};
+use futures::{Future, FutureExt, StreamExt};
 use pin_project::pin_project;
 use std::{
     mem::swap,
@@ -22,7 +22,7 @@ pub struct SupervisorFut<S: Specification> {
 #[pin_project]
 enum SupervisorFutState<S: Specification> {
     NotStarted(S),
-    Starting(Pin<Box<S::Fut>>, Pin<Box<Sleep>>),
+    Starting(Pin<Box<S::StartFut>>, Pin<Box<Sleep>>),
     Supervising(Pin<Box<S::Supervisee>>, Option<(Pin<Box<Sleep>>, bool)>),
     Exited,
 }
@@ -47,7 +47,7 @@ impl<S: Specification> SupervisorFut<S> {
     where
         S: Sized + Send + 'static,
         S::Supervisee: Send,
-        S::Fut: Send,
+        S::StartFut: Send,
     {
         SupervisorProcess::spawn_supervisor(self)
     }
@@ -62,7 +62,7 @@ impl<S: Specification> Future for SupervisorFut<S> {
         loop {
             match &mut this.state {
                 SupervisorFutState::NotStarted(spec) => {
-                    let timeout = Box::pin(sleep(spec.start_timeout()));
+                    let timeout = Box::pin(sleep(spec.start_time()));
 
                     let spec = {
                         let mut state = SupervisorFutState::Exited;
@@ -78,7 +78,7 @@ impl<S: Specification> Future for SupervisorFut<S> {
                 SupervisorFutState::Starting(fut, start_timer) => {
                     if let Poll::Ready(res) = fut.as_mut().poll(cx) {
                         match res {
-                            Err(StartError::Finished) => {
+                            Err(StartError::Completed) => {
                                 this.state = SupervisorFutState::Exited;
                                 break Poll::Ready(Ok(None));
                             }
@@ -86,11 +86,11 @@ impl<S: Specification> Future for SupervisorFut<S> {
                                 this.state =
                                     SupervisorFutState::Supervising(Box::pin(supervisee), None);
                             }
-                            Err(StartError::Failure(child_spec)) => {
+                            Err(StartError::Failed(child_spec)) => {
                                 this.state = SupervisorFutState::Exited;
                                 break Poll::Ready(Ok(Some(child_spec)));
                             }
-                            Err(StartError::Unhandled(e)) => {
+                            Err(StartError::Irrecoverable(e)) => {
                                 this.state = SupervisorFutState::Exited;
                                 break Poll::Ready(Err(e));
                             }
@@ -121,7 +121,7 @@ impl<S: Specification> Future for SupervisorFut<S> {
                         if this.to_shutdown {
                             supervisee.as_mut().halt();
                             *aborting =
-                                Some((Box::pin(sleep(supervisee.as_ref().abort_timeout())), false));
+                                Some((Box::pin(sleep(supervisee.as_ref().shutdown_time())), false));
                         } else {
                             return supervisee.as_mut().poll(cx);
                         }
@@ -153,15 +153,15 @@ pub struct SupervisorRef {
 #[protocol]
 enum SupervisorProtocol {}
 
-impl<Sp: Specification> SupervisorProcess<Sp> {
+impl<S> SupervisorProcess<S>
+where
+    S: Specification + Send + 'static,
+    S::Supervisee: Send,
+    S::StartFut: Send,
+{
     pub fn spawn_supervisor(
-        supervision_fut: SupervisorFut<Sp>,
-    ) -> (Child<ExitResult<Sp>>, SupervisorRef)
-    where
-        Sp: Send + 'static,
-        Sp::Supervisee: Send,
-        Sp::Fut: Send,
-    {
+        supervision_fut: SupervisorFut<S>,
+    ) -> (Child<ExitResult<S>>, SupervisorRef) {
         let (child, address) = spawn(|inbox: Inbox<SupervisorProtocol>| SupervisorProcess {
             inbox,
             supervision_fut,

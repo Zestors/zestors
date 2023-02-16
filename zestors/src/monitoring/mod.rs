@@ -3,14 +3,14 @@
 Supervision trees can be built by spawning tasks and monitoring them using their children.
 A [`Child`] is a unique reference to an actor similar to a
 [tokio JoinHandle](tokio::task::JoinHandle), but different in that it could refer to multiple
-processes (see [`ChildGroup`]) instead of just one. By default, when a child is dropped the
+processes (see [`ChildPool`]) instead of just one. By default, when a child is dropped the
 processes of the actor are shut down as well.
 
-Monitoring is slightly different for single children and for child-groups:
+Monitoring is slightly different for single children and for child-pools:
 - A [`Child<E, _, Single>`] can be monitored by awaiting it. When the actor exits normally, the
 `E` (exit-value) of the process is returned, if it exits due to a panic or abort an [ExitError] is
 returned instead.
-- A [`Child<E, _, Group>`] can be monitored by [streaming](futures::Stream) it. The items returned
+- A [`Child<E, _, Pool>`] can be monitored by [streaming](futures::Stream) it. The items returned
 from the stream are the same as what is returned by awaiting a single child.
 
 # Address
@@ -52,12 +52,12 @@ implements [`ActorRef`] with four different methods:
 
 # Child or ChildPool
 When specifying a [`Child<_, _, C>`], the argument `C` is it's [`ChildKind`]. This specifies
-whether the child is a single child or a child-group. This type can be left-out with the default
+whether the child is a single child or a child-pool. This type can be left-out with the default
 being [`Single`]:
 - `Child<_, _>` = `Child<_, _, Single>`
-- `ChildPool<_, _>` = `Child<_, _, Group>`
+- `ChildPool<_, _>` = `Child<_, _, Pool>`
 
-Any child can be converted into a child-group using [`Child::into_group`].
+Any child can be converted into a child-pool using [`Child::into_pool`].
 
 | __<--__ [`messaging`] | [`actor_type`] __-->__ |
 |---|---|
@@ -128,23 +128,23 @@ async fn main() {
     drop(child);
     assert_eq!(address.await, ());
 
-    // Let's also try spawning a child-group and monitoring that
-    let (mut child_group, address) = spawn_group(0..10, |_, inbox| async move {
+    // Let's also try spawning a child-pool and monitoring that
+    let (mut child_pool, address) = spawn_pool(0..10, |_, inbox| async move {
         spawned_process(inbox).await
     });
     address.halt();
-    child_group
+    child_pool
         .for_each(|process_exit| async move { // (trait StreamExt)
             assert!(matches!(process_exit, Ok("Halt properly handled")));
         })
         .await;
     assert_eq!(address.await, ());
 
-    // And finally shutting down a child-group
-    let (mut child_group, address) = spawn_group(0..10, |_, inbox| async move {
+    // And finally shutting down a child-pool
+    let (mut child_pool, address) = spawn_pool(0..10, |_, inbox| async move {
         spawned_process(inbox).await
     });
-    child_group
+    child_pool
         .shutdown(Duration::from_secs(1))
         .for_each(|process_exit| async move { // (trait StreamExt)
             assert!(matches!(process_exit, Ok("Halt properly handled")));
@@ -156,18 +156,15 @@ async fn main() {
 */
 
 #[allow(unused)]
-use crate::{*, all::*};
+use crate::{all::*, *};
 
+mod actor_ref;
 mod address;
 mod child;
 mod child_kind;
 mod shutdown;
-mod actor_ref;
-
 pub use actor_ref::*;
 pub use address::*;
 pub use child::*;
 pub use child_kind::*;
 pub use shutdown::*;
-
-pub use zestors_core::monitoring::*;

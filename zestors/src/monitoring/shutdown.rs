@@ -54,20 +54,20 @@ impl<'a, E: Send + 'static, T: ActorType> Future for ShutdownFut<'a, E, T> {
 //  ShutdownStream
 //------------------------------------------------------------------------------------------------
 
-/// Stream returned when shutting down a [ChildGroup].
+/// Stream returned when shutting down a [ChildPool].
 ///
 /// This stream can be collected into a vec with [StreamExt::collect]:
 pub struct ShutdownStream<'a, E: Send + 'static, T: ActorType> {
-    group: &'a mut ChildGroup<E, T>,
+    pool: &'a mut ChildPool<E, T>,
     sleep: Option<Pin<Box<Sleep>>>,
 }
 
 impl<'a, E: Send + 'static, T: ActorType> ShutdownStream<'a, E, T> {
-    pub(super) fn new(group: &'a mut ChildGroup<E, T>, timeout: Duration) -> Self {
-        group.halt();
+    pub(super) fn new(pool: &'a mut ChildPool<E, T>, timeout: Duration) -> Self {
+        pool.halt();
 
         ShutdownStream {
-            group,
+            pool,
             sleep: Some(Box::pin(tokio::time::sleep(timeout))),
         }
     }
@@ -80,11 +80,11 @@ impl<'a, E: Send + 'static, T: ActorType> Stream for ShutdownStream<'a, E, T> {
         if let Some(sleep) = &mut self.sleep {
             if sleep.poll_unpin(cx).is_ready() {
                 self.sleep = None;
-                self.group.abort();
+                self.pool.abort();
             }
         };
 
-        self.group.poll_next_unpin(cx)
+        self.pool.poll_next_unpin(cx)
     }
 }
 
@@ -136,7 +136,7 @@ impl From<tokio::task::JoinError> for ProcessExitError {
 
 #[cfg(test)]
 mod test {
-    use crate::_priv::test_helper::{basic_actor, grouped_basic_actor};
+    use crate::_priv::test_helper::{basic_actor, pooled_basic_actor};
     use crate::all::*;
     use futures::stream::StreamExt;
     use std::{future::pending, time::Duration};
@@ -144,7 +144,7 @@ mod test {
     #[tokio::test]
     async fn shutdown_success() {
         let (mut child, _addr) = spawn(basic_actor!());
-        assert!(child.shutdown(Duration::from_millis(5)).await.is_ok());
+        assert!(child.shutdown_with(Duration::from_millis(5)).await.is_ok());
     }
 
     #[tokio::test]
@@ -153,14 +153,14 @@ mod test {
             pending::<()>().await;
         });
         assert!(matches!(
-            child.shutdown(Duration::from_millis(5)).await,
+            child.shutdown_with(Duration::from_millis(5)).await,
             Err(ProcessExitError::Abort)
         ));
     }
 
     #[tokio::test]
-    async fn shutdown_group_success() {
-        let (mut child, _addr) = spawn_group(0..3, grouped_basic_actor!());
+    async fn shutdown_pool_success() {
+        let (mut child, _addr) = spawn_pool(0..3, pooled_basic_actor!());
 
         let results = child
             .shutdown(Duration::from_millis(5))
@@ -174,8 +174,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn shutdown_group_failure() {
-        let (mut child, _addr) = spawn_group(0..3, |_, _inbox: Inbox<()>| async {
+    async fn shutdown_pool_failure() {
+        let (mut child, _addr) = spawn_pool(0..3, |_, _inbox: Inbox<()>| async {
             pending::<()>().await;
         });
 
@@ -191,12 +191,12 @@ mod test {
     }
 
     #[tokio::test]
-    async fn shutdown_group_mixed() {
+    async fn shutdown_pool_mixed() {
         let (child, _addr) = spawn(|_inbox: Inbox<()>| async move {
             pending::<()>().await;
             unreachable!()
         });
-        let mut child = child.into_group();
+        let mut child = child.into_pool();
         child.spawn_onto(basic_actor!()).unwrap();
         child
             .spawn_onto(|_inbox: Inbox<()>| async move {

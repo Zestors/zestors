@@ -18,9 +18,9 @@ macro_rules! basic_actor {
 }
 pub(crate) use basic_actor;
 
-macro_rules! grouped_basic_actor {
+macro_rules! pooled_basic_actor {
     () => {
-        crate::_priv::test_helper::grouped_basic_actor!(())
+        crate::_priv::test_helper::pooled_basic_actor!(())
     };
     ($ty:ty) => {
         |_, mut inbox: crate::Inbox<$ty>| async move {
@@ -33,7 +33,7 @@ macro_rules! grouped_basic_actor {
         }
     };
 }
-pub(crate) use grouped_basic_actor;
+pub(crate) use pooled_basic_actor;
 
 #[protocol]
 pub(crate) enum U32Protocol {

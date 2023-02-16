@@ -7,7 +7,6 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-use zestors_core::inboxes::InboxType;
 
 /// A child is a unique reference to an actor, consisting of one or more processes.
 /// ...
@@ -25,26 +24,26 @@ use zestors_core::inboxes::InboxType;
 ///     - [`Halter`], indicating that the actor does not have an [Inbox].
 ///     - A dynamic child using the [`Accepts!`] macro. This can be used for actors with or without
 ///       an [Inbox], and actors of either type can be converted using [`Child::transform_into`].
-/// - `P`: Stands for [`IsGroup`], and specifies whether this child is grouped or not (default
-///   is [NoGroup]). This can be either:
-///     - [NoGroup], indicating the child is not grouped.
-///     - [Group], indicating that the child is a [ChildGroup].
+/// - `P`: Stands for [`IsPool`], and specifies whether this child is pooled or not (default
+///   is [NoPool]). This can be either:
+///     - [NoPool], indicating the child is not pooled.
+///     - [Pool], indicating that the child is a [ChildPool].
 ///
 /// ## Shorthands
 /// In order to keep writing these types simple, we can use the following shorthands to define our
 /// types:
 /// ```no_compile
-/// Child<E, C>     = Child<E, C, NoGroup>;       // A regular child.
+/// Child<E, C>     = Child<E, C, NoPool>;       // A regular child.
 /// Child<E>        = Child<E, Accepts![]>;      // A child that doesn't accept any messages.
-/// ChildGroup<E, C> = Child<E, C, Group>;         // A regular childgroup.
-/// ChildGroup<E>    = ChildGroup<E, Accepts![]>;  // A childgroup that doesn't accept any messages.
+/// ChildPool<E, C> = Child<E, C, Pool>;         // A regular childpool.
+/// ChildPool<E>    = ChildPool<E, Accepts![]>;  // A childpool that doesn't accept any messages.
 /// ```
 #[derive(Debug)]
 pub struct Child<E, A = Accepts![], C = Single>
 where
     E: Send + 'static,
     A: ActorType,
-    C: ChildKind,
+    C: ChildType,
 {
     channel: Arc<A::Channel>,
     join_handles: Option<C::JoinHandles<E>>,
@@ -52,15 +51,15 @@ where
     is_aborted: bool,
 }
 
-/// A `ChildGroup<E, CT>` is the same as a `Child<E, CT, Group>`.
-pub type ChildGroup<E, A = Accepts![]> = Child<E, A, Group>;
+/// A `ChildPool<E, CT>` is the same as a `Child<E, CT, Pool>`.
+pub type ChildPool<E, A = Accepts![]> = Child<E, A, Pool>;
 
 /// # Methods valid for all children.
 impl<E, A, C> Child<E, A, C>
 where
     E: Send + 'static,
     A: ActorType,
-    C: ChildKind,
+    C: ChildType,
 {
     pub(crate) fn new(
         channel: Arc<A::Channel>,
@@ -202,16 +201,16 @@ where
     }
 }
 
-/// # Methods valid for children that are not grouped.
+/// # Methods valid for children that are not pooled.
 impl<E, A> Child<E, A, Single>
 where
     E: Send + 'static,
     A: ActorType,
 {
-    /// Convert the [Child] into a [ChildGroup].
-    pub fn into_group(self) -> ChildGroup<E, A> {
+    /// Convert the [Child] into a [ChildPool].
+    pub fn into_pool(self) -> ChildPool<E, A> {
         let (channel, mut join_handles, link, is_aborted) = self.into_parts();
-        ChildGroup {
+        ChildPool {
             channel,
             join_handles: Some(vec![join_handles.take().unwrap()]),
             link,
@@ -223,17 +222,25 @@ where
     /// result of the task, and closes the channel.
     ///
     /// If the timeout expires before the actor has exited, the actor will be aborted.
-    pub fn shutdown(&mut self, timeout: Duration) -> ShutdownFut<'_, E, A> {
+    pub fn shutdown_with(&mut self, timeout: Duration) -> ShutdownFut<'_, E, A> {
         ShutdownFut::new(self, timeout)
+    }
+
+    pub fn shutdown(&mut self) -> ShutdownFut<'_, E, A> {
+        let timeout = match self.link {
+            Link::Detached => Duration::from_secs(1),
+            Link::Attached(timeout) => timeout,
+        };
+        self.shutdown_with(timeout)
     }
 }
 
 //-------------------------------------------------
-//  Grouped children
+//  Pooled children
 //-------------------------------------------------
 
-/// # Methods valid for children that are grouped.
-impl<E, A> Child<E, A, Group>
+/// # Methods valid for children that are pooled.
+impl<E, A> Child<E, A, Pool>
 where
     E: Send + 'static,
     A: ActorType,
@@ -262,12 +269,10 @@ where
         Fun: FnOnce(I) -> Fut + Send + 'static,
         Fut: Future<Output = E> + Send + 'static,
         I: InboxType,
-        <I::ActorType as ActorType>::Channel: Sized,
+        I::Channel: Sized,
         E: Send + 'static,
     {
-        let channel = match Arc::downcast::<<I::ActorType as ActorType>::Channel>(
-            self.channel.clone().into_any(),
-        ) {
+        let channel = match Arc::downcast::<I::Channel>(self.channel.clone().into_any()) {
             Ok(channel) => channel,
             Err(_) => return Err(TrySpawnError::IncorrectType(fun)),
         };
@@ -295,7 +300,7 @@ where
         Fun: FnOnce(A) -> Fut + Send + 'static,
         Fut: Future<Output = E> + Send + 'static,
         E: Send + 'static,
-        A: GroupInboxType,
+        A: MultiInboxType,
         A::Channel: Sized,
     {
         match self.channel.try_add_process() {
@@ -315,11 +320,11 @@ where
     }
 }
 
-impl<E, A, C> ActorRef for Child<E, A, C>
+impl<E, A, C> ChannelRef for Child<E, A, C>
 where
     E: Send + 'static,
     A: ActorType,
-    C: ChildKind,
+    C: ChildType,
 {
     type ActorType = A;
     fn channel(&self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
@@ -331,11 +336,11 @@ impl<E, A, C> Unpin for Child<E, A, C>
 where
     E: Send + 'static,
     A: ActorType,
-    C: ChildKind,
+    C: ChildType,
 {
 }
 
-/// # Future is implemented for non-grouped children only.
+/// # Future is implemented for non-pooled children only.
 impl<E, A> Future for Child<E, A, Single>
 where
     E: Send + 'static,
@@ -352,8 +357,8 @@ where
     }
 }
 
-/// # Stream is implemented for grouped children only.
-impl<E, A> Stream for Child<E, A, Group>
+/// # Stream is implemented for pooled children only.
+impl<E, A> Stream for Child<E, A, Pool>
 where
     E: Send + 'static,
     A: ActorType,
@@ -380,18 +385,18 @@ impl<E, A, C> Drop for Child<E, A, C>
 where
     E: Send + 'static,
     A: ActorType,
-    C: ChildKind,
+    C: ChildType,
 {
     fn drop(&mut self) {
-        if let Link::Attached(abort_timer) = self.link {
+        if let Link::Attached(shutdown_time) = self.link {
             if !self.is_aborted && !self.is_finished() {
-                if abort_timer.is_zero() {
+                if shutdown_time.is_zero() {
                     self.abort();
                 } else {
                     self.halt();
                     let handles = self.join_handles.take().unwrap();
                     tokio::task::spawn(async move {
-                        tokio::time::sleep(abort_timer).await;
+                        tokio::time::sleep(shutdown_time).await;
                         C::abort(&handles)
                     });
                 }
@@ -408,7 +413,7 @@ pub trait IntoChild<E, A, C>
 where
     E: Send + 'static,
     A: ActorType,
-    C: ChildKind,
+    C: ChildType,
 {
     fn into_child(self) -> Child<E, A, C>;
 }
@@ -424,24 +429,24 @@ where
     }
 }
 
-impl<E, T, A> IntoChild<E, T, Group> for Child<E, A, Single>
+impl<E, T, A> IntoChild<E, T, Pool> for Child<E, A, Single>
 where
     E: Send + 'static,
     T: ActorType,
     A: TransformInto<T>,
 {
-    fn into_child(self) -> Child<E, T, Group> {
-        self.into_group().transform_into()
+    fn into_child(self) -> Child<E, T, Pool> {
+        self.into_pool().transform_into()
     }
 }
 
-impl<E, G, T> IntoChild<E, T, Group> for Child<E, G, Group>
+impl<E, G, T> IntoChild<E, T, Pool> for Child<E, G, Pool>
 where
     E: Send + 'static,
     T: ActorType,
     G: TransformInto<T>,
 {
-    fn into_child(self) -> Child<E, T, Group> {
+    fn into_child(self) -> Child<E, T, Pool> {
         self.transform_into()
     }
 }
@@ -453,7 +458,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::_priv::test_helper::basic_actor;
-    use crate::all::{ActorRef, *};
+    use crate::all::*;
     use std::{future::pending, time::Duration};
     use tokio::sync::oneshot;
 
@@ -537,23 +542,23 @@ mod test {
     }
 
     #[tokio::test]
-    async fn into_childgroup() {
+    async fn into_childpool() {
         let (child, _addr) = spawn(basic_actor!());
-        let group = child.into_group();
-        assert_eq!(group.task_count(), 1);
-        assert_eq!(group.process_count(), 1);
-        assert_eq!(group.is_aborted(), false);
+        let pool = child.into_pool();
+        assert_eq!(pool.task_count(), 1);
+        assert_eq!(pool.process_count(), 1);
+        assert_eq!(pool.is_aborted(), false);
 
         let (mut child, _addr) = spawn(basic_actor!());
         child.abort();
-        let group = child.into_group();
-        assert_eq!(group.is_aborted(), true);
+        let pool = child.into_pool();
+        assert_eq!(pool.is_aborted(), true);
     }
 }
 
 #[cfg(test)]
-mod test_grouped {
-    use crate::_priv::test_helper::{basic_actor, grouped_basic_actor, U32Protocol};
+mod test_pooled {
+    use crate::_priv::test_helper::{basic_actor, pooled_basic_actor, U32Protocol};
     use crate::all::*;
     use futures::future::pending;
     use std::sync::atomic::{AtomicU8, Ordering};
@@ -562,7 +567,7 @@ mod test_grouped {
     #[tokio::test]
     async fn dropping() {
         static HALT_COUNT: AtomicU8 = AtomicU8::new(0);
-        let (child, addr) = spawn_group(0..3, |_, mut inbox: Inbox<()>| async move {
+        let (child, addr) = spawn_pool(0..3, |_, mut inbox: Inbox<()>| async move {
             if let Err(RecvError::Halted) = inbox.recv().await {
                 HALT_COUNT.fetch_add(1, Ordering::AcqRel);
             };
@@ -576,7 +581,7 @@ mod test_grouped {
     #[tokio::test]
     async fn dropping_halts_then_aborts() {
         static HALT_COUNT: AtomicU8 = AtomicU8::new(0);
-        let (child, addr) = spawn_group(0..3, |_, mut inbox: Inbox<()>| async move {
+        let (child, addr) = spawn_pool(0..3, |_, mut inbox: Inbox<()>| async move {
             if let Err(RecvError::Halted) = inbox.recv().await {
                 HALT_COUNT.fetch_add(1, Ordering::AcqRel);
             };
@@ -592,7 +597,7 @@ mod test_grouped {
     async fn dropping_detached() {
         static HALT_COUNT: AtomicU8 = AtomicU8::new(0);
 
-        let (child, addr) = spawn_group_with(
+        let (child, addr) = spawn_pool_with(
             Link::Detached,
             Capacity::default(),
             0..3,
@@ -614,14 +619,14 @@ mod test_grouped {
 
     #[tokio::test]
     async fn downcast() {
-        let (group, _addr) = spawn_group(0..5, grouped_basic_actor!());
-        let group: ChildGroup<_> = group.transform_into();
-        assert!(matches!(group.downcast::<Inbox<()>>(), Ok(_)));
+        let (pool, _addr) = spawn_pool(0..5, pooled_basic_actor!());
+        let pool: ChildPool<_> = pool.transform_into();
+        assert!(matches!(pool.downcast::<Inbox<()>>(), Ok(_)));
     }
 
     #[tokio::test]
     async fn spawn_ok() {
-        let (mut child, _addr) = spawn_group(0..1, grouped_basic_actor!());
+        let (mut child, _addr) = spawn_pool(0..1, pooled_basic_actor!());
         assert!(child.spawn_onto(basic_actor!()).is_ok());
         assert!(child
             .transform_into::<Accepts![]>()
@@ -631,7 +636,7 @@ mod test_grouped {
 
     #[tokio::test]
     async fn spawn_err_exit() {
-        let (mut child, addr) = spawn_group(0..1, grouped_basic_actor!());
+        let (mut child, addr) = spawn_pool(0..1, pooled_basic_actor!());
         addr.halt();
         addr.await;
         assert!(matches!(
@@ -651,7 +656,7 @@ mod test_grouped {
         let (child, _addr) = spawn(basic_actor!(U32Protocol));
         assert!(matches!(
             child
-                .into_group()
+                .into_pool()
                 .transform_into::<Accepts![]>()
                 .try_spawn_onto(basic_actor!(())),
             Err(TrySpawnError::IncorrectType(_))

@@ -36,8 +36,8 @@ impl RestartLimiter {
     }
 
     /// Adds a restart and then checks whether the restart is within the limit.
-    pub fn restart_within_limit(&mut self) -> bool {
-        if !self.triggered {
+    pub fn within_limit(&mut self) -> bool {
+        if !self.triggered() {
             self.values.push(Instant::now());
             self.values
                 .retain(|instant| instant.elapsed() < self.within);
@@ -46,7 +46,8 @@ impl RestartLimiter {
                 self.triggered = true
             }
         }
-        self.triggered
+
+        self.triggered()
     }
 
     pub fn triggered(&self) -> bool {
