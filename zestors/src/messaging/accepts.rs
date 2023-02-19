@@ -1,4 +1,5 @@
 use crate::all::*;
+use futures::{future::BoxFuture, Future};
 
 /// [`Accept`] is implemented for any [`ActorType`] that accepts the [`Message`] `M`.
 pub trait Accept<M: Message>: ActorType {
@@ -54,4 +55,65 @@ macro_rules! Accepts {
     };
 }
 pub use Accepts;
-use futures::Future;
+
+pub trait AcceptExt<M: Message>: Accept<M> {
+    fn try_request<F, E, R>(
+        channel: &Self::Channel,
+        msg: M,
+    ) -> BoxFuture<'_, Result<R, TryRequestError<M, E>>>
+    where
+        M: Message<Returned = F> + Send + 'static,
+        F: Future<Output = Result<R, E>> + Send,
+    {
+        Box::pin(async move {
+            match Self::try_send(channel, msg) {
+                Ok(rx) => match rx.await {
+                    Ok(msg) => Ok(msg),
+                    Err(e) => Err(TryRequestError::NoReply(e)),
+                },
+                Err(TrySendError::Closed(msg)) => Err(TryRequestError::Closed(msg)),
+                Err(TrySendError::Full(msg)) => Err(TryRequestError::Full(msg)),
+            }
+        })
+    }
+
+    fn force_request<F, E, R>(
+        channel: &Self::Channel,
+        msg: M,
+    ) -> BoxFuture<'_, Result<R, TryRequestError<M, E>>>
+    where
+        M: Message<Returned = F> + Send + 'static,
+        F: Future<Output = Result<R, E>> + Send,
+    {
+        Box::pin(async move {
+            match Self::force_send(channel, msg) {
+                Ok(rx) => match rx.await {
+                    Ok(msg) => Ok(msg),
+                    Err(e) => Err(TryRequestError::NoReply(e)),
+                },
+                Err(TrySendError::Closed(msg)) => Err(TryRequestError::Closed(msg)),
+                Err(TrySendError::Full(msg)) => Err(TryRequestError::Full(msg)),
+            }
+        })
+    }
+
+    fn request<F, E, R>(
+        channel: &Self::Channel,
+        msg: M,
+    ) -> BoxFuture<'_, Result<R, RequestError<M, E>>>
+    where
+        M: Message<Returned = F> + Send + 'static,
+        F: Future<Output = Result<R, E>> + Send,
+    {
+        Box::pin(async move {
+            match Self::send(channel, msg).await {
+                Ok(rx) => match rx.await {
+                    Ok(msg) => Ok(msg),
+                    Err(e) => Err(RequestError::NoReply(e)),
+                },
+                Err(SendError(msg)) => Err(RequestError::Closed(msg)),
+            }
+        })
+    }
+}
+impl<M: Message, T> AcceptExt<M> for T where T: Accept<M> {}

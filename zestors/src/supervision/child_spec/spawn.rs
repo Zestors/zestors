@@ -11,17 +11,35 @@ use std::{
     time::Duration,
 };
 
-#[pin_project]
-pub struct SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>
+pub fn from_spawn_fn<I, D, SFut, E, EFut>(
+    spawn_fn: impl (FnOnce(I, D) -> SFut) + Clone + Send + 'static,
+    exit_fn: impl (FnOnce(Result<E, ExitError>) -> EFut) + Send + Clone + 'static,
+    start_time: Duration,
+    data: D,
+    inbox_config: I::Config,
+) -> impl Startable<Ref = Address<I>> + 'static
 where
     E: Send + 'static,
     I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
-    SFun: FnOnce(D, I) -> SFut + Send + Clone + 'static,
     SFut: Future<Output = E> + Send + 'static,
-    EFun: FnOnce(Result<E, ProcessExitError>) -> EFut + Send + Clone,
-    EFut: Future<Output = ExitResult<D>> + Send,
+    EFut: Future<Output = SuperviseResult<D>> + Send + 'static,
+{
+    SpawnSpec::new(spawn_fn, exit_fn, data, inbox_config, start_time.into())
+}
+
+#[pin_project]
+pub(crate) struct SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>
+where
+    E: Send + 'static,
+    I: InboxType,
+    I::Config: Send + Clone,
+    D: Send + 'static,
+    SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
+    SFut: Future<Output = E> + Send + 'static,
+    EFun: FnOnce(Result<E, ExitError>) -> EFut + Send + Clone,
+    EFut: Future<Output = SuperviseResult<D>> + Send,
 {
     inner: Inner<SFun, SFut, EFun, EFut, D, E, I>,
     data: D,
@@ -33,17 +51,17 @@ where
     I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
-    SFun: FnOnce(D, I) -> SFut + Send + Clone + 'static,
+    SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
     SFut: Future<Output = E> + Send + 'static,
-    EFun: FnOnce(Result<E, ProcessExitError>) -> EFut + Send + Clone,
-    EFut: Future<Output = ExitResult<D>> + Send,
+    EFun: FnOnce(Result<E, ExitError>) -> EFut + Send + Clone,
+    EFut: Future<Output = SuperviseResult<D>> + Send,
 {
     pub fn new(
         spawn_fn: SFun,
         exit_fn: EFun,
         data: D,
         config: I::Config,
-        abort_timeout: Duration,
+        abort_timeout: ShutdownTime,
     ) -> Self {
         Self {
             inner: Inner {
@@ -66,34 +84,34 @@ where
             exit_fn,
             data,
             Default::default(),
-            Duration::from_secs(1),
+            ShutdownTime::default(),
         )
     }
 }
 
-impl<SFun, SFut, EFun, EFut, D, E, I> Specification for SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>
+impl<SFun, SFut, EFun, EFut, D, E, I> Startable for SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
     I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
-    SFun: FnOnce(D, I) -> SFut + Send + Clone + 'static,
+    SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
     SFut: Future<Output = E> + Send + 'static,
-    EFun: FnOnce(Result<E, ProcessExitError>) -> EFut + Send + Clone,
-    EFut: Future<Output = ExitResult<D>> + Send,
+    EFun: FnOnce(Result<E, ExitError>) -> EFut + Send + Clone + 'static,
+    EFut: Future<Output = SuperviseResult<D>> + Send + 'static,
 {
     type Ref = Address<I>;
     type Supervisee = SpawnSupervisee<SFun, SFut, EFun, EFut, D, E, I>;
-    type StartFut = Ready<StartResult<Self>>;
+    type Fut = Ready<StartResult<Self>>;
 
-    fn start(self) -> Self::StartFut {
+    fn start(self) -> Self::Fut {
         future::ready({
             let inner = self.inner.clone();
             let (child, address) = spawn_with(
                 Link::Attached(inner.abort_timeout),
                 inner.config,
                 move |inbox| async move {
-                    let spawn_fut = (inner.spawn_fn)(self.data, inbox);
+                    let spawn_fut = (inner.spawn_fn)(inbox, self.data);
                     spawn_fut.await
                 },
             );
@@ -115,16 +133,16 @@ where
 }
 
 #[pin_project]
-pub struct SpawnSupervisee<SFun, SFut, EFun, EFut, D, E, I>
+pub(crate) struct SpawnSupervisee<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
     I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
-    SFun: FnOnce(D, I) -> SFut + Send + Clone + 'static,
+    SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
     SFut: Future<Output = E> + Send + 'static,
-    EFun: FnOnce(Result<E, ProcessExitError>) -> EFut + Send + Clone,
-    EFut: Future<Output = ExitResult<D>> + Send,
+    EFun: FnOnce(Result<E, ExitError>) -> EFut + Send + Clone,
+    EFut: Future<Output = SuperviseResult<D>> + Send,
 {
     inner: Option<Inner<SFun, SFut, EFun, EFut, D, E, I>>,
     child: Child<E, I>,
@@ -132,21 +150,21 @@ where
     exit_fut: Option<EFut>,
 }
 
-impl<SFun, SFut, EFun, EFut, D, E, I> Supervisee
+impl<SFun, SFut, EFun, EFut, D, E, I> Supervisable
     for SpawnSupervisee<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
     I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
-    SFun: FnOnce(D, I) -> SFut + Send + Clone + 'static,
+    SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
     SFut: Future<Output = E> + Send + 'static,
-    EFun: FnOnce(Result<E, ProcessExitError>) -> EFut + Send + Clone,
-    EFut: Future<Output = ExitResult<D>> + Send,
+    EFun: FnOnce(Result<E, ExitError>) -> EFut + Send + Clone + 'static,
+    EFut: Future<Output = SuperviseResult<D>> + Send + 'static,
 {
     type Spec = SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>;
 
-    fn shutdown_time(self: Pin<&Self>) -> Duration {
+    fn shutdown_time(self: Pin<&Self>) -> ShutdownTime {
         match self.child.link() {
             Link::Detached => panic!(),
             Link::Attached(duration) => duration.clone(),
@@ -160,22 +178,11 @@ where
     fn abort(self: Pin<&mut Self>) {
         self.project().child.abort();
     }
-}
 
-impl<SFun, SFut, EFun, EFut, D, E, I> Future for SpawnSupervisee<SFun, SFut, EFun, EFut, D, E, I>
-where
-    E: Send + 'static,
-    I: InboxType,
-    I::Config: Send + Clone,
-    D: Send + 'static,
-    SFun: FnOnce(D, I) -> SFut + Send + Clone + 'static,
-    SFut: Future<Output = E> + Send + 'static,
-    EFun: FnOnce(Result<E, ProcessExitError>) -> EFut + Send + Clone,
-    EFut: Future<Output = ExitResult<D>> + Send,
-{
-    type Output = ExitResult<<Self as Supervisee>::Spec>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll_supervise(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+    ) -> Poll<SuperviseResult<Self::Spec>> {
         let mut this = self.as_mut().project();
 
         loop {
@@ -209,37 +216,37 @@ mod test {
     #[test]
     fn test() {
         let x = SpawnSpec::new(
-            |data: u32, inbox: Halter| async move { () },
+            |inbox: Halter, data: u32| async move { () },
             |exit| async move {
                 match exit {
                     Ok(res) => todo!(),
                     Err(e) => match e {
-                        ProcessExitError::Panic(_) => todo!(),
-                        ProcessExitError::Abort => todo!(),
+                        ExitError::Panic(_) => todo!(),
+                        ExitError::Abort => todo!(),
                     },
                 }
             },
             10,
             Default::default(),
-            Duration::from_secs(1),
+            ShutdownTime::Default,
         );
     }
 
-    fn spec() -> impl Specification<Ref = Address<Halter>> + Send + Unpin {
+    fn spec() -> impl Startable<Ref = Address<Halter>> {
         SpawnSpec::new(
-            |data: u32, inbox: Halter| async move { () },
+            |inbox: Halter, data: u32| async move { () },
             |exit| async move {
                 match exit {
                     Ok(res) => todo!(),
                     Err(e) => match e {
-                        ProcessExitError::Panic(_) => todo!(),
-                        ProcessExitError::Abort => todo!(),
+                        ExitError::Panic(_) => todo!(),
+                        ExitError::Abort => todo!(),
                     },
                 }
             },
             10,
             Default::default(),
-            Duration::from_secs(1),
+            ShutdownTime::default(),
         )
     }
 }
@@ -250,15 +257,15 @@ where
     I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
-    SFun: FnOnce(D, I) -> SFut + Send + Clone + 'static,
+    SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
     SFut: Future<Output = E> + Send + 'static,
-    EFun: FnOnce(Result<E, ProcessExitError>) -> EFut + Send + Clone,
-    EFut: Future<Output = ExitResult<D>> + Send,
+    EFun: FnOnce(Result<E, ExitError>) -> EFut + Send + Clone,
+    EFut: Future<Output = SuperviseResult<D>> + Send,
 {
     spawn_fn: SFun,
     exit_fn: EFun,
     config: I::Config,
-    abort_timeout: Duration,
+    abort_timeout: ShutdownTime,
     phantom: PhantomData<(SFut, EFut)>,
 }
 
@@ -268,10 +275,10 @@ where
     I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
-    SFun: FnOnce(D, I) -> SFut + Send + Clone + 'static,
+    SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
     SFut: Future<Output = E> + Send + 'static,
-    EFun: FnOnce(Result<E, ProcessExitError>) -> EFut + Send + Clone,
-    EFut: Future<Output = ExitResult<D>> + Send,
+    EFun: FnOnce(Result<E, ExitError>) -> EFut + Send + Clone,
+    EFut: Future<Output = SuperviseResult<D>> + Send,
 {
     fn clone(&self) -> Self {
         Self {

@@ -129,23 +129,23 @@ impl Channel for MultiHalterChannel {
         }
     }
 
-    fn try_send_any(&self, boxed: AnyPayload) -> Result<(), TrySendCheckedError<AnyPayload>> {
+    fn try_send_any(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {
         Err(TrySendCheckedError::NotAccepted(boxed))
     }
 
-    fn force_send_any(&self, boxed: AnyPayload) -> Result<(), TrySendCheckedError<AnyPayload>> {
+    fn force_send_any(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {
         Err(TrySendCheckedError::NotAccepted(boxed))
     }
 
-    fn send_any_blocking(&self, boxed: AnyPayload) -> Result<(), SendCheckedError<AnyPayload>> {
+    fn send_any_blocking(&self, boxed: BoxPayload) -> Result<(), SendCheckedError<BoxPayload>> {
         Err(SendCheckedError::NotAccepted(boxed))
     }
 
     fn send_any<'a>(
         &'a self,
-        boxed: AnyPayload,
+        boxed: BoxPayload,
     ) -> std::pin::Pin<
-        Box<dyn futures::Future<Output = Result<(), SendCheckedError<AnyPayload>>> + Send + 'a>,
+        Box<dyn futures::Future<Output = Result<(), SendCheckedError<BoxPayload>>> + Send + 'a>,
     > {
         Box::pin(async move { Err(SendCheckedError::NotAccepted(boxed)) })
     }

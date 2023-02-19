@@ -111,8 +111,7 @@ mod actor_id;
 mod actor_type;
 mod channel;
 mod errors;
-mod accepts;
-pub use {actor_id::*, actor_type::*, channel::*, errors::*, accepts::*};
+pub use {actor_id::*, actor_type::*, channel::*, errors::*};
 
 pub mod dyn_actor_types;
 pub mod halter;

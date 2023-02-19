@@ -95,14 +95,14 @@ where
     /// Attach the actor.
     ///
     /// Returns the old abort-timeout if it was already attached.
-    pub fn attach(&mut self, duration: Duration) -> Option<Duration> {
-        self.link.attach(duration)
+    pub fn attach(&mut self, time: ShutdownTime) -> Option<ShutdownTime> {
+        self.link.attach(time)
     }
 
     /// Detach the actor.
     ///
     /// Returns the old abort-timeout if it was attached before.
-    pub fn detach(&mut self) -> Option<Duration> {
+    pub fn detach(&mut self) -> Option<ShutdownTime> {
         self.link.detach()
     }
 
@@ -222,16 +222,16 @@ where
     /// result of the task, and closes the channel.
     ///
     /// If the timeout expires before the actor has exited, the actor will be aborted.
-    pub fn shutdown_with(&mut self, timeout: Duration) -> ShutdownFut<'_, E, A> {
-        ShutdownFut::new(self, timeout)
+    pub fn shutdown_with(&mut self, timeout: ShutdownTime) -> ShutdownFut<'_, E, A> {
+        ShutdownFut::new(self, timeout.duration())
     }
 
     pub fn shutdown(&mut self) -> ShutdownFut<'_, E, A> {
-        let timeout = match self.link {
-            Link::Detached => Duration::from_secs(1),
-            Link::Attached(timeout) => timeout,
+        let time = match self.link {
+            Link::Detached => ShutdownTime::Default,
+            Link::Attached(time) => time,
         };
-        self.shutdown_with(timeout)
+        self.shutdown_with(time)
     }
 }
 
@@ -320,14 +320,14 @@ where
     }
 }
 
-impl<E, A, C> ChannelRef for Child<E, A, C>
+impl<E, A, C> ActorRef for Child<E, A, C>
 where
     E: Send + 'static,
     A: ActorType,
     C: ChildType,
 {
     type ActorType = A;
-    fn channel(&self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
+    fn channel_ref(&self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
         &self.channel
     }
 }
@@ -346,7 +346,7 @@ where
     E: Send + 'static,
     A: ActorType,
 {
-    type Output = Result<E, ProcessExitError>;
+    type Output = Result<E, ExitError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.join_handles
@@ -363,7 +363,7 @@ where
     E: Send + 'static,
     A: ActorType,
 {
-    type Item = Result<E, ProcessExitError>;
+    type Item = Result<E, ExitError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.join_handles.as_ref().unwrap().len() == 0 {
@@ -388,15 +388,16 @@ where
     C: ChildType,
 {
     fn drop(&mut self) {
-        if let Link::Attached(shutdown_time) = self.link {
+        if let Link::Attached(shutdown_time) = &mut self.link {
+            let duration = shutdown_time.duration();
             if !self.is_aborted && !self.is_finished() {
-                if shutdown_time.is_zero() {
+                if duration.is_zero() {
                     self.abort();
                 } else {
                     self.halt();
                     let handles = self.join_handles.take().unwrap();
                     tokio::task::spawn(async move {
-                        tokio::time::sleep(shutdown_time).await;
+                        tokio::time::sleep(duration).await;
                         C::abort(&handles)
                     });
                 }
@@ -480,7 +481,7 @@ mod test {
     async fn dropping_aborts() {
         let (tx, rx) = oneshot::channel();
         let (child, _addr) = spawn_with(
-            Link::Attached(Duration::from_millis(1)),
+            Link::Attached(Duration::from_millis(1).into()),
             Default::default(),
             |mut inbox: Inbox<()>| async move {
                 if let Err(RecvError::Halted) = inbox.recv().await {
@@ -530,7 +531,7 @@ mod test {
         assert!(!child.is_aborted());
         child.abort();
         assert!(child.is_aborted());
-        assert!(matches!(child.await, Err(ProcessExitError::Abort)));
+        assert!(matches!(child.await, Err(ExitError::Abort)));
     }
 
     #[tokio::test]

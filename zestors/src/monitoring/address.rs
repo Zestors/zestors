@@ -101,9 +101,9 @@ impl<A: ActorType> Address<A> {
     }
 }
 
-impl<A: ActorType> ChannelRef for Address<A> {
+impl<A: ActorType> ActorRef for Address<A> {
     type ActorType = A;
-    fn channel(&self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
+    fn channel_ref(&self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
         &self.channel
     }
 }

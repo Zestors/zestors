@@ -44,9 +44,9 @@ impl InboxType for Halter {
     }
 }
 
-impl ChannelRef for Halter {
+impl ActorRef for Halter {
     type ActorType = Self;
-    fn channel(&self) -> &Arc<<Self as ActorType>::Channel> {
+    fn channel_ref(&self) -> &Arc<<Self as ActorType>::Channel> {
         &self.channel
     }
 }

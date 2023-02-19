@@ -1,11 +1,45 @@
+use tokio::sync::oneshot;
 use futures::{Future, FutureExt};
 use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::sync::oneshot;
+use super::MessageDerive;
 
-use crate::messaging::{TrySendRecvError, SendRecvError};
+pub fn new_request<T>() -> (Tx<T>, Rx<T>) {
+    let (tx, rx) = oneshot::channel();
+    (Tx(tx), Rx(rx))
+}
+
+impl<M, R> MessageDerive<M> for Rx<R> {
+    type Payload = (M, Tx<R>);
+    type Returned = Rx<R>;
+
+    fn create(msg: M) -> ((M, Tx<R>), Rx<R>) {
+        let (tx, rx) = new_request();
+        ((msg, tx), rx)
+    }
+
+    fn cancel(sent: (M, Tx<R>), _returned: Rx<R>) -> M {
+        sent.0
+    }
+}
+
+impl<M, R> MessageDerive<M> for Tx<R> {
+    type Payload = (M, Rx<R>);
+    type Returned = Tx<R>;
+
+    fn create(msg: M) -> ((M, Rx<R>), Tx<R>) {
+        let (tx, rx) = new_request();
+        ((msg, rx), tx)
+    }
+
+    fn cancel(sent: (M, Rx<R>), _returned: Tx<R>) -> M {
+        sent.0
+    }
+}
+
+
 
 //------------------------------------------------------------------------------------------------
 //  Tx
@@ -78,18 +112,6 @@ pub struct RxError;
 impl From<oneshot::error::RecvError> for RxError {
     fn from(_: oneshot::error::RecvError) -> Self {
         Self
-    }
-}
-
-impl<M> Into<TrySendRecvError<M>> for RxError {
-    fn into(self) -> TrySendRecvError<M> {
-        TrySendRecvError::NoReply
-    }
-}
-
-impl<M> Into<SendRecvError<M>> for RxError {
-    fn into(self) -> SendRecvError<M> {
-        SendRecvError::NoReply
     }
 }
 

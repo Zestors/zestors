@@ -13,21 +13,21 @@ use tokio::time::{sleep, Sleep};
 //------------------------------------------------------------------------------------------------
 
 #[pin_project]
-pub struct SupervisorFut<S: Specification> {
+pub struct SupervisorFut<S: Startable> {
     to_shutdown: bool,
     #[pin]
     state: SupervisorFutState<S>,
 }
 
 #[pin_project]
-enum SupervisorFutState<S: Specification> {
+enum SupervisorFutState<S: Startable> {
     NotStarted(S),
-    Starting(Pin<Box<S::StartFut>>, Pin<Box<Sleep>>),
+    Starting(Pin<Box<S::Fut>>, Pin<Box<Sleep>>),
     Supervising(Pin<Box<S::Supervisee>>, Option<(Pin<Box<Sleep>>, bool)>),
     Exited,
 }
 
-impl<S: Specification> SupervisorFut<S> {
+impl<S: Startable> SupervisorFut<S> {
     pub fn new(spec: S) -> Self {
         Self {
             to_shutdown: false,
@@ -43,18 +43,18 @@ impl<S: Specification> SupervisorFut<S> {
         self.to_shutdown
     }
 
-    pub fn spawn_supervisor(self) -> (Child<ExitResult<S>>, SupervisorRef)
+    pub fn spawn_supervisor(self) -> (Child<SuperviseResult<S>>, SupervisorRef)
     where
         S: Sized + Send + 'static,
         S::Supervisee: Send,
-        S::StartFut: Send,
+        S::Fut: Send,
     {
         SupervisorProcess::spawn_supervisor(self)
     }
 }
 
-impl<S: Specification> Future for SupervisorFut<S> {
-    type Output = ExitResult<S>;
+impl<S: Startable> Future for SupervisorFut<S> {
+    type Output = SuperviseResult<S>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
@@ -108,7 +108,7 @@ impl<S: Specification> Future for SupervisorFut<S> {
 
                 SupervisorFutState::Supervising(supervisee, aborting) => match aborting {
                     Some((sleep, aborted)) => {
-                        if let Poll::Ready(exit) = supervisee.as_mut().poll(cx) {
+                        if let Poll::Ready(exit) = supervisee.as_mut().poll_supervise(cx) {
                             return Poll::Ready(exit);
                         }
                         if let Poll::Ready(()) = sleep.poll_unpin(cx) {
@@ -120,10 +120,12 @@ impl<S: Specification> Future for SupervisorFut<S> {
                     None => {
                         if this.to_shutdown {
                             supervisee.as_mut().halt();
-                            *aborting =
-                                Some((Box::pin(sleep(supervisee.as_ref().shutdown_time())), false));
+                            *aborting = Some((
+                                Box::pin(sleep(supervisee.as_ref().shutdown_time().duration())),
+                                false,
+                            ));
                         } else {
-                            return supervisee.as_mut().poll(cx);
+                            return supervisee.as_mut().poll_supervise(cx);
                         }
                     }
                 },
@@ -139,7 +141,7 @@ impl<S: Specification> Future for SupervisorFut<S> {
 //------------------------------------------------------------------------------------------------
 
 #[pin_project]
-pub(super) struct SupervisorProcess<Sp: Specification> {
+pub(super) struct SupervisorProcess<Sp: Startable> {
     #[pin]
     inbox: Inbox<SupervisorProtocol>,
     #[pin]
@@ -155,13 +157,13 @@ enum SupervisorProtocol {}
 
 impl<S> SupervisorProcess<S>
 where
-    S: Specification + Send + 'static,
+    S: Startable + Send + 'static,
     S::Supervisee: Send,
-    S::StartFut: Send,
+    S::Fut: Send,
 {
     pub fn spawn_supervisor(
         supervision_fut: SupervisorFut<S>,
-    ) -> (Child<ExitResult<S>>, SupervisorRef) {
+    ) -> (Child<SuperviseResult<S>>, SupervisorRef) {
         let (child, address) = spawn(|inbox: Inbox<SupervisorProtocol>| SupervisorProcess {
             inbox,
             supervision_fut,
@@ -170,8 +172,8 @@ where
     }
 }
 
-impl<S: Specification> Future for SupervisorProcess<S> {
-    type Output = ExitResult<S>;
+impl<S: Startable> Future for SupervisorProcess<S> {
+    type Output = SuperviseResult<S>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut proj = self.as_mut().project();

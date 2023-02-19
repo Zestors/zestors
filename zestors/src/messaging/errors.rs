@@ -34,8 +34,8 @@ pub struct SendError<M>(pub M);
 ///
 /// This error combines failures in sending and receiving.
 #[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
-pub enum SendRecvError<M> {
-    NoReply,
+pub enum RequestError<M, E> {
+    NoReply(E),
     Closed(M),
 }
 
@@ -43,8 +43,9 @@ pub enum SendRecvError<M> {
 ///
 /// This error combines failures in sending and receiving.
 #[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
-pub enum TrySendRecvError<M> {
-    NoReply,
+pub enum TryRequestError<M, E> {
+    NoReply(E),
     Closed(M),
     Full(M),
 }
+

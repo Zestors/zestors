@@ -44,7 +44,7 @@ async fn spawn_and_halt() {
 #[tokio::test]
 async fn spawn_and_drop() {
     let (child, address) = spawn_with(
-        Link::Attached(Duration::from_millis(10)),
+        Link::Attached(Duration::from_millis(10).into()),
         Capacity::Bounded(10),
         |mut inbox: Inbox<()>| async move {
             assert_eq!(inbox.recv().await.unwrap_err(), RecvError::Halted);

@@ -13,49 +13,48 @@ use std::{
 //  ChildSpecification
 //------------------------------------------------------------------------------------------------
 
-pub trait ChildSpecification: Sized {
-    type StartFut: Future<
-        Output = Result<(Child<Self::Exit, Self::ActorType>, Self::Ref), StartError<Self>>,
-    >;
-    type ExitFut: Future<Output = ExitResult<Self>>;
+pub trait SpecifyChild: 'static + Send + Sized {
+    type StartFut: Future<Output = Result<(Child<Self::Exit, Self::ActorType>, Self::Ref), StartError<Self>>>
+        + Send;
+    type ExitFut: Future<Output = SuperviseResult<Self>> + Send;
     type Exit: Send + 'static;
     type ActorType: ActorType;
-    type Ref;
+    type Ref: Send;
 
     fn start(self) -> Self::StartFut;
 
-    fn exit(exit: Result<Self::Exit, ProcessExitError>) -> Self::ExitFut;
+    fn exit(exit: Result<Self::Exit, ExitError>) -> Self::ExitFut;
 
-    fn start_timeout(&self) -> Duration;
+    fn start_time(&self) -> Duration;
 }
 
-pub struct ChildSpec<S: ChildSpecification> {
+pub struct ChildSpec<S: SpecifyChild> {
     spec: S,
 }
 
-impl<S: ChildSpecification> Specification for ChildSpec<S> {
+impl<S: SpecifyChild> Startable for ChildSpec<S> {
     type Ref = S::Ref;
     type Supervisee = ChildSupervisee<S>;
-    type StartFut = ChildSpecFut<S>;
+    type Fut = ChildSpecFut<S>;
 
-    fn start(self) -> Self::StartFut {
+    fn start(self) -> Self::Fut {
         ChildSpecFut {
-            fut: <S as ChildSpecification>::start(self.spec),
+            fut: <S as SpecifyChild>::start(self.spec),
         }
     }
 
     fn start_time(&self) -> Duration {
-        <S as ChildSpecification>::start_timeout(&self.spec)
+        <S as SpecifyChild>::start_time(&self.spec)
     }
 }
 
 #[pin_project]
-pub struct ChildSpecFut<S: ChildSpecification> {
+pub struct ChildSpecFut<S: SpecifyChild> {
     #[pin]
     fut: S::StartFut,
 }
 
-impl<S: ChildSpecification> Future for ChildSpecFut<S> {
+impl<S: SpecifyChild> Future for ChildSpecFut<S> {
     type Output = StartResult<ChildSpec<S>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -69,13 +68,13 @@ impl<S: ChildSpecification> Future for ChildSpecFut<S> {
 }
 
 #[pin_project]
-pub struct ChildSupervisee<S: ChildSpecification> {
+pub struct ChildSupervisee<S: SpecifyChild> {
     #[pin]
     exit_fut: Option<S::ExitFut>,
     child: Child<S::Exit, S::ActorType>,
 }
 
-impl<S: ChildSpecification> ChildSupervisee<S> {
+impl<S: SpecifyChild> ChildSupervisee<S> {
     pub fn new(child: Child<S::Exit, S::ActorType>) -> Self {
         Self {
             exit_fut: None,
@@ -84,12 +83,12 @@ impl<S: ChildSpecification> ChildSupervisee<S> {
     }
 }
 
-impl<S: ChildSpecification> Supervisee for ChildSupervisee<S> {
+impl<S: SpecifyChild> Supervisable for ChildSupervisee<S> {
     type Spec = ChildSpec<S>;
 
-    fn shutdown_time(self: Pin<&Self>) -> Duration {
+    fn shutdown_time(self: Pin<&Self>) -> ShutdownTime {
         match self.child.link() {
-            Link::Detached => Duration::from_secs(1),
+            Link::Detached => ShutdownTime::default(),
             Link::Attached(duration) => duration.clone(),
         }
     }
@@ -101,12 +100,8 @@ impl<S: ChildSpecification> Supervisee for ChildSupervisee<S> {
     fn abort(self: Pin<&mut Self>) {
         self.project().child.abort();
     }
-}
 
-impl<S: ChildSpecification> Future for ChildSupervisee<S> {
-    type Output = ExitResult<ChildSpec<S>>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll_supervise(self: Pin<&mut Self>, cx: &mut Context) -> Poll<SuperviseResult<Self::Spec>> {
         let mut this = self.project();
 
         loop {
@@ -130,11 +125,11 @@ impl<S: ChildSpecification> Future for ChildSupervisee<S> {
     }
 }
 
-impl<S: ChildSpecification> ChannelRef for ChildSupervisee<S> {
+impl<S: SpecifyChild> ActorRef for ChildSupervisee<S> {
     type ActorType = S::ActorType;
 
-    fn channel(&self) -> &std::sync::Arc<<Self::ActorType as ActorType>::Channel> {
-        self.child.channel()
+    fn channel_ref(&self) -> &std::sync::Arc<<Self::ActorType as ActorType>::Channel> {
+        self.child.channel_ref()
     }
 }
 
@@ -146,18 +141,18 @@ impl<S: ChildSpecification> ChannelRef for ChildSupervisee<S> {
 pub trait DynChildSpecification: 'static + Sized + Send {
     type Exit: Send + 'static;
     type ActorType: ActorType;
-    type Ref;
+    type Ref: Send;
 
     async fn start(
         self,
     ) -> Result<(Child<Self::Exit, Self::ActorType>, Self::Ref), StartError<Self>>;
 
-    async fn exit(exit: Result<Self::Exit, ProcessExitError>) -> Result<Option<Self>, BoxError>;
+    async fn exit(exit: Result<Self::Exit, ExitError>) -> Result<Option<Self>, BoxError>;
 
     fn start_timeout(&self) -> Duration;
 }
 
-impl<S: DynChildSpecification> ChildSpecification for S {
+impl<S: DynChildSpecification> SpecifyChild for S {
     type StartFut = BoxFuture<
         'static,
         Result<(Child<Self::Exit, Self::ActorType>, Self::Ref), StartError<Self>>,
@@ -171,11 +166,11 @@ impl<S: DynChildSpecification> ChildSpecification for S {
         <S as DynChildSpecification>::start(self)
     }
 
-    fn exit(exit: Result<Self::Exit, ProcessExitError>) -> Self::ExitFut {
+    fn exit(exit: Result<Self::Exit, ExitError>) -> Self::ExitFut {
         <S as DynChildSpecification>::exit(exit)
     }
 
-    fn start_timeout(&self) -> Duration {
+    fn start_time(&self) -> Duration {
         <S as DynChildSpecification>::start_timeout(self)
     }
 }
@@ -190,7 +185,7 @@ where
     I: InboxType,
 {
     spawn_fn: fn(I, D) -> SFut,
-    exit_fn: fn(Result<E, ProcessExitError>) -> EFut,
+    exit_fn: fn(Result<E, ExitError>) -> EFut,
     config: I::Config,
     link: Link,
     data: D,
@@ -205,7 +200,7 @@ where
     I::Config: Clone + Send,
     D: Send + 'static,
     SFut: Future<Output = E> + Send + 'static,
-    EFut: Future<Output = ExitResult<D>> + Send + 'static,
+    EFut: Future<Output = SuperviseResult<D>> + Send + 'static,
 {
     type Exit = E;
     type ActorType = I;
@@ -217,7 +212,7 @@ where
         todo!()
     }
 
-    async fn exit(exit: Result<Self::Exit, ProcessExitError>) -> Result<Option<Self>, BoxError> {
+    async fn exit(exit: Result<Self::Exit, ExitError>) -> Result<Option<Self>, BoxError> {
         todo!()
     }
 
@@ -225,12 +220,10 @@ where
         Duration::from_millis(10)
     }
 
-//     fn into_spec(self) -> ChildSpec<ChildSpawnSpec<SFut, EFut, D, E, I>> {
-//         ChildSpec { spec: self }
-//     }
+    //     fn into_spec(self) -> ChildSpec<ChildSpawnSpec<SFut, EFut, D, E, I>> {
+    //         ChildSpec { spec: self }
+    //     }
 }
-
-
 
 // pub fn spec() -> impl Specification<Ref = Address<Halter>> {
 //     ChildSpawnSpec {

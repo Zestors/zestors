@@ -104,9 +104,9 @@ the child can be dropped without halting or aborting the actor.
 ```
  */
 
-mod config;
+mod link;
 mod errors;
-pub use {config::*, errors::*};
+pub use {link::*, errors::*};
 
 use crate::*;
 use futures::Future;

@@ -16,9 +16,16 @@ pub fn supervisor(_ts: TokenStream1) -> TokenStream1 {
 /// #[reply(MyReply)]
 /// struct MyCall;
 /// ```
-#[proc_macro_derive(Message, attributes(msg))]
+#[proc_macro_derive(Message, attributes(msg, request))]
 pub fn derive_message(item: TokenStream1) -> TokenStream1 {
     message::derive_message(item.into())
+        .unwrap_or_else(|e| e.into_compile_error())
+        .into()
+}
+
+#[proc_macro_derive(Envelope, attributes(envelope))]
+pub fn derive_envelope(item: TokenStream1) -> TokenStream1 {
+    envelope::derive_envelope(item.into())
         .unwrap_or_else(|e| e.into_compile_error())
         .into()
 }
@@ -57,3 +64,4 @@ pub fn protocol(attr: TokenStream1, item: TokenStream1) -> TokenStream1 {
 
 mod message;
 mod protocol;
+mod envelope;

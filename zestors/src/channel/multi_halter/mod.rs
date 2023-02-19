@@ -27,9 +27,9 @@ impl ActorType for MultiHalter {
     type Channel = MultiHalterChannel;
 }
 
-impl ChannelRef for MultiHalter {
+impl ActorRef for MultiHalter {
     type ActorType = Self;
-    fn channel(&self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
+    fn channel_ref(&self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
         &self.channel
     }
 }

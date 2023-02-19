@@ -1,9 +1,32 @@
-use std::time::Duration;
+//! # Child specifications:
+//!
+//! ### Spawn specification 1:
+//! - spawn_fn: async fn(D, Inbox) -> E
+//! - exit_fn: async fn(ExitResult<E>) -> Result<Option<D>, BoxError>
+//! - data: D
+//! - inbox_config: Inbox::Config (default)
+//! - abort_time: FnMut() -> Duration
+//!
+//! ### Spawn specification 2: (Clonable data)
+//! - spawn_fn: async fn(D, Inbox) -> Exit
+//! - exit_fn: async fn(ExitResult<Exit>) -> Result<bool, BoxError>
+//! - data: D
+//! - inbox_config: Inbox::Config (default)
+//! - abort_time: FnMut() -> Duration
+//!
+//! ### Start specification 
+//! - start_fn: async fn(D) -> Result<(Child<E, A>, Ref), StartError<Self>>
+//! - exit_fn: async fn(ExitResult<E>) -> Result<Option<D>, BoxError>
+//! - data: D
+//! - abort_time: FnMut() -> Duration
+//! 
+//! ### Start specification 2:
 
 pub(super) use super::*;
-
+use std::time::Duration;
 mod child;
 mod spawn;
+mod start;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 
@@ -21,7 +44,7 @@ pub trait RootSpecification: 'static + Sized + Send {
 
     async fn on_exit(
         &mut self,
-        exit: Result<Self::ProcessExit, ProcessExitError>,
+        exit: Result<Self::ProcessExit, ExitError>,
     ) -> Result<Option<Self::With>, BoxError>;
 
     fn start_timeout(&self) -> Duration {
@@ -29,7 +52,10 @@ pub trait RootSpecification: 'static + Sized + Send {
     }
 
     fn into_spec(self, with: Self::With) -> RootSpec<Self> {
-        RootSpec { spec: Box::new(self), with }
+        RootSpec {
+            spec: Box::new(self),
+            with,
+        }
     }
 }
 
@@ -48,5 +74,5 @@ pub struct RootSpecFut<S: RootSpecification> {
 
 pub struct RootSupervisee<S: RootSpecification> {
     child: Child<S::ProcessExit, S::ActorType>,
-    spec: Box<S>
+    spec: Box<S>,
 }

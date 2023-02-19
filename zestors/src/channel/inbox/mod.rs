@@ -93,10 +93,10 @@ impl<P: Protocol> ActorType for Inbox<P> {
     type Channel = InboxChannel<P>;
 }
 
-impl<P: Protocol> ChannelRef for Inbox<P> {
+impl<P: Protocol> ActorRef for Inbox<P> {
     type ActorType = Self;
 
-    fn channel(&self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
+    fn channel_ref(&self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
         &self.channel
     }
 }

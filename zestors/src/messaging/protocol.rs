@@ -6,12 +6,12 @@ use std::{any::TypeId, sync::Arc};
 /// For every message `M` that the protocol accepts, it should also implement [`ProtocolFrom<M>`].
 pub trait Protocol: Send + 'static {
     /// Take out the inner message.
-    fn into_msg(self) -> AnyPayload;
+    fn into_msg(self) -> BoxPayload;
 
     /// Attempt to create the protocol from a message.
     ///
     /// This succeeds if the protocol implements [`ProtocolFrom<M>`] (i.e. accepts) the message.
-    fn try_from_msg(msg: AnyPayload) -> Result<Self, AnyPayload>
+    fn try_from_msg(msg: BoxPayload) -> Result<Self, BoxPayload>
     where
         Self: Sized;
 
@@ -42,11 +42,11 @@ pub trait ProtocolFrom<M: Message>: Protocol {
 //------------------------------------------------------------------------------------------------
 
 impl Protocol for () {
-    fn into_msg(self) -> AnyPayload {
-        AnyPayload::new::<()>(())
+    fn into_msg(self) -> BoxPayload {
+        BoxPayload::new::<()>(())
     }
 
-    fn try_from_msg(boxed: AnyPayload) -> Result<Self, AnyPayload> {
+    fn try_from_msg(boxed: BoxPayload) -> Result<Self, BoxPayload> {
         boxed.downcast::<()>()
     }
 
@@ -72,11 +72,11 @@ impl ProtocolFrom<()> for () {
 }
 
 impl Protocol for Arc<()> {
-    fn into_msg(self) -> AnyPayload {
-        AnyPayload::new::<Arc<()>>(self)
+    fn into_msg(self) -> BoxPayload {
+        BoxPayload::new::<Arc<()>>(self)
     }
 
-    fn try_from_msg(boxed: AnyPayload) -> Result<Self, AnyPayload> {
+    fn try_from_msg(boxed: BoxPayload) -> Result<Self, BoxPayload> {
         boxed.downcast::<Arc<()>>()
     }
 

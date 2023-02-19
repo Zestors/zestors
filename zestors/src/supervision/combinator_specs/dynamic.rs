@@ -8,27 +8,21 @@ use std::{
     time::Duration,
 };
 
-/// A type-erased and boxed [`Specification`].
 #[derive(Debug)]
-pub struct DynSpec(Pin<Box<dyn DynSpecification + Send>>);
+pub struct DynSpec<Ref = ()>(Pin<Box<dyn DynSpecification<Ref>>>);
 
-impl DynSpec {
-    pub fn new<S>(spec: S) -> Self
-    where
-        S: Specification + Send + 'static,
-        S::StartFut: Send,
-        S::Supervisee: Send,
-    {
+impl<Ref: 'static> DynSpec<Ref> {
+    pub fn new<S: Startable<Ref = Ref> + 'static>(spec: S) -> Self {
         Self(Box::pin(MultiSpec::Spec(spec)))
     }
 }
 
-impl Specification for DynSpec {
-    type Ref = ();
-    type Supervisee = DynSupervisee;
-    type StartFut = DynStartFut;
+impl<Ref: Send + 'static> Startable for DynSpec<Ref> {
+    type Ref = Ref;
+    type Supervisee = DynSupervisee<Ref>;
+    type Fut = DynStartFut<Ref>;
 
-    fn start(mut self) -> Self::StartFut {
+    fn start(mut self) -> Self::Fut {
         self.0.as_mut()._start();
         DynStartFut(Some(self.0))
     }
@@ -40,21 +34,16 @@ impl Specification for DynSpec {
 
 /// A type-erased and boxed [`Specification::StartFut`].
 #[derive(Debug)]
-pub struct DynStartFut(Option<Pin<Box<dyn DynSpecification + Send>>>);
+pub struct DynStartFut<Ref = ()>(Option<Pin<Box<dyn DynSpecification<Ref>>>>);
 
-impl DynStartFut {
-    pub fn new<S>(fut: S::StartFut) -> Self
-    where
-        S: Specification + Send + 'static,
-        S::StartFut: Send,
-        S::Supervisee: Send,
-    {
+impl<Ref: Send + 'static> DynStartFut<Ref> {
+    pub fn new<S: Startable<Ref = Ref> + 'static>(fut: S::Fut) -> Self {
         Self(Some(Box::pin(MultiSpec::<S>::StartFut(fut))))
     }
 }
 
-impl Future for DynStartFut {
-    type Output = StartResult<DynSpec>;
+impl<Ref: Send + 'static> Future for DynStartFut<Ref> {
+    type Output = StartResult<DynSpec<Ref>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.0
@@ -66,7 +55,9 @@ impl Future for DynStartFut {
                 DynSupervisedStart::Failure => {
                     Err(StartError::Failed(DynSpec(self.0.take().unwrap())))
                 }
-                DynSupervisedStart::Success => Ok((DynSupervisee(self.0.take()), ())),
+                DynSupervisedStart::Success(reference) => {
+                    Ok((DynSupervisee(self.0.take()), reference))
+                }
                 DynSupervisedStart::Finished => Err(StartError::Completed),
                 DynSupervisedStart::Unhandled(e) => Err(StartError::Irrecoverable(e)),
             })
@@ -75,23 +66,20 @@ impl Future for DynStartFut {
 
 /// A type-erased and boxed [`Supervisee`].
 #[derive(Debug)]
-pub struct DynSupervisee(Option<Pin<Box<dyn DynSpecification + Send>>>);
+pub struct DynSupervisee<Ref = ()>(Option<Pin<Box<dyn DynSpecification<Ref>>>>);
 
-impl DynSupervisee {
-    pub fn new<S>(supervisee: S::Supervisee) -> Self
-    where
-        S: Specification + Send + 'static,
-        S::StartFut: Send,
-        S::Supervisee: Send,
+impl<Ref: 'static> DynSupervisee<Ref> {
+    pub fn new<S: Startable<Ref = Ref> + 'static>(supervisee: S::Supervisee) -> Self
+
     {
         Self(Some(Box::pin(MultiSpec::<S>::Supervised(supervisee))))
     }
 }
 
-impl Supervisee for DynSupervisee {
-    type Spec = DynSpec;
+impl<Ref: Send + 'static> Supervisable for DynSupervisee<Ref> {
+    type Spec = DynSpec<Ref>;
 
-    fn shutdown_time(self: Pin<&Self>) -> Duration {
+    fn shutdown_time(self: Pin<&Self>) -> ShutdownTime {
         self.0.as_ref().unwrap().as_ref()._abort_timeout()
     }
 
@@ -102,12 +90,11 @@ impl Supervisee for DynSupervisee {
     fn abort(mut self: Pin<&mut Self>) {
         self.0.as_mut().unwrap().as_mut()._abort()
     }
-}
 
-impl Future for DynSupervisee {
-    type Output = ExitResult<DynSpec>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll_supervise(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+    ) -> Poll<SuperviseResult<Self::Spec>> {
         self.0
             .as_mut()
             .unwrap()
@@ -126,29 +113,30 @@ impl Future for DynSupervisee {
 /// The reason for this trait is that this allows us to only allocate a box once: When the initial
 /// spec is turned into a dynamic one. Afterwards, if it exits and restarts, no more boxing is
 /// necessary.
-trait DynSpecification: Debug {
+trait DynSpecification<Ref>: Send + Debug + 'static {
     fn _start(self: Pin<&mut Self>);
     fn _start_timeout(&self) -> Duration;
-    fn _poll_start_fut(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<DynSupervisedStart>;
+    fn _poll_start_fut(self: Pin<&mut Self>, cx: &mut Context<'_>)
+        -> Poll<DynSupervisedStart<Ref>>;
     fn _poll_supervise_fut(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<DynSupervisedExit>;
     fn _abort(self: Pin<&mut Self>);
     fn _halt(self: Pin<&mut Self>);
-    fn _abort_timeout(self: Pin<&Self>) -> Duration;
+    fn _abort_timeout(self: Pin<&Self>) -> ShutdownTime;
 }
 
 // todo: it should be possible to provide an implementation that does not require Unpin for
 // the Fut and Supervisee.
 #[pin_project(project = DynMultiSpecProj, project_ref = DynMultiSpecProjRef)]
-enum MultiSpec<S: Specification> {
+enum MultiSpec<S: Startable> {
     Spec(S),
-    StartFut(#[pin] S::StartFut),
+    StartFut(#[pin] S::Fut),
     Supervised(#[pin] S::Supervisee),
     Unhandled,
     Finished,
     SpecTaken,
 }
 
-impl<S: Specification> Debug for MultiSpec<S> {
+impl<S: Startable> Debug for MultiSpec<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Spec(arg0) => f.debug_tuple("Spec").finish(),
@@ -161,7 +149,7 @@ impl<S: Specification> Debug for MultiSpec<S> {
     }
 }
 
-impl<S: Specification> MultiSpec<S> {
+impl<S: Startable> MultiSpec<S> {
     fn take_spec_unwrap(self: &mut Pin<&mut Self>) -> S {
         let mut taken = Self::SpecTaken;
         std::mem::swap(unsafe { self.as_mut().get_unchecked_mut() }, &mut taken);
@@ -170,9 +158,9 @@ impl<S: Specification> MultiSpec<S> {
     }
 }
 
-enum DynSupervisedStart {
+enum DynSupervisedStart<Ref> {
     Failure,
-    Success,
+    Success(Ref),
     Finished,
     Unhandled(BoxError),
 }
@@ -183,9 +171,10 @@ enum DynSupervisedExit {
     Unhandled(BoxError),
 }
 
-impl<S> DynSpecification for MultiSpec<S>
+impl<S> DynSpecification<S::Ref> for MultiSpec<S>
 where
-    S: Specification,
+    S: Startable + 'static,
+    S::Ref: 'static,
 {
     fn _start(mut self: Pin<&mut Self>) {
         let spec = self.take_spec_unwrap();
@@ -197,7 +186,10 @@ where
         spec.start_time()
     }
 
-    fn _poll_start_fut(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<DynSupervisedStart> {
+    fn _poll_start_fut(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<DynSupervisedStart<S::Ref>> {
         let this = self.as_mut().project();
         let DynMultiSpecProj::StartFut(fut) = this else { panic!() };
 
@@ -211,9 +203,8 @@ where
                 DynSupervisedStart::Failure
             }
             Ok((supervisee, reference)) => {
-                drop(reference);
                 self.set(Self::Supervised(supervisee));
-                DynSupervisedStart::Success
+                DynSupervisedStart::Success(reference)
             }
             Err(StartError::Irrecoverable(e)) => {
                 self.set(Self::Unhandled);
@@ -228,7 +219,7 @@ where
     ) -> Poll<DynSupervisedExit> {
         let this = self.as_mut().project();
         let DynMultiSpecProj::Supervised(supervisee) = this else { panic!() };
-        supervisee.poll(cx).map(|res| match res {
+        supervisee.poll_supervise(cx).map(|res| match res {
             Ok(None) => {
                 self.set(Self::Finished);
                 DynSupervisedExit::Finished
@@ -254,7 +245,7 @@ where
         supervisee.halt()
     }
 
-    fn _abort_timeout(self: Pin<&Self>) -> Duration {
+    fn _abort_timeout(self: Pin<&Self>) -> ShutdownTime {
         let DynMultiSpecProjRef::Supervised(supervisee) = self.project_ref() else { panic!() };
         supervisee.shutdown_time()
     }

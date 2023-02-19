@@ -49,14 +49,14 @@ The supervisee is not completed but is not able to restart either.
 
 mod combinator_specs;
 mod restart_limiter;
-mod root_specs;
-mod specification;
+mod child_spec;
+mod startable;
 mod supervisor;
 pub use combinator_specs::*;
 use futures::Future;
 pub(super) use restart_limiter::*;
-pub use root_specs::*;
-pub use specification::*;
+pub use child_spec::*;
+pub use startable::*;
 pub use supervisor::*;
 
 use crate as zestors;
@@ -70,17 +70,17 @@ use std::error::Error;
 
 type BoxError = Box<dyn Error + Send>;
 
-enum SpecStateWith<S: Specification> {
+enum SpecStateWith<S: Startable> {
     Dead(S),
-    Starting(S::StartFut),
+    Starting(S::Fut),
     Alive(S::Supervisee, S::Ref),
     Unhandled(BoxError),
     Finished,
 }
 
-enum SpecState<S: Specification> {
+enum SpecState<S: Startable> {
     Dead(S),
-    Starting(S::StartFut),
+    Starting(S::Fut),
     Alive(S::Supervisee),
     Unhandled(BoxError),
     Finished,

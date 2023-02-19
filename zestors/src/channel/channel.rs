@@ -85,22 +85,22 @@ pub trait Channel: Send + Sync + Debug {
     /// Try to send a payload to the actor.
     ///
     /// For channels that do not accept messages, this must fail with `NotAccepted`.
-    fn try_send_any(&self, msg: AnyPayload) -> Result<(), TrySendCheckedError<AnyPayload>>;
+    fn try_send_any(&self, msg: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>>;
 
     /// Try to force-send a message to the actor.
     ///
     /// For channels that do not accept messages, this must fail with `NotAccepted`.
-    fn force_send_any(&self, msg: AnyPayload) -> Result<(), TrySendCheckedError<AnyPayload>>;
+    fn force_send_any(&self, msg: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>>;
 
     /// Send a payload to the actor while blocking the thread when waiting for space.
     ///
     /// For channels that do not accept messages, this must fail with `NotAccepted`.
-    fn send_any_blocking(&self, msg: AnyPayload) -> Result<(), SendCheckedError<AnyPayload>>;
+    fn send_any_blocking(&self, msg: BoxPayload) -> Result<(), SendCheckedError<BoxPayload>>;
 
     /// Send a payload to the actor waiting for space.
     ///
     /// For channels that do not accept messages, this must fail with `NotAccepted`.
-    fn send_any(&self, msg: AnyPayload) -> BoxFuture<'_, Result<(), SendCheckedError<AnyPayload>>>;
+    fn send_any(&self, msg: BoxPayload) -> BoxFuture<'_, Result<(), SendCheckedError<BoxPayload>>>;
 }
 
 impl dyn Channel {
@@ -110,7 +110,7 @@ impl dyn Channel {
         M::Payload: Send + 'static,
     {
         let (sends, returns) = M::create(msg);
-        let res = self.try_send_any(AnyPayload::new::<M>(sends));
+        let res = self.try_send_any(BoxPayload::new::<M>(sends));
 
         match res {
             Ok(()) => Ok(returns),
@@ -134,7 +134,7 @@ impl dyn Channel {
         M::Payload: Send + 'static,
     {
         let (sends, returns) = M::create(msg);
-        let res = self.force_send_any(AnyPayload::new::<M>(sends));
+        let res = self.force_send_any(BoxPayload::new::<M>(sends));
 
         match res {
             Ok(()) => Ok(returns),
@@ -158,7 +158,7 @@ impl dyn Channel {
         M::Payload: Send + 'static,
     {
         let (sends, returns) = M::create(msg);
-        let res = self.send_any_blocking(AnyPayload::new::<M>(sends));
+        let res = self.send_any_blocking(BoxPayload::new::<M>(sends));
 
         match res {
             Ok(()) => Ok(returns),
@@ -181,7 +181,7 @@ impl dyn Channel {
     {
         Box::pin(async move {
             let (sends, returns) = M::create(msg);
-            let res = self.send_any(AnyPayload::new::<M>(sends)).await;
+            let res = self.send_any(BoxPayload::new::<M>(sends)).await;
 
             match res {
                 Ok(()) => Ok(returns),

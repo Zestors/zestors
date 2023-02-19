@@ -394,7 +394,7 @@ impl<P: Protocol> Channel for InboxChannel<P> {
         }
     }
 
-    fn try_send_any(&self, boxed: AnyPayload) -> Result<(), TrySendCheckedError<AnyPayload>> {
+    fn try_send_any(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {
         match P::try_from_msg(boxed) {
             Ok(prot) => self.try_send_protocol(prot).map_err(|e| match e {
                 TrySendError::Full(prot) => TrySendCheckedError::Full(prot.into_msg()),
@@ -404,7 +404,7 @@ impl<P: Protocol> Channel for InboxChannel<P> {
         }
     }
 
-    fn force_send_any(&self, boxed: AnyPayload) -> Result<(), TrySendCheckedError<AnyPayload>> {
+    fn force_send_any(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {
         match P::try_from_msg(boxed) {
             Ok(prot) => self.send_protocol_now(prot).map_err(|e| match e {
                 TrySendError::Full(prot) => TrySendCheckedError::Full(prot.into_msg()),
@@ -414,7 +414,7 @@ impl<P: Protocol> Channel for InboxChannel<P> {
         }
     }
 
-    fn send_any_blocking(&self, boxed: AnyPayload) -> Result<(), SendCheckedError<AnyPayload>> {
+    fn send_any_blocking(&self, boxed: BoxPayload) -> Result<(), SendCheckedError<BoxPayload>> {
         match P::try_from_msg(boxed) {
             Ok(prot) => self
                 .send_protocol_blocking(prot)
@@ -425,8 +425,8 @@ impl<P: Protocol> Channel for InboxChannel<P> {
 
     fn send_any(
         &self,
-        boxed: AnyPayload,
-    ) -> BoxFuture<'_, Result<(), SendCheckedError<AnyPayload>>> {
+        boxed: BoxPayload,
+    ) -> BoxFuture<'_, Result<(), SendCheckedError<BoxPayload>>> {
         Box::pin(async move {
             match P::try_from_msg(boxed) {
                 Ok(prot) => self

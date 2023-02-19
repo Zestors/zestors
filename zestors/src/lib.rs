@@ -30,3 +30,5 @@ pub mod all {
 pub(crate) mod _priv;
 #[allow(unused)]
 use crate::all::*;
+
+pub use zestors_codegen::{protocol, Envelope, Message};

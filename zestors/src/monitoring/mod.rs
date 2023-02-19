@@ -158,12 +158,12 @@ async fn main() {
 #[allow(unused)]
 use crate::{all::*, *};
 
-mod actor_ref;
+mod actor_reference;
 mod address;
 mod child;
 mod child_kind;
 mod shutdown;
-pub use actor_ref::*;
+pub use actor_reference::*;
 pub use address::*;
 pub use child::*;
 pub use child_kind::*;

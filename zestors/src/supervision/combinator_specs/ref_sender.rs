@@ -13,27 +13,27 @@ use tokio::sync::mpsc;
 //------------------------------------------------------------------------------------------------
 
 #[pin_project]
-pub struct RefSenderSpec<S: Specification> {
+pub struct RefSenderSpec<S: Startable> {
     #[pin]
     spec: S,
     sender: Option<mpsc::UnboundedSender<S::Ref>>,
 }
 
 #[pin_project]
-pub struct RefSenderSpecFut<S: Specification> {
+pub struct RefSenderSpecFut<S: Startable> {
     #[pin]
-    fut: S::StartFut,
+    fut: S::Fut,
     sender: Option<mpsc::UnboundedSender<S::Ref>>,
 }
 
 #[pin_project]
-pub struct RefSenderSupervisee<S: Specification> {
+pub struct RefSenderSupervisee<S: Startable> {
     #[pin]
     supervisee: S::Supervisee,
     sender: Option<mpsc::UnboundedSender<S::Ref>>,
 }
 
-impl<Sp: Specification> RefSenderSpec<Sp> {
+impl<Sp: Startable> RefSenderSpec<Sp> {
     pub fn new(spec: Sp) -> (Self, mpsc::UnboundedReceiver<Sp::Ref>) {
         let (sender, receiver) = mpsc::unbounded_channel();
         (Self::new_with_channel(spec, sender), receiver)
@@ -47,7 +47,7 @@ impl<Sp: Specification> RefSenderSpec<Sp> {
     }
 }
 
-impl<Sp: Specification> Specification for RefSenderSpec<Sp> {
+impl<Sp: Startable> Startable for RefSenderSpec<Sp> {
     type Ref = ();
     type Supervisee = RefSenderSupervisee<Sp>;
 
@@ -55,17 +55,17 @@ impl<Sp: Specification> Specification for RefSenderSpec<Sp> {
         self.spec.start_time()
     }
 
-    fn start(self) -> Self::StartFut {
+    fn start(self) -> Self::Fut {
         RefSenderSpecFut {
             fut: self.spec.start(),
             sender: self.sender,
         }
     }
 
-    type StartFut = RefSenderSpecFut<Sp>;
+    type Fut = RefSenderSpecFut<Sp>;
 }
 
-impl<Sp: Specification> Future for RefSenderSpecFut<Sp> {
+impl<Sp: Startable> Future for RefSenderSpecFut<Sp> {
     type Output = StartResult<RefSenderSpec<Sp>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -96,10 +96,10 @@ impl<Sp: Specification> Future for RefSenderSpecFut<Sp> {
 //  Supervisee
 //------------------------------------------------------------------------------------------------
 
-impl<S: Specification> Supervisee for RefSenderSupervisee<S> {
+impl<S: Startable> Supervisable for RefSenderSupervisee<S> {
     type Spec = RefSenderSpec<S>;
 
-    fn shutdown_time(self: Pin<&Self>) -> Duration {
+    fn shutdown_time(self: Pin<&Self>) -> ShutdownTime {
         self.project_ref().supervisee.shutdown_time()
     }
 
@@ -110,14 +110,10 @@ impl<S: Specification> Supervisee for RefSenderSupervisee<S> {
     fn abort(self: Pin<&mut Self>) {
         self.project().supervisee.abort()
     }
-}
 
-impl<S: Specification> Future for RefSenderSupervisee<S> {
-    type Output = ExitResult<RefSenderSpec<S>>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll_supervise(self: Pin<&mut Self>, cx: &mut Context) -> Poll<SuperviseResult<Self::Spec>> {
         let proj = self.project();
-        proj.supervisee.poll(cx).map(|res| {
+        proj.supervisee.poll_supervise(cx).map(|res| {
             res.map(|spec| {
                 spec.map(|spec| RefSenderSpec {
                     spec,

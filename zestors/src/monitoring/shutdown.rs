@@ -32,7 +32,7 @@ impl<'a, E: Send + 'static, T: ActorType> ShutdownFut<'a, E, T> {
 impl<'a, E: Send + 'static, T: ActorType> Unpin for ShutdownFut<'a, E, T> {}
 
 impl<'a, E: Send + 'static, T: ActorType> Future for ShutdownFut<'a, E, T> {
-    type Output = Result<E, ProcessExitError>;
+    type Output = Result<E, ExitError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.child.poll_unpin(cx) {
@@ -74,7 +74,7 @@ impl<'a, E: Send + 'static, T: ActorType> ShutdownStream<'a, E, T> {
 }
 
 impl<'a, E: Send + 'static, T: ActorType> Stream for ShutdownStream<'a, E, T> {
-    type Item = Result<E, ProcessExitError>;
+    type Item = Result<E, ExitError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if let Some(sleep) = &mut self.sleep {
@@ -94,7 +94,7 @@ impl<'a, E: Send + 'static, T: ActorType> Stream for ShutdownStream<'a, E, T> {
 
 /// An error returned from an exiting process.
 #[derive(Debug, Error)]
-pub enum ProcessExitError {
+pub enum ExitError {
     /// Process panicked.
     #[error("Process has exited because of a panic")]
     Panic(Box<dyn Any + Send>),
@@ -103,29 +103,29 @@ pub enum ProcessExitError {
     Abort,
 }
 
-impl ProcessExitError {
+impl ExitError {
     /// Whether the error is a panic.
     pub fn is_panic(&self) -> bool {
         match self {
-            ProcessExitError::Panic(_) => true,
-            ProcessExitError::Abort => false,
+            ExitError::Panic(_) => true,
+            ExitError::Abort => false,
         }
     }
 
     /// Whether the error is an abort.
     pub fn is_abort(&self) -> bool {
         match self {
-            ProcessExitError::Panic(_) => false,
-            ProcessExitError::Abort => true,
+            ExitError::Panic(_) => false,
+            ExitError::Abort => true,
         }
     }
 }
 
-impl From<tokio::task::JoinError> for ProcessExitError {
+impl From<tokio::task::JoinError> for ExitError {
     fn from(e: tokio::task::JoinError) -> Self {
         match e.try_into_panic() {
-            Ok(panic) => ProcessExitError::Panic(panic),
-            Err(_) => ProcessExitError::Abort,
+            Ok(panic) => ExitError::Panic(panic),
+            Err(_) => ExitError::Abort,
         }
     }
 }
@@ -144,7 +144,7 @@ mod test {
     #[tokio::test]
     async fn shutdown_success() {
         let (mut child, _addr) = spawn(basic_actor!());
-        assert!(child.shutdown_with(Duration::from_millis(5)).await.is_ok());
+        assert!(child.shutdown_with(Duration::from_millis(5).into()).await.is_ok());
     }
 
     #[tokio::test]
@@ -153,8 +153,8 @@ mod test {
             pending::<()>().await;
         });
         assert!(matches!(
-            child.shutdown_with(Duration::from_millis(5)).await,
-            Err(ProcessExitError::Abort)
+            child.shutdown_with(Duration::from_millis(5).into()).await,
+            Err(ExitError::Abort)
         ));
     }
 
@@ -186,7 +186,7 @@ mod test {
         assert_eq!(results.len(), 3);
 
         for result in results {
-            assert!(matches!(result, Err(ProcessExitError::Abort)));
+            assert!(matches!(result, Err(ExitError::Abort)));
         }
     }
 

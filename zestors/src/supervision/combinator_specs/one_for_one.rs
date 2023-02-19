@@ -11,35 +11,6 @@ use thiserror::Error;
 use tokio::time::{sleep, Instant, Sleep};
 
 //------------------------------------------------------------------------------------------------
-//  Item
-//------------------------------------------------------------------------------------------------
-
-#[derive(Debug)]
-enum OneForOneItem {
-    Spec(DynSpec),
-    StartFut(DynStartFut),
-    Supervisee(DynSupervisee, Option<Instant>),
-    Irrecoverable(BoxError),
-    Completed,
-}
-
-impl OneForOneItem {
-    fn start(&mut self) -> Result<(), Box<dyn Error>> {
-        let spec = {
-            let mut item = OneForOneItem::Completed;
-            swap(self, &mut item);
-            let Self::Spec(spec) = item else {
-                return Err(format!("{:?} was not a spec", item).into());
-            };
-            spec
-        };
-
-        *self = OneForOneItem::StartFut(spec.start());
-        Ok(())
-    }
-}
-
-//------------------------------------------------------------------------------------------------
 //  Spec
 //------------------------------------------------------------------------------------------------
 
@@ -58,23 +29,24 @@ impl OneForOneSpec {
         }
     }
 
-    pub fn with_spec<S: Specification>(mut self, spec: S) -> Self
+    pub fn with_spec<S: Startable>(mut self, spec: S) -> Self
     where
         S: Send + 'static,
-        S::StartFut: Send,
+        S::Fut: Send,
         S::Supervisee: Send,
     {
         self.add_spec(spec);
         self
     }
 
-    pub fn add_spec<S: Specification>(&mut self, spec: S)
+    pub fn add_spec<S: Startable>(&mut self, spec: S)
     where
         S: Send + 'static,
-        S::StartFut: Send,
+        S::Fut: Send,
         S::Supervisee: Send,
     {
-        self.items.push(OneForOneItem::Spec(spec.into_dyn()))
+        self.items
+            .push(OneForOneItem::Spec(spec.on_start(|_| ()).into_dyn()))
     }
 
     pub fn pop_spec(&mut self) -> Option<DynSpec> {
@@ -88,12 +60,12 @@ impl OneForOneSpec {
     }
 }
 
-impl Specification for OneForOneSpec {
+impl Startable for OneForOneSpec {
     type Ref = ();
     type Supervisee = OneForOneSupervisee;
-    type StartFut = OneForOneStartFut;
+    type Fut = OneForOneStartFut;
 
-    fn start(mut self) -> Self::StartFut {
+    fn start(mut self) -> Self::Fut {
         let start_time = self
             .items
             .iter()
@@ -282,7 +254,7 @@ impl Future for OneForOneStartFut {
                             }
                         }
                         OneForOneItem::Supervisee(supervisee, _) => {
-                            if let Poll::Ready(exit_res) = supervisee.poll_unpin(cx) {
+                            if let Poll::Ready(exit_res) = Pin::new(supervisee).poll_supervise(cx) {
                                 match exit_res {
                                     Ok(Some(spec)) => {
                                         *item = OneForOneItem::Spec(spec);
@@ -329,11 +301,11 @@ impl OneForOneSupervisee {
     }
 }
 
-impl Supervisee for OneForOneSupervisee {
+impl Supervisable for OneForOneSupervisee {
     type Spec = OneForOneSpec;
 
-    fn shutdown_time(self: Pin<&Self>) -> Duration {
-        Duration::MAX
+    fn shutdown_time(self: Pin<&Self>) -> ShutdownTime {
+        Duration::MAX.into()
     }
 
     fn halt(mut self: Pin<&mut Self>) {
@@ -355,12 +327,37 @@ impl Supervisee for OneForOneSupervisee {
             }
         }
     }
+
+    fn poll_supervise(self: Pin<&mut Self>, cx: &mut Context) -> Poll<SuperviseResult<Self::Spec>> {
+        todo!()
+    }
 }
 
-impl Future for OneForOneSupervisee {
-    type Output = ExitResult<OneForOneSpec>;
+//------------------------------------------------------------------------------------------------
+//  Item
+//------------------------------------------------------------------------------------------------
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        todo!()
+#[derive(Debug)]
+enum OneForOneItem {
+    Spec(DynSpec),
+    StartFut(DynStartFut),
+    Supervisee(DynSupervisee, Option<Instant>),
+    Irrecoverable(BoxError),
+    Completed,
+}
+
+impl OneForOneItem {
+    fn start(&mut self) -> Result<(), Box<dyn Error>> {
+        let spec = {
+            let mut item = OneForOneItem::Completed;
+            swap(self, &mut item);
+            let Self::Spec(spec) = item else {
+                return Err(format!("{:?} was not a spec", item).into());
+            };
+            spec
+        };
+
+        *self = OneForOneItem::StartFut(spec.start());
+        Ok(())
     }
 }
