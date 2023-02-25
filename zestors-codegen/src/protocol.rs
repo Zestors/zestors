@@ -29,14 +29,14 @@ fn impl_accepts(item: &ItemEnum, variants: &Vec<ProtocolVariant>) -> Result<Toke
             let variant_ty = &variant.ty;
             let variant_ident = &variant.ident;
             quote! {
-                impl #impl_generics zestors::messaging::ProtocolFrom<#variant_ty> for #ident #ty_generics #where_clause {
-                    fn from_msg(
+                impl #impl_generics zestors::messaging::FromPayload<#variant_ty> for #ident #ty_generics #where_clause {
+                    fn from_payload(
                         msg: <#variant_ty as zestors::messaging::Message>::Payload
                     ) -> Self {
                         Self::#variant_ident(msg)
                     }
 
-                    fn try_into_msg(self) -> Result<
+                    fn try_into_payload(self) -> Result<
                         <#variant_ty as zestors::messaging::Message>::Payload,
                         Self
                     > {
@@ -102,7 +102,7 @@ fn impl_protocol(item: &ItemEnum, variants: &Vec<ProtocolVariant>) -> Result<Tok
     Ok(quote! {
         impl #impl_generics zestors::messaging::Protocol for #ident #ty_generics #where_clause {
 
-            fn try_from_msg(boxed: zestors::messaging::BoxPayload) -> Result<Self, zestors::messaging::BoxPayload> {
+            fn try_from_boxed_payload(boxed: zestors::messaging::BoxPayload) -> Result<Self, zestors::messaging::BoxPayload> {
                 #(#downcasts)*
                 Err(boxed)
             }
@@ -112,7 +112,7 @@ fn impl_protocol(item: &ItemEnum, variants: &Vec<ProtocolVariant>) -> Result<Tok
                 false
             }
 
-            fn into_msg(self) -> zestors::messaging::BoxPayload {
+            fn into_boxed_payload(self) -> zestors::messaging::BoxPayload {
                 match self {
                     #(#matches)*
                 }

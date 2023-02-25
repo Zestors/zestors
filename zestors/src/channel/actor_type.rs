@@ -17,8 +17,8 @@ pub trait DynActorType: ActorType<Channel = dyn Channel> {
 
 /// Anything that can be passed along as the argument to the spawn function.
 /// An inbox also defines the [`ActorType`] of spawned actor.
-pub trait InboxType: ActorType + Send + 'static {
-    type Config;
+pub trait InboxType: ActorType + ActorRef<ActorType = Self> + Send + 'static {
+    type Config: Send;
 
     /// Sets up the channel with the given address count and actor-id.
     fn setup_channel(

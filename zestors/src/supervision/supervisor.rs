@@ -13,21 +13,21 @@ use tokio::time::{sleep, Sleep};
 //------------------------------------------------------------------------------------------------
 
 #[pin_project]
-pub struct SupervisorFut<S: Startable> {
+pub struct SupervisorFut<S: Specifies> {
     to_shutdown: bool,
     #[pin]
     state: SupervisorFutState<S>,
 }
 
 #[pin_project]
-enum SupervisorFutState<S: Startable> {
+enum SupervisorFutState<S: Specifies> {
     NotStarted(S),
-    Starting(Pin<Box<S::Fut>>, Pin<Box<Sleep>>),
+    Starting(Pin<Box<S::Fut>>),
     Supervising(Pin<Box<S::Supervisee>>, Option<(Pin<Box<Sleep>>, bool)>),
     Exited,
 }
 
-impl<S: Startable> SupervisorFut<S> {
+impl<S: Specifies> SupervisorFut<S> {
     pub fn new(spec: S) -> Self {
         Self {
             to_shutdown: false,
@@ -53,7 +53,7 @@ impl<S: Startable> SupervisorFut<S> {
     }
 }
 
-impl<S: Startable> Future for SupervisorFut<S> {
+impl<S: Specifies> Future for SupervisorFut<S> {
     type Output = SuperviseResult<S>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -62,8 +62,6 @@ impl<S: Startable> Future for SupervisorFut<S> {
         loop {
             match &mut this.state {
                 SupervisorFutState::NotStarted(spec) => {
-                    let timeout = Box::pin(sleep(spec.start_time()));
-
                     let spec = {
                         let mut state = SupervisorFutState::Exited;
                         swap(&mut this.state, &mut state);
@@ -73,9 +71,9 @@ impl<S: Startable> Future for SupervisorFut<S> {
                         spec
                     };
 
-                    this.state = SupervisorFutState::Starting(Box::pin(spec.start()), timeout)
+                    this.state = SupervisorFutState::Starting(Box::pin(spec.start()))
                 }
-                SupervisorFutState::Starting(fut, start_timer) => {
+                SupervisorFutState::Starting(fut) => {
                     if let Poll::Ready(res) = fut.as_mut().poll(cx) {
                         match res {
                             Err(StartError::Completed) => {
@@ -95,15 +93,7 @@ impl<S: Startable> Future for SupervisorFut<S> {
                                 break Poll::Ready(Err(e));
                             }
                         };
-                    } else {
-                        break match start_timer.as_mut().poll_unpin(cx) {
-                            Poll::Ready(()) => {
-                                this.state = SupervisorFutState::Exited;
-                                Poll::Ready(todo!())
-                            }
-                            Poll::Pending => Poll::Pending,
-                        };
-                    }
+                    };
                 }
 
                 SupervisorFutState::Supervising(supervisee, aborting) => match aborting {
@@ -141,7 +131,7 @@ impl<S: Startable> Future for SupervisorFut<S> {
 //------------------------------------------------------------------------------------------------
 
 #[pin_project]
-pub(super) struct SupervisorProcess<Sp: Startable> {
+pub(super) struct SupervisorProcess<Sp: Specifies> {
     #[pin]
     inbox: Inbox<SupervisorProtocol>,
     #[pin]
@@ -157,7 +147,7 @@ enum SupervisorProtocol {}
 
 impl<S> SupervisorProcess<S>
 where
-    S: Startable + Send + 'static,
+    S: Specifies + Send + 'static,
     S::Supervisee: Send,
     S::Fut: Send,
 {
@@ -172,7 +162,7 @@ where
     }
 }
 
-impl<S: Startable> Future for SupervisorProcess<S> {
+impl<S: Specifies> Future for SupervisorProcess<S> {
     type Output = SuperviseResult<S>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

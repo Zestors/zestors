@@ -6,12 +6,12 @@ use std::{any::TypeId, sync::Arc};
 /// For every message `M` that the protocol accepts, it should also implement [`ProtocolFrom<M>`].
 pub trait Protocol: Send + 'static {
     /// Take out the inner message.
-    fn into_msg(self) -> BoxPayload;
+    fn into_boxed_payload(self) -> BoxPayload;
 
     /// Attempt to create the protocol from a message.
     ///
     /// This succeeds if the protocol implements [`ProtocolFrom<M>`] (i.e. accepts) the message.
-    fn try_from_msg(msg: BoxPayload) -> Result<Self, BoxPayload>
+    fn try_from_boxed_payload(payload: BoxPayload) -> Result<Self, BoxPayload>
     where
         Self: Sized;
 
@@ -23,16 +23,16 @@ pub trait Protocol: Send + 'static {
 
 /// The trait [`ProtocolFrom<M>`] should be implemented for all messages `M` that a
 /// [Protocol] accepts.
-pub trait ProtocolFrom<M: Message>: Protocol {
+pub trait FromPayload<M: Message>: Protocol {
     /// Create the protocol from the payload of a message.
-    fn from_msg(msg: M::Payload) -> Self
+    fn from_payload(payload: M::Payload) -> Self
     where
         Self: Sized;
 
     /// Attempt to convert the protocol into a specific payload of a message.
     ///
-    /// This succeeds it the inner message of the protocol is of the same type.
-    fn try_into_msg(self) -> Result<M::Payload, Self>
+    /// This succeeds if the inner message of the protocol is of the same type.
+    fn try_into_payload(self) -> Result<M::Payload, Self>
     where
         Self: Sized;
 }
@@ -42,12 +42,12 @@ pub trait ProtocolFrom<M: Message>: Protocol {
 //------------------------------------------------------------------------------------------------
 
 impl Protocol for () {
-    fn into_msg(self) -> BoxPayload {
+    fn into_boxed_payload(self) -> BoxPayload {
         BoxPayload::new::<()>(())
     }
 
-    fn try_from_msg(boxed: BoxPayload) -> Result<Self, BoxPayload> {
-        boxed.downcast::<()>()
+    fn try_from_boxed_payload(payload: BoxPayload) -> Result<Self, BoxPayload> {
+        payload.downcast::<()>()
     }
 
     fn accepts_msg(msg_id: &std::any::TypeId) -> bool {
@@ -55,15 +55,15 @@ impl Protocol for () {
     }
 }
 
-impl ProtocolFrom<()> for () {
-    fn from_msg(msg: ()) -> Self
+impl FromPayload<()> for () {
+    fn from_payload(payload: ()) -> Self
     where
         Self: Sized,
     {
-        msg
+        payload
     }
 
-    fn try_into_msg(self) -> Result<(), Self>
+    fn try_into_payload(self) -> Result<(), Self>
     where
         Self: Sized,
     {
@@ -72,11 +72,11 @@ impl ProtocolFrom<()> for () {
 }
 
 impl Protocol for Arc<()> {
-    fn into_msg(self) -> BoxPayload {
+    fn into_boxed_payload(self) -> BoxPayload {
         BoxPayload::new::<Arc<()>>(self)
     }
 
-    fn try_from_msg(boxed: BoxPayload) -> Result<Self, BoxPayload> {
+    fn try_from_boxed_payload(boxed: BoxPayload) -> Result<Self, BoxPayload> {
         boxed.downcast::<Arc<()>>()
     }
 
@@ -85,15 +85,15 @@ impl Protocol for Arc<()> {
     }
 }
 
-impl ProtocolFrom<Arc<()>> for Arc<()> {
-    fn from_msg(msg: <Arc<()> as Message>::Payload) -> Self
+impl FromPayload<Arc<()>> for Arc<()> {
+    fn from_payload(msg: <Arc<()> as Message>::Payload) -> Self
     where
         Self: Sized,
     {
         msg
     }
 
-    fn try_into_msg(self) -> Result<<Arc<()> as Message>::Payload, Self>
+    fn try_into_payload(self) -> Result<<Arc<()> as Message>::Payload, Self>
     where
         Self: Sized,
     {

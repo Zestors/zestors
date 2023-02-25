@@ -29,7 +29,7 @@ impl OneForOneSpec {
         }
     }
 
-    pub fn with_spec<S: Startable>(mut self, spec: S) -> Self
+    pub fn with_spec<S: Specifies>(mut self, spec: S) -> Self
     where
         S: Send + 'static,
         S::Fut: Send,
@@ -39,7 +39,7 @@ impl OneForOneSpec {
         self
     }
 
-    pub fn add_spec<S: Startable>(&mut self, spec: S)
+    pub fn add_spec<S: Specifies>(&mut self, spec: S)
     where
         S: Send + 'static,
         S::Fut: Send,
@@ -60,30 +60,17 @@ impl OneForOneSpec {
     }
 }
 
-impl Startable for OneForOneSpec {
+impl Specifies for OneForOneSpec {
     type Ref = ();
     type Supervisee = OneForOneSupervisee;
     type Fut = OneForOneStartFut;
 
     fn start(mut self) -> Self::Fut {
-        let start_time = self
-            .items
-            .iter()
-            .fold(Duration::ZERO, |duration, item| match item {
-                OneForOneItem::Spec(spec) => Ord::max(spec.start_time(), duration),
-                _ => panic!(),
-            })
-            .saturating_add(Duration::from_millis(10));
-
         for item in self.items.iter_mut() {
             item.start().expect("Is a spec");
         }
 
-        OneForOneStartFut::new(self, start_time, start_time)
-    }
-
-    fn start_time(&self) -> Duration {
-        Duration::MAX
+        OneForOneStartFut::new(self)
     }
 }
 
@@ -94,9 +81,7 @@ impl Startable for OneForOneSpec {
 #[pin_project]
 pub struct OneForOneStartFut {
     inner: Option<OneForOneSpec>,
-    /// If None then the timeout has been triggered
-    timer: Option<Pin<Box<Sleep>>>,
-    shutdown_time: Duration,
+    shutdown_timer: Option<Pin<Box<Sleep>>>,
     start_failure: bool,
 }
 
@@ -106,12 +91,11 @@ struct OneForOneError(&'static str, OneForOneSpec);
 
 #[allow(unused_assignments)]
 impl OneForOneStartFut {
-    fn new(inner: OneForOneSpec, start_time: Duration, shutdown_time: Duration) -> Self {
+    fn new(inner: OneForOneSpec) -> Self {
         OneForOneStartFut {
             inner: Some(inner),
-            shutdown_time,
-            timer: Some(Box::pin(sleep(start_time))),
             start_failure: false,
+            shutdown_timer: None,
         }
     }
 
@@ -217,17 +201,12 @@ impl Future for OneForOneStartFut {
 
                 if this.start_failure {
                     // Reset the timeout because we are now going to shut everything down.
-                    this.timer = Some(Box::pin(sleep(this.shutdown_time)));
+                    this.shutdown_timer = Some(Box::pin(sleep(todo!())));
                 } else if all_ready {
                     let supervisee = OneForOneSupervisee::new(this.inner.take().unwrap());
                     break 'outer Poll::Ready(Ok((supervisee, ())));
                 } else {
-                    if Self::time_limit_reached(&mut this.timer, cx) {
-                        this.timer = Some(Box::pin(sleep(this.shutdown_time)));
-                        this.start_failure = true;
-                    } else {
-                        break 'outer Poll::Pending;
-                    }
+                    break 'outer Poll::Pending;
                 };
             } else {
                 let mut all_ready = true;
@@ -274,7 +253,7 @@ impl Future for OneForOneStartFut {
                     }
                 }
 
-                if all_ready || Self::time_limit_reached(&mut this.timer, cx) {
+                if all_ready {
                     break 'outer Poll::Ready(this.take_start_now());
                 } else {
                     break 'outer Poll::Pending;

@@ -4,7 +4,6 @@ use pin_project::pin_project;
 use std::{
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
 };
 use tokio::sync::mpsc;
 
@@ -12,22 +11,8 @@ use tokio::sync::mpsc;
 //  Startable
 //------------------------------------------------------------------------------------------------
 
-pub trait UnpinStartable: Startable + Unpin
-where
-    Self::Supervisee: Unpin,
-    Self::Fut: Unpin,
-{
-}
-impl<S> UnpinStartable for S
-where
-    S: Startable + Unpin,
-    S::Supervisee: Unpin,
-    S::Fut: Unpin,
-{
-}
-
 /// A [`Specification`] specifies how [`Supervisee`] can be started.
-pub trait Startable: Send + Sized {
+pub trait Specifies: Send + Sized {
     /// The reference passed on when the supervisee is started
     type Ref: Send + 'static;
 
@@ -39,13 +24,22 @@ pub trait Startable: Send + Sized {
 
     /// Start the supervisee.
     fn start(self) -> Self::Fut;
-
-    /// The limit for how much time is given for starting.
-    /// After this time, the supervisee specification is dropped and an error is returned.
-    fn start_time(&self) -> Duration;
 }
 
-pub trait StartableExt: Startable {
+/// Result returned when starting a [`Specification`].
+pub type StartResult<S> =
+    Result<(<S as Specifies>::Supervisee, <S as Specifies>::Ref), StartError<S>>;
+
+pub enum StartError<S> {
+    /// Starting the supervisee has failed, but it may be retried.
+    Failed(S),
+    /// Starting the supervisee has failed, with no way to retry.
+    Irrecoverable(BoxError),
+    /// The supervisee is completed and does not need to be restarted.
+    Completed,
+}
+
+pub trait StartableExt: Specifies {
     /// Returns a future that can be awaited to supervise the supervisee.
     fn start_supervise(self) -> SupervisorFut<Self> {
         SupervisorFut::new(self)
@@ -88,20 +82,7 @@ pub trait StartableExt: Startable {
         DynSpec::new(self)
     }
 }
-impl<T: Startable> StartableExt for T {}
-
-/// Result returned when starting a [`Specification`].
-pub type StartResult<S> =
-    Result<(<S as Startable>::Supervisee, <S as Startable>::Ref), StartError<S>>;
-
-pub enum StartError<S> {
-    /// Starting the supervisee has failed, but it may be retried.
-    Failed(S),
-    /// Starting the supervisee has failed, with no way to retry.
-    Irrecoverable(BoxError),
-    /// The supervisee is completed and does not need to be restarted.
-    Completed,
-}
+impl<T: Specifies> StartableExt for T {}
 
 //------------------------------------------------------------------------------------------------
 //  Supervisable
@@ -109,7 +90,7 @@ pub enum StartError<S> {
 
 /// Specifies how a child can be supervised
 pub trait Supervisable: Send + Sized {
-    type Spec: Startable<Supervisee = Self>;
+    type Spec: Specifies<Supervisee = Self>;
 
     fn poll_supervise(self: Pin<&mut Self>, cx: &mut Context) -> Poll<SuperviseResult<Self::Spec>>;
 
@@ -130,9 +111,9 @@ pub trait Supervisable: Send + Sized {
 pub type SuperviseResult<S> = Result<Option<S>, BoxError>;
 
 #[pin_project]
-pub struct SuperviseFuture<S: Startable>(#[pin] S::Supervisee);
+pub struct SuperviseFuture<S: Specifies>(#[pin] S::Supervisee);
 
-impl<S: Startable> Future for SuperviseFuture<S> {
+impl<S: Specifies> Future for SuperviseFuture<S> {
     type Output = SuperviseResult<S>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

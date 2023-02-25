@@ -52,6 +52,7 @@ mod restart_limiter;
 mod child_spec;
 mod startable;
 mod supervisor;
+mod action;
 pub use combinator_specs::*;
 use futures::Future;
 pub(super) use restart_limiter::*;
@@ -64,13 +65,14 @@ use crate as zestors;
 use crate::*;
 use std::error::Error;
 
+
 //------------------------------------------------------------------------------------------------
 //  Private types
 //------------------------------------------------------------------------------------------------
 
 type BoxError = Box<dyn Error + Send>;
 
-enum SpecStateWith<S: Startable> {
+enum SpecStateWith<S: Specifies> {
     Dead(S),
     Starting(S::Fut),
     Alive(S::Supervisee, S::Ref),
@@ -78,7 +80,7 @@ enum SpecStateWith<S: Startable> {
     Finished,
 }
 
-enum SpecState<S: Startable> {
+enum SpecState<S: Specifies> {
     Dead(S),
     Starting(S::Fut),
     Alive(S::Supervisee),

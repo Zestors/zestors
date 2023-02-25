@@ -8,16 +8,15 @@ use std::{
     marker::PhantomData,
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
 };
 
 pub fn from_spawn_fn<I, D, SFut, E, EFut>(
     spawn_fn: impl (FnOnce(I, D) -> SFut) + Clone + Send + 'static,
     exit_fn: impl (FnOnce(Result<E, ExitError>) -> EFut) + Send + Clone + 'static,
-    start_time: Duration,
     data: D,
+    shutdown_time: ShutdownTime,
     inbox_config: I::Config,
-) -> impl Startable<Ref = Address<I>> + 'static
+) -> impl Specifies<Ref = Address<I>> + 'static
 where
     E: Send + 'static,
     I: InboxType,
@@ -26,7 +25,7 @@ where
     SFut: Future<Output = E> + Send + 'static,
     EFut: Future<Output = SuperviseResult<D>> + Send + 'static,
 {
-    SpawnSpec::new(spawn_fn, exit_fn, data, inbox_config, start_time.into())
+    SpawnSpec::new(spawn_fn, exit_fn, data, inbox_config, shutdown_time)
 }
 
 #[pin_project]
@@ -74,22 +73,9 @@ where
             data,
         }
     }
-
-    pub fn new_default(spawn_fn: SFun, exit_fn: EFun, data: D) -> Self
-    where
-        I::Config: Default,
-    {
-        Self::new(
-            spawn_fn,
-            exit_fn,
-            data,
-            Default::default(),
-            ShutdownTime::default(),
-        )
-    }
 }
 
-impl<SFun, SFut, EFun, EFut, D, E, I> Startable for SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>
+impl<SFun, SFut, EFun, EFut, D, E, I> Specifies for SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
     I: InboxType,
@@ -105,30 +91,24 @@ where
     type Fut = Ready<StartResult<Self>>;
 
     fn start(self) -> Self::Fut {
-        future::ready({
-            let inner = self.inner.clone();
-            let (child, address) = spawn_with(
-                Link::Attached(inner.abort_timeout),
-                inner.config,
-                move |inbox| async move {
-                    let spawn_fut = (inner.spawn_fn)(inbox, self.data);
-                    spawn_fut.await
-                },
-            );
-
-            Ok((
-                SpawnSupervisee {
-                    inner: Some(self.inner),
-                    child,
-                    exit_fut: None,
-                },
-                address,
-            ))
-        })
-    }
-
-    fn start_time(&self) -> Duration {
-        Duration::from_millis(10)
+        let inner = self.inner.clone();
+        let (child, address) = spawn_with(
+            Link::Attached(inner.abort_timeout),
+            inner.config,
+            move |inbox| async move {
+                let spawn_fut = (inner.spawn_fn)(inbox, self.data);
+                spawn_fut.await
+            },
+        );
+        let res = Ok((
+            SpawnSupervisee {
+                inner: Some(self.inner),
+                child,
+                exit_fut: None,
+            },
+            address,
+        ));
+        future::ready(res)
     }
 }
 
@@ -232,7 +212,7 @@ mod test {
         );
     }
 
-    fn spec() -> impl Startable<Ref = Address<Halter>> {
+    fn spec() -> impl Specifies<Ref = Address<Halter>> {
         SpawnSpec::new(
             |inbox: Halter, data: u32| async move { () },
             |exit| async move {

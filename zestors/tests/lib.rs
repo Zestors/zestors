@@ -98,7 +98,7 @@ async fn address_counts() {
 
 #[tokio::test]
 async fn inbox_counts() {
-    let (pool, _address) = spawn_pool(0..4, |_, mut inbox: Inbox<()>| async move {
+    let (pool, _address) = spawn_many(0..4, |_, mut inbox: Inbox<()>| async move {
         inbox.recv().await.unwrap_err();
     });
     let mut pool = pool.into_dyn();
@@ -131,7 +131,7 @@ enum U32Protocol {
 
 #[tokio::test]
 async fn pooled_messaging_split() {
-    let (pool, address) = spawn_pool_with(
+    let (pool, address) = spawn_many_with(
         Link::default(),
         Capacity::Bounded(5),
         0..3,

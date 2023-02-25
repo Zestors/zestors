@@ -395,30 +395,30 @@ impl<P: Protocol> Channel for InboxChannel<P> {
     }
 
     fn try_send_any(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {
-        match P::try_from_msg(boxed) {
+        match P::try_from_boxed_payload(boxed) {
             Ok(prot) => self.try_send_protocol(prot).map_err(|e| match e {
-                TrySendError::Full(prot) => TrySendCheckedError::Full(prot.into_msg()),
-                TrySendError::Closed(prot) => TrySendCheckedError::Closed(prot.into_msg()),
+                TrySendError::Full(prot) => TrySendCheckedError::Full(prot.into_boxed_payload()),
+                TrySendError::Closed(prot) => TrySendCheckedError::Closed(prot.into_boxed_payload()),
             }),
             Err(boxed) => Err(TrySendCheckedError::NotAccepted(boxed)),
         }
     }
 
     fn force_send_any(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {
-        match P::try_from_msg(boxed) {
+        match P::try_from_boxed_payload(boxed) {
             Ok(prot) => self.send_protocol_now(prot).map_err(|e| match e {
-                TrySendError::Full(prot) => TrySendCheckedError::Full(prot.into_msg()),
-                TrySendError::Closed(prot) => TrySendCheckedError::Closed(prot.into_msg()),
+                TrySendError::Full(prot) => TrySendCheckedError::Full(prot.into_boxed_payload()),
+                TrySendError::Closed(prot) => TrySendCheckedError::Closed(prot.into_boxed_payload()),
             }),
             Err(boxed) => Err(TrySendCheckedError::NotAccepted(boxed)),
         }
     }
 
     fn send_any_blocking(&self, boxed: BoxPayload) -> Result<(), SendCheckedError<BoxPayload>> {
-        match P::try_from_msg(boxed) {
+        match P::try_from_boxed_payload(boxed) {
             Ok(prot) => self
                 .send_protocol_blocking(prot)
-                .map_err(|SendError(prot)| SendCheckedError::Closed(prot.into_msg())),
+                .map_err(|SendError(prot)| SendCheckedError::Closed(prot.into_boxed_payload())),
             Err(boxed) => Err(SendCheckedError::NotAccepted(boxed)),
         }
     }
@@ -428,11 +428,11 @@ impl<P: Protocol> Channel for InboxChannel<P> {
         boxed: BoxPayload,
     ) -> BoxFuture<'_, Result<(), SendCheckedError<BoxPayload>>> {
         Box::pin(async move {
-            match P::try_from_msg(boxed) {
+            match P::try_from_boxed_payload(boxed) {
                 Ok(prot) => self
                     .send_protocol(prot)
                     .await
-                    .map_err(|SendError(prot)| SendCheckedError::Closed(prot.into_msg())),
+                    .map_err(|SendError(prot)| SendCheckedError::Closed(prot.into_boxed_payload())),
                 Err(boxed) => Err(SendCheckedError::NotAccepted(boxed)),
             }
         })

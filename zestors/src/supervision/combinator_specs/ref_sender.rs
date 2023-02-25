@@ -13,27 +13,27 @@ use tokio::sync::mpsc;
 //------------------------------------------------------------------------------------------------
 
 #[pin_project]
-pub struct RefSenderSpec<S: Startable> {
+pub struct RefSenderSpec<S: Specifies> {
     #[pin]
     spec: S,
     sender: Option<mpsc::UnboundedSender<S::Ref>>,
 }
 
 #[pin_project]
-pub struct RefSenderSpecFut<S: Startable> {
+pub struct RefSenderSpecFut<S: Specifies> {
     #[pin]
     fut: S::Fut,
     sender: Option<mpsc::UnboundedSender<S::Ref>>,
 }
 
 #[pin_project]
-pub struct RefSenderSupervisee<S: Startable> {
+pub struct RefSenderSupervisee<S: Specifies> {
     #[pin]
     supervisee: S::Supervisee,
     sender: Option<mpsc::UnboundedSender<S::Ref>>,
 }
 
-impl<Sp: Startable> RefSenderSpec<Sp> {
+impl<Sp: Specifies> RefSenderSpec<Sp> {
     pub fn new(spec: Sp) -> (Self, mpsc::UnboundedReceiver<Sp::Ref>) {
         let (sender, receiver) = mpsc::unbounded_channel();
         (Self::new_with_channel(spec, sender), receiver)
@@ -47,13 +47,9 @@ impl<Sp: Startable> RefSenderSpec<Sp> {
     }
 }
 
-impl<Sp: Startable> Startable for RefSenderSpec<Sp> {
+impl<Sp: Specifies> Specifies for RefSenderSpec<Sp> {
     type Ref = ();
     type Supervisee = RefSenderSupervisee<Sp>;
-
-    fn start_time(&self) -> Duration {
-        self.spec.start_time()
-    }
 
     fn start(self) -> Self::Fut {
         RefSenderSpecFut {
@@ -65,7 +61,7 @@ impl<Sp: Startable> Startable for RefSenderSpec<Sp> {
     type Fut = RefSenderSpecFut<Sp>;
 }
 
-impl<Sp: Startable> Future for RefSenderSpecFut<Sp> {
+impl<Sp: Specifies> Future for RefSenderSpecFut<Sp> {
     type Output = StartResult<RefSenderSpec<Sp>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -96,7 +92,7 @@ impl<Sp: Startable> Future for RefSenderSpecFut<Sp> {
 //  Supervisee
 //------------------------------------------------------------------------------------------------
 
-impl<S: Startable> Supervisable for RefSenderSupervisee<S> {
+impl<S: Specifies> Supervisable for RefSenderSupervisee<S> {
     type Spec = RefSenderSpec<S>;
 
     fn shutdown_time(self: Pin<&Self>) -> ShutdownTime {

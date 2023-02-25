@@ -5,19 +5,18 @@ use std::{
     fmt::Debug,
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
 };
 
 #[derive(Debug)]
 pub struct DynSpec<Ref = ()>(Pin<Box<dyn DynSpecification<Ref>>>);
 
 impl<Ref: 'static> DynSpec<Ref> {
-    pub fn new<S: Startable<Ref = Ref> + 'static>(spec: S) -> Self {
+    pub fn new<S: Specifies<Ref = Ref> + 'static>(spec: S) -> Self {
         Self(Box::pin(MultiSpec::Spec(spec)))
     }
 }
 
-impl<Ref: Send + 'static> Startable for DynSpec<Ref> {
+impl<Ref: Send + 'static> Specifies for DynSpec<Ref> {
     type Ref = Ref;
     type Supervisee = DynSupervisee<Ref>;
     type Fut = DynStartFut<Ref>;
@@ -26,10 +25,6 @@ impl<Ref: Send + 'static> Startable for DynSpec<Ref> {
         self.0.as_mut()._start();
         DynStartFut(Some(self.0))
     }
-
-    fn start_time(&self) -> Duration {
-        self.0._start_timeout()
-    }
 }
 
 /// A type-erased and boxed [`Specification::StartFut`].
@@ -37,7 +32,7 @@ impl<Ref: Send + 'static> Startable for DynSpec<Ref> {
 pub struct DynStartFut<Ref = ()>(Option<Pin<Box<dyn DynSpecification<Ref>>>>);
 
 impl<Ref: Send + 'static> DynStartFut<Ref> {
-    pub fn new<S: Startable<Ref = Ref> + 'static>(fut: S::Fut) -> Self {
+    pub fn new<S: Specifies<Ref = Ref> + 'static>(fut: S::Fut) -> Self {
         Self(Some(Box::pin(MultiSpec::<S>::StartFut(fut))))
     }
 }
@@ -69,9 +64,7 @@ impl<Ref: Send + 'static> Future for DynStartFut<Ref> {
 pub struct DynSupervisee<Ref = ()>(Option<Pin<Box<dyn DynSpecification<Ref>>>>);
 
 impl<Ref: 'static> DynSupervisee<Ref> {
-    pub fn new<S: Startable<Ref = Ref> + 'static>(supervisee: S::Supervisee) -> Self
-
-    {
+    pub fn new<S: Specifies<Ref = Ref> + 'static>(supervisee: S::Supervisee) -> Self {
         Self(Some(Box::pin(MultiSpec::<S>::Supervised(supervisee))))
     }
 }
@@ -115,7 +108,6 @@ impl<Ref: Send + 'static> Supervisable for DynSupervisee<Ref> {
 /// necessary.
 trait DynSpecification<Ref>: Send + Debug + 'static {
     fn _start(self: Pin<&mut Self>);
-    fn _start_timeout(&self) -> Duration;
     fn _poll_start_fut(self: Pin<&mut Self>, cx: &mut Context<'_>)
         -> Poll<DynSupervisedStart<Ref>>;
     fn _poll_supervise_fut(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<DynSupervisedExit>;
@@ -127,7 +119,7 @@ trait DynSpecification<Ref>: Send + Debug + 'static {
 // todo: it should be possible to provide an implementation that does not require Unpin for
 // the Fut and Supervisee.
 #[pin_project(project = DynMultiSpecProj, project_ref = DynMultiSpecProjRef)]
-enum MultiSpec<S: Startable> {
+enum MultiSpec<S: Specifies> {
     Spec(S),
     StartFut(#[pin] S::Fut),
     Supervised(#[pin] S::Supervisee),
@@ -136,7 +128,7 @@ enum MultiSpec<S: Startable> {
     SpecTaken,
 }
 
-impl<S: Startable> Debug for MultiSpec<S> {
+impl<S: Specifies> Debug for MultiSpec<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Spec(arg0) => f.debug_tuple("Spec").finish(),
@@ -149,7 +141,7 @@ impl<S: Startable> Debug for MultiSpec<S> {
     }
 }
 
-impl<S: Startable> MultiSpec<S> {
+impl<S: Specifies> MultiSpec<S> {
     fn take_spec_unwrap(self: &mut Pin<&mut Self>) -> S {
         let mut taken = Self::SpecTaken;
         std::mem::swap(unsafe { self.as_mut().get_unchecked_mut() }, &mut taken);
@@ -173,17 +165,12 @@ enum DynSupervisedExit {
 
 impl<S> DynSpecification<S::Ref> for MultiSpec<S>
 where
-    S: Startable + 'static,
+    S: Specifies + 'static,
     S::Ref: 'static,
 {
     fn _start(mut self: Pin<&mut Self>) {
         let spec = self.take_spec_unwrap();
         self.set(Self::StartFut(spec.start()));
-    }
-
-    fn _start_timeout(&self) -> Duration {
-        let Self::Spec(spec) = self else { panic!() };
-        spec.start_time()
     }
 
     fn _poll_start_fut(

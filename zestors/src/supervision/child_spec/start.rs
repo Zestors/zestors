@@ -3,7 +3,7 @@ use crate::{
     monitoring::{Address, ActorRefExt, Child, ExitError},
     supervision::{
         combinator_specs::{spawn, Link, ShutdownTime},
-        StartError, StartResult, Startable, Supervisable, SuperviseResult,
+        StartError, StartResult, Specifies, Supervisable, SuperviseResult,
     },
 };
 use futures::{future::BoxFuture, Future, FutureExt};
@@ -82,7 +82,7 @@ where
     }
 }
 
-impl<SFun, SFut, EFun, EFut, D, E, A, Ref> Startable
+impl<SFun, SFut, EFun, EFut, D, E, A, Ref> Specifies
     for ChildSpec<SFun, SFut, EFun, EFut, D, E, A, Ref>
 where
     SFun: (FnOnce(D, Duration) -> SFut) + Send + Clone + 'static,
@@ -124,9 +124,6 @@ where
         })
     }
 
-    fn start_time(&self) -> Duration {
-        self.start_time
-    }
 }
 
 #[pin_project]

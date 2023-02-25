@@ -12,14 +12,17 @@ the following order.
 - [`distribution`] : todo
 */
 
+pub mod actor;
 pub mod channel;
 pub mod distribution;
 pub mod messaging;
 pub mod monitoring;
 pub mod spawning;
 pub mod supervision;
+mod handler;
 
 pub mod all {
+    pub use crate::handler::*;
     pub use crate::channel::{halter::*, inbox::*, multi_halter::*, *};
     pub use crate::messaging::*;
     pub use crate::monitoring::*;

@@ -35,10 +35,18 @@ mod config;
 pub use config::*;
 
 use super::{InboxType, MultiInboxType};
-use crate::all::*;
+use crate::{
+    all::*,
+    handler::{HandlerEvent, HandlerState},
+};
 use event_listener::EventListener;
-use futures::{future::BoxFuture, stream::FusedStream, FutureExt, Stream};
-use std::{fmt::Debug, sync::Arc};
+use futures::{future::BoxFuture, stream::FusedStream, FutureExt, Stream, StreamExt};
+use std::{
+    fmt::Debug,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
 /// An Inbox is a non clone-able receiver part of a channel.
 ///
@@ -133,8 +141,34 @@ impl<P: Protocol + Send> InboxType for Inbox<P> {
     }
 }
 
-fn unwrap_then_cancel<P: ProtocolFrom<M>, M: Message>(prot: P, returned: M::Returned) -> M {
-    let Ok(sent) = prot.try_into_msg() else {
+impl<P, H> HandlerState<H> for Inbox<P>
+where
+    P: Protocol + HandledBy<H>,
+    H: Handler<State = Self>,
+{
+    type Protocol = P;
+    type InboxType = Self;
+
+    fn from_inbox(inbox: Self::InboxType) -> Self {
+        inbox
+    }
+
+    fn poll_next_action(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+    ) -> Poll<Result<Action<H>, crate::handler::HandlerEvent>> {
+        self.poll_next_unpin(cx).map(|res| match res {
+            Some(res) => match res {
+                Ok(protocol) => Ok(Action::Protocol(protocol)),
+                Err(_halted) => Err(HandlerEvent::Halt),
+            },
+            None => Err(HandlerEvent::Dead),
+        })
+    }
+}
+
+fn unwrap_then_cancel<P: FromPayload<M>, M: Message>(prot: P, returned: M::Returned) -> M {
+    let Ok(sent) = prot.try_into_payload() else {
         panic!("")
     };
     M::cancel(sent, returned)
@@ -142,7 +176,7 @@ fn unwrap_then_cancel<P: ProtocolFrom<M>, M: Message>(prot: P, returned: M::Retu
 
 impl<M, P> Accept<M> for Inbox<P>
 where
-    P: Protocol + ProtocolFrom<M>,
+    P: Protocol + FromPayload<M>,
     M: Message + Send + 'static,
     M::Payload: Send,
     M::Returned: Send,
@@ -152,7 +186,7 @@ where
     fn try_send(address: &Self::Channel, msg: M) -> Result<M::Returned, TrySendError<M>> {
         let (sends, returns) = M::create(msg);
 
-        match address.try_send_protocol(P::from_msg(sends)) {
+        match address.try_send_protocol(P::from_payload(sends)) {
             Ok(()) => Ok(returns),
             Err(e) => match e {
                 TrySendError::Closed(prot) => {
@@ -168,7 +202,7 @@ where
     fn force_send(address: &Self::Channel, msg: M) -> Result<M::Returned, TrySendError<M>> {
         let (sends, returns) = M::create(msg);
 
-        match address.send_protocol_now(P::from_msg(sends)) {
+        match address.send_protocol_now(P::from_payload(sends)) {
             Ok(()) => Ok(returns),
             Err(e) => match e {
                 TrySendError::Closed(prot) => {
@@ -184,7 +218,7 @@ where
     fn send_blocking(address: &Self::Channel, msg: M) -> Result<M::Returned, SendError<M>> {
         let (sends, returns) = M::create(msg);
 
-        match address.send_protocol_blocking(P::from_msg(sends)) {
+        match address.send_protocol_blocking(P::from_payload(sends)) {
             Ok(()) => Ok(returns),
             Err(SendError(prot)) => Err(SendError(unwrap_then_cancel(prot, returns))),
         }
@@ -194,7 +228,7 @@ where
         Box::pin(async move {
             let (sends, returns) = M::create(msg);
 
-            match address.send_protocol(P::from_msg(sends)).await {
+            match address.send_protocol(P::from_payload(sends)).await {
                 Ok(()) => Ok(returns),
                 Err(SendError(prot)) => Err(SendError(unwrap_then_cancel(prot, returns))),
             }

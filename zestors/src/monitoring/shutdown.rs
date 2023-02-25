@@ -160,7 +160,7 @@ mod test {
 
     #[tokio::test]
     async fn shutdown_pool_success() {
-        let (mut child, _addr) = spawn_pool(0..3, pooled_basic_actor!());
+        let (mut child, _addr) = spawn_many(0..3, pooled_basic_actor!());
 
         let results = child
             .shutdown(Duration::from_millis(5))
@@ -175,7 +175,7 @@ mod test {
 
     #[tokio::test]
     async fn shutdown_pool_failure() {
-        let (mut child, _addr) = spawn_pool(0..3, |_, _inbox: Inbox<()>| async {
+        let (mut child, _addr) = spawn_many(0..3, |_, _inbox: Inbox<()>| async {
             pending::<()>().await;
         });
 

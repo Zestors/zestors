@@ -16,7 +16,7 @@ bytes = "1.2.1"
 pin-project = "1.0.12"
 serde = {version = "^1", features = ["derive"]}
 tokio-util = {version = "0.6.4", features = ["codec"]}
-uuid = {version = "1.0", features = ["v4"]}
+uuid = { version = "1.0", features = ["v4"] }
 event-listener = "^2.0"
 tokio-test = "0.4.2"
 

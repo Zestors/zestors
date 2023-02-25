@@ -3,33 +3,38 @@ use crate::all::*;
 use std::{any::TypeId, sync::Arc};
 
 macro_rules! create_dynamic_actor_types {
-    ($($ident:ident $(<$( $ty:ident ),*>)?),*) => {$(
+    ($($actor_ty:ident $(<$( $msg:ident ),*>)?),*) => {$(
+        // creates the dynamic actor-type trait which implements FromPayload<..> as a marker-trait.
         /// See [`Dyn`].
-        pub trait $ident< $($($ty: Message,)?)*>: std::fmt::Debug + $($( ProtocolFrom<$ty> + )?)* {}
+        pub trait $actor_ty< $($($msg: Message,)?)*>: std::fmt::Debug + $($( FromPayload<$msg> + )?)* {}
 
-        impl<$($($ty: Message + 'static,)?)*> DynActorType for Dyn<dyn $ident< $($($ty,)?)*>> {
+        // Implement the dynamic actor-type for Dyn<dyn _>
+        impl<$($($msg: Message + 'static,)?)*> DynActorType for Dyn<dyn $actor_ty< $($($msg,)?)*>> {
             fn msg_ids() -> Box<[TypeId]> {
-                Box::new([$($(TypeId::of::<$ty>(),)?)*])
+                Box::new([$($(TypeId::of::<$msg>(),)?)*])
             }
         }
 
-        impl<D, $($($ty: Message + 'static,)?)*> TransformInto<Dyn<dyn $ident<$($($ty,)?)*>>> for Dyn<D>
+        // Any sized channel can transform into this Dyn<dyn _>, as long as it impl FromPayload<M> 
+        // for all the messages
+        impl<D, $($($msg: Message + 'static,)?)*> TransformInto<Dyn<dyn $actor_ty<$($($msg,)?)*>>> for Dyn<D>
         where
-            Dyn<D>: DynActorType,
-            D: ?Sized $($( + ProtocolFrom<$ty> )?)*
+            D: ?Sized $($( + FromPayload<$msg> )?)*
         {
             fn transform_into(channel: Arc<Self::Channel>) -> Arc<dyn Channel> {
                 channel
             }
         }
 
-        impl<C, $($($ty: Message + 'static,)?)*> TransformInto<Dyn<dyn $ident<$($($ty,)?)*>>> for C
+        // Any sized channel can transform into this Dyn<dyn _>, as long as it implements 
+        // Accept<M> all the messages
+        impl<I, $($($msg: Message + 'static,)?)*> TransformInto<Dyn<dyn $actor_ty<$($($msg,)?)*>>> for I
         where
-            C: InboxType $($( + Accept<$ty> )?)*,
-            C::Channel: Sized
+            I: InboxType $($( + Accept<$msg> )?)*,
+            I::Channel: Sized
         {
             fn transform_into(channel: Arc<Self::Channel>) -> Arc<dyn Channel> {
-                <C::Channel as Channel>::into_dyn(channel)
+                <I::Channel as Channel>::into_dyn(channel)
             }
         }
     )*};

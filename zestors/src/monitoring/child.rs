@@ -568,7 +568,7 @@ mod test_pooled {
     #[tokio::test]
     async fn dropping() {
         static HALT_COUNT: AtomicU8 = AtomicU8::new(0);
-        let (child, addr) = spawn_pool(0..3, |_, mut inbox: Inbox<()>| async move {
+        let (child, addr) = spawn_many(0..3, |_, mut inbox: Inbox<()>| async move {
             if let Err(RecvError::Halted) = inbox.recv().await {
                 HALT_COUNT.fetch_add(1, Ordering::AcqRel);
             };
@@ -582,7 +582,7 @@ mod test_pooled {
     #[tokio::test]
     async fn dropping_halts_then_aborts() {
         static HALT_COUNT: AtomicU8 = AtomicU8::new(0);
-        let (child, addr) = spawn_pool(0..3, |_, mut inbox: Inbox<()>| async move {
+        let (child, addr) = spawn_many(0..3, |_, mut inbox: Inbox<()>| async move {
             if let Err(RecvError::Halted) = inbox.recv().await {
                 HALT_COUNT.fetch_add(1, Ordering::AcqRel);
             };
@@ -598,7 +598,7 @@ mod test_pooled {
     async fn dropping_detached() {
         static HALT_COUNT: AtomicU8 = AtomicU8::new(0);
 
-        let (child, addr) = spawn_pool_with(
+        let (child, addr) = spawn_many_with(
             Link::Detached,
             Capacity::default(),
             0..3,
@@ -620,14 +620,14 @@ mod test_pooled {
 
     #[tokio::test]
     async fn downcast() {
-        let (pool, _addr) = spawn_pool(0..5, pooled_basic_actor!());
+        let (pool, _addr) = spawn_many(0..5, pooled_basic_actor!());
         let pool: ChildPool<_> = pool.transform_into();
         assert!(matches!(pool.downcast::<Inbox<()>>(), Ok(_)));
     }
 
     #[tokio::test]
     async fn spawn_ok() {
-        let (mut child, _addr) = spawn_pool(0..1, pooled_basic_actor!());
+        let (mut child, _addr) = spawn_many(0..1, pooled_basic_actor!());
         assert!(child.spawn_onto(basic_actor!()).is_ok());
         assert!(child
             .transform_into::<Accepts![]>()
@@ -637,7 +637,7 @@ mod test_pooled {
 
     #[tokio::test]
     async fn spawn_err_exit() {
-        let (mut child, addr) = spawn_pool(0..1, pooled_basic_actor!());
+        let (mut child, addr) = spawn_many(0..1, pooled_basic_actor!());
         addr.halt();
         addr.await;
         assert!(matches!(

@@ -2,4 +2,5 @@
 members = [ 
     "zestors", 
     "zestors-codegen", 
+    "future-map"
 ]

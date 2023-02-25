@@ -104,9 +104,9 @@ the child can be dropped without halting or aborting the actor.
 ```
  */
 
-mod link;
 mod errors;
-pub use {link::*, errors::*};
+mod link;
+pub use {errors::*, link::*};
 
 use crate::*;
 use futures::Future;
@@ -146,7 +146,7 @@ where
     )
 }
 
-pub fn spawn_pool<I, E, Itm, Fun, Fut>(
+pub fn spawn_many<I, E, Itm, Fun, Fut>(
     iter: impl ExactSizeIterator<Item = Itm>,
     function: Fun,
 ) -> (ChildPool<E, I>, Address<I>)
@@ -158,10 +158,10 @@ where
     E: Send + 'static,
     Itm: Send + 'static,
 {
-    spawn_pool_with(Default::default(), Default::default(), iter, function)
+    spawn_many_with(Default::default(), Default::default(), iter, function)
 }
 
-pub fn spawn_pool_with<I, E, Itm, Fun, Fut>(
+pub fn spawn_many_with<I, E, Itm, Fun, Fut>(
     link: Link,
     config: I::Config,
     iter: impl ExactSizeIterator<Item = Itm>,

@@ -1,7 +1,6 @@
 use std::{
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
 };
 
 use super::*;
@@ -15,7 +14,7 @@ use pin_project::pin_project;
 #[pin_project]
 pub struct MapRefSpec<S, Fun, T>
 where
-    S: Startable,
+    S: Specifies,
     Fun: FnMut(S::Ref) -> T,
 {
     spec: S,
@@ -25,7 +24,7 @@ where
 #[pin_project]
 pub struct MapRefStartFut<S, Fun, T>
 where
-    S: Startable,
+    S: Specifies,
     Fun: FnMut(S::Ref) -> T,
 {
     #[pin]
@@ -36,7 +35,7 @@ where
 #[pin_project]
 pub struct OnStartSupervisee<S, F, T>
 where
-    S: Startable,
+    S: Specifies,
     F: FnMut(S::Ref) -> T,
 {
     #[pin]
@@ -46,7 +45,7 @@ where
 
 impl<S, F, T> MapRefSpec<S, F, T>
 where
-    S: Startable,
+    S: Specifies,
     F: FnMut(S::Ref) -> T,
 {
     pub fn new(spec: S, map: F) -> Self {
@@ -57,9 +56,9 @@ where
     }
 }
 
-impl<Sp, F, T> Startable for MapRefSpec<Sp, F, T>
+impl<Sp, F, T> Specifies for MapRefSpec<Sp, F, T>
 where
-    Sp: Startable,
+    Sp: Specifies,
     F: FnMut(Sp::Ref) -> T + Send + 'static,
     T: Send + 'static,
 {
@@ -73,15 +72,11 @@ where
             on_start: Some(self.on_start),
         }
     }
-
-    fn start_time(&self) -> Duration {
-        self.spec.start_time()
-    }
 }
 
 impl<Sp, F, T> Future for MapRefStartFut<Sp, F, T>
 where
-    Sp: Startable,
+    Sp: Specifies,
     F: FnMut(Sp::Ref) -> T + Send + 'static,
     T: Send + 'static,
 {
@@ -117,7 +112,7 @@ where
 
 impl<S, F, T> Supervisable for OnStartSupervisee<S, F, T>
 where
-    S: Startable,
+    S: Specifies,
     F: FnMut(S::Ref) -> T + Send + 'static,
     T: Send + 'static,
 {
@@ -147,4 +142,3 @@ where
         })
     }
 }
-
