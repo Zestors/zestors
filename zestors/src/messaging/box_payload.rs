@@ -55,7 +55,7 @@ mod test {
             fn create(self) -> (Self::Payload, Self::Returned) {
                 (self, ())
             }
-            fn cancel(sent: Self::Payload, returned: Self::Returned) -> Self {
+            fn cancel(sent: Self::Payload, _returned: Self::Returned) -> Self {
                 sent
             }
         }
@@ -66,7 +66,7 @@ mod test {
             fn create(self) -> (Self::Payload, Self::Returned) {
                 (self, ())
             }
-            fn cancel(sent: Self::Payload, returned: Self::Returned) -> Self {
+            fn cancel(sent: Self::Payload, _returned: Self::Returned) -> Self {
                 sent
             }
         }

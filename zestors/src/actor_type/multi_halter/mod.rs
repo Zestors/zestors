@@ -36,7 +36,7 @@ impl ActorRef for MultiHalter {
 
 impl MultiActorInbox for MultiHalter {
     fn init_multi_inbox(
-        config: Self::Config,
+        _config: Self::Config,
         process_count: usize,
         address_count: usize,
         actor_id: ActorId,

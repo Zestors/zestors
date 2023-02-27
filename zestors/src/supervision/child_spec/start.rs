@@ -1,8 +1,8 @@
 use crate::{
     actor_type::{ActorType, ActorInbox},
-    actor_ref::{Address, ActorRefExt, Child, ExitError},
+    actor_ref::{ActorRefExt, Child, ExitError},
     supervision::{
-        combinator_specs::{spawn, Link, ShutdownTime},
+        combinator_specs::{Link, ShutdownTime},
         StartError, StartResult, Specifies, Supervisable, SuperviseResult,
     },
 };
@@ -16,10 +16,10 @@ use std::{
 };
 
 fn from_spawn_fn<D, I, SFut, E, EFut>(
-    spawn_fn: impl (FnOnce(I, D) -> SFut) + Clone + 'static,
-    exit_fn: impl (FnOnce(Result<E, ExitError>) -> EFut) + Send + Clone,
-    start_time: Duration,
-    data: D,
+    _spawn_fn: impl (FnOnce(I, D) -> SFut) + Clone + 'static,
+    _exit_fn: impl (FnOnce(Result<E, ExitError>) -> EFut) + Send + Clone,
+    _start_time: Duration,
+    _data: D,
 ) where
     E: Send + 'static,
     D: Send + 'static,

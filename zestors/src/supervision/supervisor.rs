@@ -61,7 +61,7 @@ impl<S: Specifies> Future for SupervisorFut<S> {
 
         loop {
             match &mut this.state {
-                SupervisorFutState::NotStarted(spec) => {
+                SupervisorFutState::NotStarted(_spec) => {
                     let spec = {
                         let mut state = SupervisorFutState::Exited;
                         swap(&mut this.state, &mut state);

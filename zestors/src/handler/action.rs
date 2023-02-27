@@ -125,17 +125,17 @@ mod test {
     use super::*;
 
     pub async fn my_message<'a, H: Handler>(
-        handler: &'a mut H,
-        state: &'a mut H::State,
-        msg: u32,
-        msg2: &'static str,
+        _handler: &'a mut H,
+        _state: &'a mut H::State,
+        _msg: u32,
+        _msg2: &'static str,
     ) -> Result<Flow, H::Exception> {
         Ok(Flow::Continue)
     }
 
     pub async fn my_message2<H: Handler>(
-        handler: &mut H,
-        state: &mut H::State,
+        _handler: &mut H,
+        _state: &mut H::State,
     ) -> Result<Flow, H::Exception> {
         todo!()
     }
@@ -144,16 +144,16 @@ mod test {
         let val = String::from("hi");
 
         let _ = address
-            .send(action!(|handler: &mut H, state| async move {
-                let y = "hi";
-                let val = val;
+            .send(action!(|_handler: &mut H, state| async move {
+                let _y = "hi";
+                let _val = val;
                 state.close();
                 Ok(Flow::Continue)
             }))
             .await;
 
-        let _ = address.try_send(action!(|handler: &mut H, state| async {
-            let y = "hi";
+        let _ = address.try_send(action!(|_handler: &mut H, _state| async {
+            let _y = "hi";
             todo!()
         }));
 

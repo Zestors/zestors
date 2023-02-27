@@ -195,11 +195,11 @@ mod test {
 
     #[test]
     fn test() {
-        let x = SpawnSpec::new(
-            |inbox: Halter, data: u32| async move { () },
+        let _x = SpawnSpec::new(
+            |_inbox: Halter, _data: u32| async move { () },
             |exit| async move {
                 match exit {
-                    Ok(res) => todo!(),
+                    Ok(_res) => todo!(),
                     Err(e) => match e {
                         ExitError::Panic(_) => todo!(),
                         ExitError::Abort => todo!(),
@@ -214,10 +214,10 @@ mod test {
 
     fn spec() -> impl Specifies<Ref = Address<Halter>> {
         SpawnSpec::new(
-            |inbox: Halter, data: u32| async move { () },
+            |_inbox: Halter, _data: u32| async move { () },
             |exit| async move {
                 match exit {
-                    Ok(res) => todo!(),
+                    Ok(_res) => todo!(),
                     Err(e) => match e {
                         ExitError::Panic(_) => todo!(),
                         ExitError::Abort => todo!(),

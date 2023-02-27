@@ -1,12 +1,8 @@
 use super::*;
 use async_trait::async_trait;
-use futures::{future::BoxFuture, ready, Future, FutureExt};
-use pin_project::pin_project;
-use std::{
-    marker::PhantomData,
-    pin::Pin,
-    task::{Context, Poll},
-};
+
+
+
 
 
 
@@ -34,12 +30,12 @@ impl ChildSpecification1 for MyActor {
     type With = u32;
 
     async fn start_with(
-        with: Self::With,
+        _with: Self::With,
     ) -> Result<(Child<Self::Exit, Self::ActorType>, Self::Ref), StartError<Self>> {
-        Ok(spawn(|inbox| async move { todo!() }))
+        Ok(spawn(|_inbox| async move { todo!() }))
     }
 
-    async fn exit(exit: Result<Self::Exit, ExitError>) -> Result<Option<Self::With>, BoxError> {
+    async fn exit(_exit: Result<Self::Exit, ExitError>) -> Result<Option<Self::With>, BoxError> {
         Ok(Some(10))
     }
 }

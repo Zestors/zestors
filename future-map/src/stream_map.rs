@@ -1,6 +1,5 @@
-use futures::{FutureExt, Stream, StreamExt};
+use futures::{Stream, StreamExt};
 use std::{
-    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };

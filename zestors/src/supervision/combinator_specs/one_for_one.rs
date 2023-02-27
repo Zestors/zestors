@@ -307,7 +307,7 @@ impl Supervisable for OneForOneSupervisee {
         }
     }
 
-    fn poll_supervise(self: Pin<&mut Self>, cx: &mut Context) -> Poll<SuperviseResult<Self::Spec>> {
+    fn poll_supervise(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<SuperviseResult<Self::Spec>> {
         todo!()
     }
 }

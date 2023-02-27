@@ -4,10 +4,9 @@ use crate::{
     handler::{Event, HandlerState},
 };
 use event_listener::EventListener;
-use futures::{future::BoxFuture, stream::FusedStream, Future, FutureExt, Stream, StreamExt};
+use futures::{stream::FusedStream, Future, FutureExt, Stream, StreamExt};
 use std::{
     fmt::Debug,
-    marker::PhantomData,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},

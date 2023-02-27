@@ -89,16 +89,16 @@ enum SpecState<S: Specifies> {
 
 fn test() {
     let var = "String".to_string();
-    let (fut_a, fut_b) = fn_once(|a| async { a + &var });
-    let (fut_a, fut_b) = fn_once(|a| async { a + &var });
+    let (_fut_a, _fut_b) = fn_once(|a| async { a + &var });
+    let (_fut_a, _fut_b) = fn_once(|a| async { a + &var });
     // not allowed: drop(var); -> Only static variables as reference
     let var = "String".to_string();
-    let (fut_a, fut_b) = fn_mut(|a| async { a + &var });
-    let (fut_a, fut_b) = fn_mut(|a| async { a + &var });
+    let (_fut_a, _fut_b) = fn_mut(|a| async { a + &var });
+    let (_fut_a, _fut_b) = fn_mut(|a| async { a + &var });
     // not allowed: drop(var); -> Only static variables as reference
 
     let var = "String".to_string();
-    let (fut_a, fut_b) = fn_once(|a| async {
+    let (_fut_a, _fut_b) = fn_once(|a| async {
         let var = var;
         a + &var
     });

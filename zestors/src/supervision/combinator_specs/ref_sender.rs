@@ -4,7 +4,6 @@ use pin_project::pin_project;
 use std::{
     pin::Pin,
     task::{Context, Poll},
-    time::Duration,
 };
 use tokio::sync::mpsc;
 

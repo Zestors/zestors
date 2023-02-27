@@ -131,9 +131,9 @@ enum MultiSpec<S: Specifies> {
 impl<S: Specifies> Debug for MultiSpec<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Spec(arg0) => f.debug_tuple("Spec").finish(),
-            Self::StartFut(arg0) => f.debug_tuple("StartFut").finish(),
-            Self::Supervised(arg0) => f.debug_tuple("Supervised").finish(),
+            Self::Spec(_arg0) => f.debug_tuple("Spec").finish(),
+            Self::StartFut(_arg0) => f.debug_tuple("StartFut").finish(),
+            Self::Supervised(_arg0) => f.debug_tuple("Supervised").finish(),
             Self::Unhandled => write!(f, "Unhandled"),
             Self::Finished => write!(f, "Finished"),
             Self::SpecTaken => write!(f, "SpecTaken"),
