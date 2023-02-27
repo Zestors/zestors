@@ -1,16 +1,17 @@
 /*!
-Zestors is a dynamic actor-framework built for Rust applications.
+Zestors is a fast and flexible actor-framework for creating fault-tolerant Rust applications.
 
 # Documentation
-All modules are self-documented. For a new user it is recommended to read the documentation in
-the following order.
-- [`messaging`] - Defining a protocol to send messages.
+All items are self-documented, but for a new user it is recommended to go skim through the docs in
+the following order. Every module gives an overview of what is contained inside, introduces some 
+new concepts and then gives an example on how to use it.
+- [`messaging`] - Defining a protocol in order to send messages.
 - [`actor_ref`] - Interacting with an actor through it's child or address.
-- [`actor_type`] - Specifying the type of an actor.
+- [`actor_type`] - Specifying the type of an actor statically and dynamically.
 - [`spawning`] - Spawning of actors.
-- [`handler`] - A simple way to write actors.
-- [`supervision`] : Supervision of actors.
-- [`distribution`] : todo
+- [`handler`] - A simpler way to write your actors.
+- [`supervision`] - Supervision of actors.
+- [`distribution`] - todo
 */
 
 pub mod actor_type;
@@ -28,7 +29,7 @@ mod all {
     pub use crate::actor_ref::*;
     pub use crate::spawning::*;
     pub use crate::supervision::*;
-    pub use crate::Accepts;
+    pub use crate::distribution::*;
 }
 pub(crate) mod _priv;
 #[allow(unused)]

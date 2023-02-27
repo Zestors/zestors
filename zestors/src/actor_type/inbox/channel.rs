@@ -477,7 +477,9 @@ impl<'a, P: Protocol> SendProtocolFut<'a, P> {
                 msg: Some(msg),
                 fut: back_pressure
                     .get_timeout(channel.msg_count())
-                    .map(|timeout| InnerSendProtocolFut::Sleep(Box::pin(tokio::time::sleep(timeout)))),
+                    .map(|timeout| {
+                        InnerSendProtocolFut::Sleep(Box::pin(tokio::time::sleep(timeout)))
+                    }),
             },
         }
     }
@@ -502,7 +504,9 @@ impl<'a, P: Protocol> SendProtocolFut<'a, P> {
         loop {
             // Otherwise, we create the future if it doesn't exist yet.
             if self.fut.is_none() {
-                self.fut = Some(InnerSendProtocolFut::Listener(self.channel.get_send_listener()))
+                self.fut = Some(InnerSendProtocolFut::Listener(
+                    self.channel.get_send_listener(),
+                ))
             }
 
             try_send!(msg);
@@ -562,11 +566,17 @@ impl<'a, P: Protocol> Future for SendProtocolFut<'a, P> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate as zestors;
     use crate::inbox::BackPressure;
     use crate::inbox::{RecvError, TryRecvError};
     use std::future::ready;
     use std::{sync::Arc, time::Duration};
     use tokio::time::Instant;
+    #[protocol]
+    #[derive(Debug)]
+    enum ArcProtocol {
+        Msg(Arc<()>),
+    }
 
     #[test]
     fn try_send_with_space() {
@@ -899,7 +909,9 @@ mod test {
         let msg = Arc::new(());
 
         let channel = InboxChannel::new(1, 1, Capacity::Bounded(10), ActorId::generate());
-        channel.send_protocol_now(msg.clone()).unwrap();
+        channel
+            .send_protocol_now(ArcProtocol::Msg(msg.clone()))
+            .unwrap();
 
         assert_eq!(Arc::strong_count(&msg), 2);
         channel.remove_inbox();
@@ -908,9 +920,9 @@ mod test {
 
     #[test]
     fn closing_doesnt_drop_messages() {
-        let channel = InboxChannel::<Arc<()>>::new(1, 1, Capacity::default(), ActorId::generate());
+        let channel = InboxChannel::new(1, 1, Capacity::default(), ActorId::generate());
         let msg = Arc::new(());
-        channel.push_msg(msg.clone()).unwrap();
+        channel.push_msg(ArcProtocol::Msg(msg.clone())).unwrap();
         assert_eq!(Arc::strong_count(&msg), 2);
         channel.close();
         assert_eq!(Arc::strong_count(&msg), 2);
@@ -918,7 +930,7 @@ mod test {
 
     #[test]
     fn add_inbox_with_0_inboxes_is_err() {
-        let channel = InboxChannel::<Arc<()>>::new(1, 1, Capacity::default(), ActorId::generate());
+        let channel = InboxChannel::<()>::new(1, 1, Capacity::default(), ActorId::generate());
         channel.remove_inbox();
         assert_eq!(
             channel.try_increment_process_count(),
@@ -929,7 +941,7 @@ mod test {
 
     #[test]
     fn add_inbox_with_0_addresses_is_ok() {
-        let channel = InboxChannel::<Arc<()>>::new(1, 1, Capacity::default(), ActorId::generate());
+        let channel = InboxChannel::<()>::new(1, 1, Capacity::default(), ActorId::generate());
         channel.remove_inbox();
         assert!(matches!(channel.try_increment_process_count(), Err(_)));
         assert_eq!(channel.process_count(), 0);

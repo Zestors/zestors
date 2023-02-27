@@ -1,29 +1,39 @@
+#[allow(unused)]
+use crate::all::*;
 use std::sync::Arc;
 
-/// The [`Message`] trait must be implemented for all messages that can be sent.
-/// It specifies two associated types:
-/// - `Payload`: The message that is actually sent to the receiver.
-/// - `Returned`: The value that is returned to the sender once the message has been sent.
-/// 
-/// A [`SimpleMessage`] has the following associated types:
+/// Any message should implement [`Message`], and has two associated types:
+/// - [`Message::Payload`] -> The payload of the message that is sent to the actor.
+/// - [`Message::Returned`] -> The value that is returned when the message is sent.
+///
+/// A simple message has the following associated types:
 /// - `Payload = Self`
 /// - `Returned = ()`
+///
+/// A request of type `R` has the following associated types:
+/// - `Payload = (Self, Tx<R>)`
+/// - `Returned = Rx<R>`
+///
+/// # Derive
+/// [`Message`] can be derived with the [`Message!`] macro.
 pub trait Message: Sized {
-    /// The message that is actually sent to the receiver.
+    ///  The payload of the message that is sent to the actor.
     type Payload: Send + 'static;
 
-    /// The value that is returned to the sender once the message has been sent.
+    /// The value that is returned when the message is sent.
     type Returned;
 
     /// This is called before the message is sent.
     fn create(self) -> (Self::Payload, Self::Returned);
 
-    /// This is called if the message cannot be sent succesfully.
+    /// This is called if the message cannot be sent.
     fn cancel(sent: Self::Payload, returned: Self::Returned) -> Self;
 }
 
-/// A version of the [`Message`] trait generic over `M` used as an argument to the `derive Message`
-/// macro. The  macro just forwards messages from `Message` to `DeriveMessage<Self>`.
+/// A version of the [`Message`] trait generic over `M`, used as the `[msg(..)]` attribute for the [`Message!`] derive
+/// macro.
+/// 
+/// This is implemented for `()`, [`Rx<_>`] and [`Tx<_>`]
 pub trait MessageDerive<M> {
     /// See [`Message::Payload`].
     type Payload;
@@ -37,10 +47,6 @@ pub trait MessageDerive<M> {
     /// See [`Message::cancel`].
     fn cancel(sent: Self::Payload, returned: Self::Returned) -> M;
 }
-
-//------------------------------------------------------------------------------------------------
-//  MessageDerive: `()`
-//------------------------------------------------------------------------------------------------
 
 impl<M: Send + 'static> MessageDerive<M> for () {
     type Payload = M;
@@ -56,9 +62,6 @@ impl<M: Send + 'static> MessageDerive<M> for () {
 //------------------------------------------------------------------------------------------------
 //  Message: Default implementations
 //------------------------------------------------------------------------------------------------
-
-trait SimpleMessage: Message<Payload = Self, Returned = ()> {}
-impl<T> SimpleMessage for T where T: Message<Payload = Self, Returned = ()> {}
 
 macro_rules! implement_message_for_base_types {
     ($(
@@ -197,3 +200,6 @@ implement_message_kind_and_message_for_tuples!(
         M10: m10 + m_10
     ),
 );
+
+trait SimpleMessage: Message<Payload = Self, Returned = ()> {}
+impl<T> SimpleMessage for T where T: Message<Payload = Self, Returned = ()> {}

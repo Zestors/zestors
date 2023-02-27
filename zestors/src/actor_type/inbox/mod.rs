@@ -1,4 +1,4 @@
-use super::{ActorInbox, MultiActorInbox};
+use super::{ActorInbox, MultiProcessInbox};
 use crate::{
     all::*,
     handler::{Event, HandlerState},
@@ -67,7 +67,7 @@ impl<P: Protocol + Send> ActorInbox for Inbox<P> {
     }
 }
 
-impl<P: Protocol + Send> MultiActorInbox for Inbox<P> {
+impl<P: Protocol + Send> MultiProcessInbox for Inbox<P> {
     fn init_multi_inbox(
         config: Self::Config,
         process_count: usize,
@@ -168,7 +168,7 @@ impl<P: Protocol> Drop for Inbox<P> {
     }
 }
 
-impl<M, P> Accept<M> for Inbox<P>
+impl<M, P> Accepts<M> for Inbox<P>
 where
     P: Protocol + FromPayload<M>,
     M: Message,

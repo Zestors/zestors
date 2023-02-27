@@ -94,7 +94,7 @@ impl<Sp: Specifies> Future for RefSenderSpecFut<Sp> {
 impl<S: Specifies> Supervisable for RefSenderSupervisee<S> {
     type Spec = RefSenderSpec<S>;
 
-    fn shutdown_time(self: Pin<&Self>) -> ShutdownTime {
+    fn shutdown_time(self: Pin<&Self>) -> ShutdownDuration {
         self.project_ref().supervisee.shutdown_time()
     }
 

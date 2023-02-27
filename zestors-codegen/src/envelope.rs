@@ -67,7 +67,7 @@ pub fn derive_envelope(item: TokenStream) -> Result<TokenStream, Error> {
         #[doc = #trait_doc]
         #vis trait #trait_name: zestors::actor_ref::ActorRef
         where
-            Self::ActorType: zestors::messaging::Accept<#ident>
+            Self::ActorType: zestors::messaging::Accepts<#ident>
         {
             #[doc = #method_doc]
             fn #method_name(
@@ -83,7 +83,7 @@ pub fn derive_envelope(item: TokenStream) -> Result<TokenStream, Error> {
         impl<T> #trait_name for T
         where
             T: zestors::actor_ref::ActorRef,
-            T::ActorType: zestors::messaging::Accept<#ident>
+            T::ActorType: zestors::messaging::Accepts<#ident>
         { }
     })
 }

@@ -2,7 +2,7 @@ use crate::{
     actor_type::{ActorType, ActorInbox},
     actor_ref::{ActorRefExt, Child, ExitError},
     supervision::{
-        combinator_specs::{Link, ShutdownTime},
+        combinator_specs::{Link, ShutdownDuration},
         StartError, StartResult, Specifies, Supervisable, SuperviseResult,
     },
 };
@@ -184,9 +184,9 @@ where
         }
     }
 
-    fn shutdown_time(self: Pin<&Self>) -> ShutdownTime {
+    fn shutdown_time(self: Pin<&Self>) -> ShutdownDuration {
         match self.child.link() {
-            Link::Detached => ShutdownTime::Default,
+            Link::Detached => ShutdownDuration::Dynamic,
             Link::Attached(duration) => duration.to_owned(),
         }
     }

@@ -7,6 +7,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::time::{sleep, Sleep};
+use crate as zestors;
 
 //------------------------------------------------------------------------------------------------
 //  SupervisorFut
@@ -111,7 +112,7 @@ impl<S: Specifies> Future for SupervisorFut<S> {
                         if this.to_shutdown {
                             supervisee.as_mut().halt();
                             *aborting = Some((
-                                Box::pin(sleep(supervisee.as_ref().shutdown_time().duration())),
+                                Box::pin(sleep(supervisee.as_ref().shutdown_time().get_duration())),
                                 false,
                             ));
                         } else {

@@ -14,7 +14,7 @@ pub fn from_spawn_fn<I, D, SFut, E, EFut>(
     spawn_fn: impl (FnOnce(I, D) -> SFut) + Clone + Send + 'static,
     exit_fn: impl (FnOnce(Result<E, ExitError>) -> EFut) + Send + Clone + 'static,
     data: D,
-    shutdown_time: ShutdownTime,
+    shutdown_time: ShutdownDuration,
     inbox_config: I::Config,
 ) -> impl Specifies<Ref = Address<I>> + 'static
 where
@@ -60,7 +60,7 @@ where
         exit_fn: EFun,
         data: D,
         config: I::Config,
-        abort_timeout: ShutdownTime,
+        abort_timeout: ShutdownDuration,
     ) -> Self {
         Self {
             inner: Inner {
@@ -144,7 +144,7 @@ where
 {
     type Spec = SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>;
 
-    fn shutdown_time(self: Pin<&Self>) -> ShutdownTime {
+    fn shutdown_time(self: Pin<&Self>) -> ShutdownDuration {
         match self.child.link() {
             Link::Detached => panic!(),
             Link::Attached(duration) => duration.clone(),
@@ -208,7 +208,7 @@ mod test {
             },
             10,
             Default::default(),
-            ShutdownTime::Default,
+            ShutdownDuration::Dynamic,
         );
     }
 
@@ -226,7 +226,7 @@ mod test {
             },
             10,
             Default::default(),
-            ShutdownTime::default(),
+            ShutdownDuration::default(),
         )
     }
 }
@@ -245,7 +245,7 @@ where
     spawn_fn: SFun,
     exit_fn: EFun,
     config: I::Config,
-    abort_timeout: ShutdownTime,
+    abort_timeout: ShutdownDuration,
     phantom: PhantomData<(SFut, EFut)>,
 }
 

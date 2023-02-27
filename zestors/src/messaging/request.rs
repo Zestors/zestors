@@ -1,27 +1,44 @@
-use tokio::sync::oneshot;
 use futures::{Future, FutureExt};
 use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use super::MessageDerive;
+use tokio::sync::oneshot;
+use crate::all::*;
 
+/// Create a new request, consisting of a [`Tx<T>`] and an [`Rx<T>`].
+/// The `Tx` (_transmitter_) can be used to send a single message `T` to the `Rx` (_receiver_).
+///
+/// This is just a wrapper around a [`tokio::sync::oneshot`] channel.
 pub fn new_request<T>() -> (Tx<T>, Rx<T>) {
     let (tx, rx) = oneshot::channel();
     (Tx(tx), Rx(rx))
 }
 
-impl<M, R> MessageDerive<M> for Rx<R> {
-    type Payload = (M, Tx<R>);
-    type Returned = Rx<R>;
+//------------------------------------------------------------------------------------------------
+//  Tx
+//------------------------------------------------------------------------------------------------
 
-    fn create(msg: M) -> ((M, Tx<R>), Rx<R>) {
-        let (tx, rx) = new_request();
-        ((msg, tx), rx)
+/// The transmitter part of a request, created with [`new_request`].
+/// 
+/// This implements [`MessageDerive<M>`] to be used with the [`Message!`] derive macro.
+#[derive(Debug)]
+pub struct Tx<M>(pub(super) oneshot::Sender<M>);
+
+impl<M> Tx<M> {
+    /// Send a message.
+    pub fn send(self, msg: M) -> Result<(), TxError<M>> {
+        self.0.send(msg).map_err(|msg| TxError(msg))
     }
 
-    fn cancel(sent: (M, Tx<R>), _returned: Rx<R>) -> M {
-        sent.0
+    /// Whether the [`Rx`] has closed/dropped the oneshot-channel.
+    pub fn is_closed(&self) -> bool {
+        self.0.is_closed()
+    }
+
+    /// Wait for the [`Rx`] to close/drop the oneshot-channel.
+    pub async fn closed(&mut self) {
+        self.0.closed().await
     }
 }
 
@@ -39,41 +56,13 @@ impl<M, R> MessageDerive<M> for Tx<R> {
     }
 }
 
-
-
-//------------------------------------------------------------------------------------------------
-//  Tx
-//------------------------------------------------------------------------------------------------
-
-#[derive(Debug)]
-pub struct Tx<M>(pub(super) oneshot::Sender<M>);
-
-impl<M> Tx<M> {
-    /// Send a message.
-    pub fn send(self, msg: M) -> Result<(), TxError<M>> {
-        self.0.send(msg).map_err(|msg| TxError(msg))
-    }
-
-    /// Whether the [Rx] has closed or dropped the oneshot-channel.
-    pub fn is_closed(&self) -> bool {
-        self.0.is_closed()
-    }
-
-    /// Wait for the [Rx] to close or drop the oneshot-channel.
-    pub async fn closed(&mut self) {
-        self.0.closed().await
-    }
-}
-
-/// Error returned when sending a message using a [Tx].
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
-#[error("Failed to send to Tx because it is closed.")]
-pub struct TxError<M>(pub M);
-
 //------------------------------------------------------------------------------------------------
 //  Rx
 //------------------------------------------------------------------------------------------------
 
+/// The receiver part of a request, created with [`new_request`].
+/// 
+/// This implements [`MessageDerive<M>`] to be used with the [`Message!`] derive macro.
 #[derive(Debug)]
 pub struct Rx<M>(pub(super) oneshot::Receiver<M>);
 
@@ -88,9 +77,23 @@ impl<M> Rx<M> {
         self.0.blocking_recv().map_err(|e| e.into())
     }
 
-    /// Close the oneshot-channel, preventing the [Tx] from sending a message.
+    /// Close the oneshot-channel, preventing the [`Tx`] from sending a message.
     pub fn close(&mut self) {
         self.0.close()
+    }
+}
+
+impl<M, R> MessageDerive<M> for Rx<R> {
+    type Payload = (M, Tx<R>);
+    type Returned = Rx<R>;
+
+    fn create(msg: M) -> ((M, Tx<R>), Rx<R>) {
+        let (tx, rx) = new_request();
+        ((msg, tx), rx)
+    }
+
+    fn cancel(sent: (M, Tx<R>), _returned: Rx<R>) -> M {
+        sent.0
     }
 }
 
@@ -104,7 +107,11 @@ impl<M> Future for Rx<M> {
     }
 }
 
-/// Error returned when receiving a message using an [Rx].
+//------------------------------------------------------------------------------------------------
+//  Errors
+//------------------------------------------------------------------------------------------------
+
+/// Error returned when receiving a message using an [`Rx`].
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
 #[error("Failed to receive from Rx because it is closed.")]
 pub struct RxError;
@@ -115,7 +122,7 @@ impl From<oneshot::error::RecvError> for RxError {
     }
 }
 
-/// Error returned when trying to receive a message using an [Rx].
+/// Error returned when trying to receive a message using an [`Rx`].
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
 pub enum TryRxError {
     #[error("Closed")]
@@ -132,3 +139,8 @@ impl From<oneshot::error::TryRecvError> for TryRxError {
         }
     }
 }
+
+/// Error returned when sending a message using a [`Tx`].
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
+#[error("Failed to send to Tx because it is closed.")]
+pub struct TxError<M>(pub M);

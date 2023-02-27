@@ -2,18 +2,20 @@
 use crate::*;
 use tokio::task::JoinHandle;
 
+/// The parameter `C` in a [`Child<_, _, C>`] that specifies what kind of child it is:
+/// - [`SingleProcess`] -> The actor consists of a single process: [`Child<_, _>`].
+/// - [`MultiProcess`] -> The actor consists of multiple processes: [`ChildPool<_, _>`].
 pub trait ChildType {
     type JoinHandles<E: Send + 'static>: Send + 'static;
     fn abort<E: Send + 'static>(handles: &Self::JoinHandles<E>);
     fn is_finished<E: Send + 'static>(handles: &Self::JoinHandles<E>) -> bool;
 }
 
-/// A [ChildKind] which indicates that the [Child] concerns a single process. This is also the
-/// default parameter.
+/// The default [`ChildType`].
 #[derive(Debug)]
-pub struct Single;
+pub struct SingleProcess;
 
-impl ChildType for Single {
+impl ChildType for SingleProcess {
     type JoinHandles<E: Send + 'static> = JoinHandle<E>;
 
     fn abort<E: Send + 'static>(handles: &Self::JoinHandles<E>) {
@@ -25,11 +27,11 @@ impl ChildType for Single {
     }
 }
 
-/// A [ChildKind] which indicates that the [Child] concerns a pool of processes.
+/// The pooled [`ChildType`].
 #[derive(Debug)]
-pub struct Pool;
+pub struct MultiProcess;
 
-impl ChildType for Pool {
+impl ChildType for MultiProcess {
     type JoinHandles<E: Send + 'static> = Vec<JoinHandle<E>>;
 
     fn abort<E: Send + 'static>(handles: &Self::JoinHandles<E>) {

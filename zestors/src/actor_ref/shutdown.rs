@@ -3,7 +3,7 @@ use futures::{Future, FutureExt, Stream, StreamExt};
 use std::{
     any::Any,
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
     time::Duration,
 };
 use thiserror::Error;
@@ -13,18 +13,19 @@ use tokio::time::Sleep;
 //  ShutdownFut
 //------------------------------------------------------------------------------------------------
 
+/// Future returned when shutting down a [`Child`].
 pub struct ShutdownFut<'a, E: Send + 'static, T: ActorType> {
     child: &'a mut Child<E, T>,
     sleep: Option<Pin<Box<Sleep>>>,
 }
 
 impl<'a, E: Send + 'static, T: ActorType> ShutdownFut<'a, E, T> {
-    pub(crate) fn new(child: &'a mut Child<E, T>, timeout: Duration) -> Self {
+    pub(crate) fn new(child: &'a mut Child<E, T>, duration: Duration) -> Self {
         child.halt();
 
         ShutdownFut {
             child,
-            sleep: Some(Box::pin(tokio::time::sleep(timeout))),
+            sleep: Some(Box::pin(tokio::time::sleep(duration))),
         }
     }
 }
@@ -35,18 +36,17 @@ impl<'a, E: Send + 'static, T: ActorType> Future for ShutdownFut<'a, E, T> {
     type Output = Result<E, ExitError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.child.poll_unpin(cx) {
-            Poll::Ready(res) => Poll::Ready(res),
-            Poll::Pending => {
-                if let Some(sleep) = &mut self.sleep {
-                    if sleep.poll_unpin(cx).is_ready() {
-                        self.sleep = None;
-                        self.child.abort();
-                    }
-                };
-                Poll::Pending
-            }
+        if let Poll::Ready(res) = self.child.poll_unpin(cx) {
+            return Poll::Ready(res);
         }
+
+        if let Some(sleep) = &mut self.sleep {
+            ready!(sleep.poll_unpin(cx));
+            self.child.abort();
+            self.sleep = None;
+        };
+
+        Poll::Pending
     }
 }
 
@@ -63,12 +63,12 @@ pub struct ShutdownStream<'a, E: Send + 'static, T: ActorType> {
 }
 
 impl<'a, E: Send + 'static, T: ActorType> ShutdownStream<'a, E, T> {
-    pub(super) fn new(pool: &'a mut ChildPool<E, T>, timeout: Duration) -> Self {
+    pub(super) fn new(pool: &'a mut ChildPool<E, T>, duration: ShutdownDuration) -> Self {
         pool.halt();
 
         ShutdownStream {
             pool,
-            sleep: Some(Box::pin(tokio::time::sleep(timeout))),
+            sleep: Some(Box::pin(tokio::time::sleep(duration.get_duration()))),
         }
     }
 }
@@ -77,14 +77,17 @@ impl<'a, E: Send + 'static, T: ActorType> Stream for ShutdownStream<'a, E, T> {
     type Item = Result<E, ExitError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Poll::Ready(item) = self.pool.poll_next_unpin(cx) {
+            return Poll::Ready(item);
+        }
+
         if let Some(sleep) = &mut self.sleep {
-            if sleep.poll_unpin(cx).is_ready() {
-                self.sleep = None;
-                self.pool.abort();
-            }
+            ready!(sleep.poll_unpin(cx));
+            self.pool.abort();
+            self.sleep = None;
         };
 
-        self.pool.poll_next_unpin(cx)
+        Poll::Pending
     }
 }
 
@@ -144,7 +147,10 @@ mod test {
     #[tokio::test]
     async fn shutdown_success() {
         let (mut child, _addr) = spawn(basic_actor!());
-        assert!(child.shutdown_with(Duration::from_millis(5).into()).await.is_ok());
+        assert!(child
+            .shutdown_with(Duration::from_millis(5).into())
+            .await
+            .is_ok());
     }
 
     #[tokio::test]
@@ -163,7 +169,7 @@ mod test {
         let (mut child, _addr) = spawn_many(0..3, pooled_basic_actor!());
 
         let results = child
-            .shutdown(Duration::from_millis(5))
+            .shutdown_with(Duration::from_millis(5).into())
             .collect::<Vec<_>>()
             .await;
         assert_eq!(results.len(), 3);
@@ -180,7 +186,7 @@ mod test {
         });
 
         let results = child
-            .shutdown(Duration::from_millis(5))
+            .shutdown_with(Duration::from_millis(5).into())
             .collect::<Vec<_>>()
             .await;
         assert_eq!(results.len(), 3);
@@ -207,7 +213,7 @@ mod test {
         child.spawn_onto(basic_actor!()).unwrap();
 
         let results = child
-            .shutdown(Duration::from_millis(5))
+            .shutdown_with(Duration::from_millis(5).into())
             .collect::<Vec<_>>()
             .await;
 

@@ -6,7 +6,7 @@ use std::{any::TypeId, marker::PhantomData, sync::Arc};
 /// either be statically or dynamically typed:
 /// - __Static__: A static actor-type is defined as the [`ActorInbox`].
 /// - __Dynamic__: A dynamic actor-type is defined as a [`DynActor<dyn _>`], usually written
-/// as [`Accepts![Msg1, Msg2, ..]`](Accepts!).
+/// as [`DynActor!(Msg1, Msg2, ..]`)(DynActor!).
 ///
 /// The actor-type is used as the generic parameter `A` in for example a [`Child<_, A, _>`] and
 /// an [`Address<A>`]. These can then be `transformed` into and between dynamic actor-types.
@@ -35,7 +35,7 @@ pub trait ActorInbox: ActorType + ActorRef<ActorType = Self> + Send + 'static {
 }
 
 /// An [`ActorInbox`] that allows for spawning multiple processes onto an actor.
-pub trait MultiActorInbox: ActorInbox {
+pub trait MultiProcessInbox: ActorInbox {
     /// Sets up the channel, preparing for x processes to be spawned.
     fn init_multi_inbox(
         config: Self::Config,
@@ -66,9 +66,9 @@ impl<T: ?Sized> ActorType for DynActor<T> {
     type Channel = dyn Channel;
 }
 
-impl<M, T: ?Sized> Accept<M> for DynActor<T>
+impl<M, T: ?Sized> Accepts<M> for DynActor<T>
 where
-    Self: DynActorType + TransformInto<Accepts![M]>,
+    Self: DynActorType + TransformInto<DynActor!(M)>,
     M: Message + Send + 'static,
     M::Returned: Send,
 {
@@ -123,19 +123,19 @@ pub trait TransformInto<A: ActorType>: ActorType {
 
 #[cfg(test)]
 mod test {
-    use crate::Accepts;
+    use crate::DynActor;
 
     #[test]
     fn dynamic_definitions_compile() {
-        type _1 = Accepts![()];
-        type _2 = Accepts![(), ()];
-        type _3 = Accepts![(), (), ()];
-        type _4 = Accepts![(), (), (), ()];
-        type _5 = Accepts![(), (), (), (), ()];
-        type _6 = Accepts![(), (), (), (), (), ()];
-        type _7 = Accepts![(), (), (), (), (), (), ()];
-        type _8 = Accepts![(), (), (), (), (), (), (), ()];
-        type _9 = Accepts![(), (), (), (), (), (), (), (), ()];
-        type _10 = Accepts![(), (), (), (), (), (), (), (), (), ()];
+        type _1 = DynActor!(());
+        type _2 = DynActor!((), ());
+        type _3 = DynActor!((), (), ());
+        type _4 = DynActor!((), (), (), ());
+        type _5 = DynActor!((), (), (), (), ());
+        type _6 = DynActor!((), (), (), (), (), ());
+        type _7 = DynActor!((), (), (), (), (), (), ());
+        type _8 = DynActor!((), (), (), (), (), (), (), ());
+        type _9 = DynActor!((), (), (), (), (), (), (), (), ());
+        type _10 = DynActor!((), (), (), (), (), (), (), (), (), ());
     }
 }

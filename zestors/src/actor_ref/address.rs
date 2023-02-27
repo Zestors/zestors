@@ -1,4 +1,4 @@
-use crate::{all::*, Accepts};
+use crate::{all::*, DynActor};
 use event_listener::EventListener;
 use futures::{Future, FutureExt};
 use std::{
@@ -9,24 +9,24 @@ use std::{
     task::{Context, Poll},
 };
 
-/// An address is a reference to the actor, used to send messages.
+/// An address is a cloneable [reference](ActorRef) to an actor. Most methods are located in the traits
+/// [`ActorRefExt`] and [`Transformable`].
 ///
-/// Addresses can be of two forms:
-/// * `Address<Channel<M>>`: This is the default form, which can be used to send messages of
-/// type `M`. It can be transformed into an `Address` using [Address::into_dyn].
-/// * `Address`: This form is a dynamic address, which can do everything a normal address can
-/// do, except for sending messages. It can be transformed back into an `Address<Channel<M>>` using
-/// [`Address::downcast::<M>`].
+/// ## ActorType
+/// The generic parameter `A` in `Address<A>` defines the [`ActorType`].
 ///
-/// An address can be awaited which returns once the actor exits.
+/// An `Address` = `Address<Acceps![]>`. (An address that doesn't accept any messages).
+///
+/// ## Awaiting
+/// An address can be awaited which resolves to `()` when the actor exits.
 #[derive(Debug)]
-pub struct Address<A: ActorType = Accepts![]> {
+pub struct Address<A: ActorType = DynActor!()> {
     channel: Arc<A::Channel>,
     exit_listener: Option<EventListener>,
 }
 
 impl<A: ActorType> Address<A> {
-    pub fn from_channel(channel: Arc<A::Channel>) -> Self {
+    pub(crate) fn from_channel(channel: Arc<A::Channel>) -> Self {
         Self {
             channel,
             exit_listener: None,
@@ -41,8 +41,12 @@ impl<A: ActorType> Address<A> {
             (channel, exit_listener)
         }
     }
+}
 
-    pub fn transform_unchecked_into<T>(self) -> Address<T>
+impl<A: ActorType> Transformable for Address<A> {
+    type IntoRef<T> = Address<T> where T: ActorType;
+
+    fn transform_unchecked_into<T>(self) -> Self::IntoRef<T>
     where
         T: DynActorType,
     {
@@ -53,9 +57,9 @@ impl<A: ActorType> Address<A> {
         }
     }
 
-    pub fn transform_into<T>(self) -> Address<T>
+    fn transform_into<T>(self) -> Self::IntoRef<T>
     where
-        A: TransformInto<T>,
+        Self::ActorType: TransformInto<T>,
         T: ActorType,
     {
         let (channel, exit_listener) = self.into_parts();
@@ -65,25 +69,9 @@ impl<A: ActorType> Address<A> {
         }
     }
 
-    pub fn into_dyn(self) -> Address {
-        self.transform_unchecked_into()
-    }
-
-    pub fn try_transform_into<T>(self) -> Result<Address<T>, Self>
+    fn downcast<T>(self) -> Result<Self::IntoRef<T>, Self>
     where
-        A: DynActorType,
-        T: DynActorType,
-    {
-        if T::msg_ids().iter().all(|id| self.accepts(id)) {
-            Ok(self.transform_unchecked_into())
-        } else {
-            Err(self)
-        }
-    }
-
-    pub fn downcast<T>(self) -> Result<Address<T>, Self>
-    where
-        A: DynActorType,
+        Self::ActorType: DynActorType,
         T: ActorType,
         T::Channel: Sized + 'static,
     {
@@ -112,17 +100,16 @@ impl<A: ActorType> Future for Address<A> {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if self.channel.has_exited() {
+        let this = &mut *self;
+
+        let exit_listener = this
+            .exit_listener
+            .get_or_insert(this.channel.get_exit_listener());
+
+        if this.channel.has_exited() {
             Poll::Ready(())
         } else {
-            if self.exit_listener.is_none() {
-                self.exit_listener = Some(self.channel.get_exit_listener())
-            }
-            if self.channel.has_exited() {
-                Poll::Ready(())
-            } else {
-                self.exit_listener.as_mut().unwrap().poll_unpin(cx)
-            }
+            exit_listener.poll_unpin(cx)
         }
     }
 }
@@ -131,11 +118,7 @@ impl<A: ActorType> Unpin for Address<A> {}
 
 impl<A: ActorType> Clone for Address<A> {
     fn clone(&self) -> Self {
-        self.channel.increment_address_count();
-        Self {
-            channel: self.channel.clone(),
-            exit_listener: None,
-        }
+        self.clone_address()
     }
 }
 
@@ -145,22 +128,18 @@ impl<T: ActorType> Drop for Address<T> {
     }
 }
 
-// ------------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------
 //  IntoAddress
-// ------------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------
 
-// todo: Make this like IntoChannel
-pub trait IntoAddress<T>
-where
-    T: ActorType,
-{
-    fn into_address(self) -> Address<T>;
+/// Implemented for any type that can be transformed into an [`Address<A>`].
+pub trait IntoAddress<A: ActorType = DynActor!()> {
+    fn into_address(self) -> Address<A>;
 }
 
-impl<A, T> IntoAddress<T> for Address<A>
+impl<A: ActorType, T: ActorType> IntoAddress<T> for Address<A>
 where
     A: TransformInto<T>,
-    T: ActorType,
 {
     fn into_address(self) -> Address<T> {
         self.transform_into()

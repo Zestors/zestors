@@ -34,7 +34,7 @@ impl ActorRef for MultiHalter {
     }
 }
 
-impl MultiActorInbox for MultiHalter {
+impl MultiProcessInbox for MultiHalter {
     fn init_multi_inbox(
         _config: Self::Config,
         process_count: usize,

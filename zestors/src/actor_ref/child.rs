@@ -1,45 +1,40 @@
 use crate::all::*;
 use futures::{Future, FutureExt, Stream};
 use std::{
-    mem::{self},
+    mem,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Duration,
 };
 
-/// A child is a unique reference to an actor, consisting of one or more processes.
-/// ...
-/// ...
-/// ...
+/// A child is a unique [reference](ActorRef) to an actor similar to a [`tokio::task::JoinHandle`]. The
+/// child can be used to halt/abort the actor and to monitor it's exit by awaiting it. When a child is dropped,
+/// the child will (by default) be shut-down as well.
+///
+/// A lot of methods are located in the traits [`ActorRefExt`] and [`Transformable`].
+/// 
+/// # Monitoring
+/// An actor can be monitored using it's [`Child`]. For a [`SingleProcess`]-child, this can be done directly
+/// by awaiting the [`Child`], and returns an [`Result<E, ExitError>`](ExitError). A [`MultiProcess`]-child
+/// can be [`streamed`](Stream) instead.
 ///
 /// # Generics
+/// The [`Child<E, A, C>`] is specified by:
+/// - `E`: Stands for `Exit` and is the value that the spawned child exits with.
+/// - `A`: Stands for [`ActorType`] and specifies the type of the actor.
+/// - `C`: Stands for [`ChildType`] and specifies whether this child is pooled or not.
+/// This can either be [`SingleProcess`] or [`MultiProcess`].
 ///
-/// A `Child<E, CT, PT>` has the following generics:
-/// - `E`: Stands for `Exit`, and is the value that the spawned child exits with.
-/// - `C`: Stands for [`ActorType`], and specifies the underlying channel and what kind of
-///   messages the actor [accepts](Accept) (the default is [`Accepts![]`](Accepts!)). This value can be
-///   one of the following:
-///     - The [`Protocol`] of the actor, given that the actor has an [Inbox].
-///     - [`Halter`], indicating that the actor does not have an [Inbox].
-///     - A dynamic child using the [`Accepts!`] macro. This can be used for actors with or without
-///       an [Inbox], and actors of either type can be converted using [`Child::transform_into`].
-/// - `P`: Stands for [`IsPool`], and specifies whether this child is pooled or not (default
-///   is [NoPool]). This can be either:
-///     - [NoPool], indicating the child is not pooled.
-///     - [Pool], indicating that the child is a [ChildPool].
-///
-/// ## Shorthands
-/// In order to keep writing these types simple, we can use the following shorthands to define our
-/// types:
+/// The following shorthand notation can be used:
 /// ```no_compile
-/// Child<E, C>     = Child<E, C, NoPool>;       // A regular child.
-/// Child<E>        = Child<E, Accepts![]>;      // A child that doesn't accept any messages.
-/// ChildPool<E, C> = Child<E, C, Pool>;         // A regular childpool.
-/// ChildPool<E>    = ChildPool<E, Accepts![]>;  // A childpool that doesn't accept any messages.
+/// Child<E, A>     = Child<E, A, SingleProcess>;
+/// Child<E>        = Child<E, DynActor!(), SingleProcess>;
+/// ChildPool<E, A> = Child<E, A, MultiProcess>;
+/// ChildPool<E>    = Child<E, DynActor!(), MultiProcess>;
 /// ```
 #[derive(Debug)]
-pub struct Child<E, A = Accepts![], C = Single>
+#[must_use = "Dropping a child shuts down the actor!"]
+pub struct Child<E, A = DynActor!(), C = SingleProcess>
 where
     E: Send + 'static,
     A: ActorType,
@@ -51,10 +46,10 @@ where
     is_aborted: bool,
 }
 
-/// A `ChildPool<E, CT>` is the same as a `Child<E, CT, Pool>`.
-pub type ChildPool<E, A = Accepts![]> = Child<E, A, Pool>;
+/// Type-alias for child-pools, see [`Child`] for usage.
+pub type ChildPool<E, A = DynActor!()> = Child<E, A, MultiProcess>;
 
-/// # Methods valid for all children.
+/// # Methods valid for any child.
 impl<E, A, C> Child<E, A, C>
 where
     E: Send + 'static,
@@ -85,29 +80,31 @@ where
         }
     }
 
-    /// Get the underlying [`tokio::task::JoinHandle`].
+    /// Get the underlying [`tokio::task::JoinHandle`]s.
     ///
-    /// This will not run the drop, and therefore the actor will not be halted/aborted.
-    pub fn into_inner(self) -> C::JoinHandles<E> {
+    /// # Warning
+    /// This will not run the drop implementation and therefore the actor will not be halted/aborted.
+    pub fn into_join_handles(self) -> C::JoinHandles<E> {
         self.into_parts().1.take().unwrap()
     }
 
     /// Attach the actor.
     ///
-    /// Returns the old abort-timeout if it was already attached.
-    pub fn attach(&mut self, time: ShutdownTime) -> Option<ShutdownTime> {
-        self.link.attach(time)
+    /// Returns the old [`ShutdownDuration`] if it was already attached.
+    pub fn attach(&mut self, duration: ShutdownDuration) -> Option<ShutdownDuration> {
+        self.link.attach(duration)
     }
 
     /// Detach the actor.
     ///
-    /// Returns the old abort-timeout if it was attached before.
-    pub fn detach(&mut self) -> Option<ShutdownTime> {
+    /// Returns the old [`ShutdownDuration`] if it was attached.
+    pub fn detach(&mut self) -> Option<ShutdownDuration> {
         self.link.detach()
     }
 
-    /// Returns true if the actor has been aborted. This does not mean that the tasks have exited,
-    /// but only that aborting has begun.
+    /// Returns true if the actor has been aborted. (see [`tokio::task::JoinHandle::abort`])
+    ///
+    /// This does not mean that the tasks have exited but only that aborting has begun.
     pub fn is_aborted(&self) -> bool {
         self.is_aborted
     }
@@ -117,11 +114,14 @@ where
         self.link.is_attached()
     }
 
-    /// Get a reference to the current [Link] of the actor.
+    /// Get a reference to the [`Link`] state.
     pub fn link(&self) -> &Link {
         &self.link
     }
 
+    /// Aborts the actor. (see [`tokio::task::JoinHandle::abort`])
+    ///
+    /// Returns `true` if this is the first time aborting.
     pub fn abort(&mut self) -> bool {
         self.channel.close();
         let was_aborted = self.is_aborted;
@@ -130,12 +130,176 @@ where
         !was_aborted
     }
 
-    /// Whether the task is finished.
+    /// Whether the tokio-tasks are finished. (see [`tokio::task::JoinHandle::is_finished`])
     pub fn is_finished(&self) -> bool {
         C::is_finished(self.join_handles.as_ref().unwrap())
     }
+}
 
-    pub fn transform_unchecked_into<T>(self) -> Child<E, T, C>
+/// # Methods valid for single-process children only.
+impl<E, A> Child<E, A, SingleProcess>
+where
+    E: Send + 'static,
+    A: ActorType,
+{
+    /// Turn the [`Child`] into a [`ChildPool`].
+    pub fn into_pool(self) -> ChildPool<E, A>
+    where
+        A: MultiProcessInbox,
+    {
+        let (channel, mut join_handles, link, is_aborted) = self.into_parts();
+        ChildPool {
+            channel,
+            join_handles: Some(vec![join_handles.take().unwrap()]),
+            link,
+            is_aborted,
+        }
+    }
+
+    /// Same as [`Self::shutdown`] but with a custom [`ShutdownDuration`].
+    pub fn shutdown_with(&mut self, duration: ShutdownDuration) -> ShutdownFut<'_, E, A> {
+        ShutdownFut::new(self, duration.get_duration())
+    }
+
+    /// Halts the actor and then waits for it to exit. If the actor does not exit after the
+    /// [`ShutdownDuration`] specified by the [`Link`] of this actor, the actor will be aborted.
+    ///
+    /// If the actor has a [`Link::Detached`], then [`ShutdownDuration::Dynamic`] is used.
+    pub fn shutdown(&mut self) -> ShutdownFut<'_, E, A> {
+        let duration = match self.link {
+            Link::Detached => ShutdownDuration::Dynamic,
+            Link::Attached(duration) => duration,
+        };
+        self.shutdown_with(duration)
+    }
+}
+
+/// # Methods valid for children multi-process children only.
+impl<E, A> Child<E, A, MultiProcess>
+where
+    E: Send + 'static,
+    A: ActorType,
+{
+    /// The amount of tokio-tasks that have not finished.
+    pub fn task_count(&self) -> usize {
+        self.join_handles
+            .as_ref()
+            .unwrap()
+            .iter()
+            .filter(|handle| !handle.is_finished())
+            .collect::<Vec<_>>()
+            .len()
+    }
+
+    /// The amount of tokio-tasks, including those that have finished.
+    pub fn handle_count(&self) -> usize {
+        self.join_handles.as_ref().unwrap().len()
+    }
+
+    /// Same as [`Self::shutdown`] but with a custom [`ShutdownDuration`].
+    pub fn shutdown_with(&mut self, duration: ShutdownDuration) -> ShutdownStream<'_, E, A> {
+        ShutdownStream::new(self, duration)
+    }
+
+    /// Halts the actor and then waits for all processes to exit. If the actor does not exit after the
+    /// [`ShutdownDuration`] specified by the [`Link`] of this actor, the actor will be aborted.
+    ///
+    /// The returned value is a [`Stream`] that resolves one-by-one for every process.
+    ///
+    /// If the actor has a [`Link::Detached`], then [`ShutdownDuration::Dynamic`] is used.
+    pub fn shutdown(&mut self) -> ShutdownStream<'_, E, A> {
+        let duration = match self.link {
+            Link::Detached => ShutdownDuration::Dynamic,
+            Link::Attached(duration) => duration,
+        };
+        self.shutdown_with(duration)
+    }
+
+    /// Attempt to spawn an additional process on the channel.
+    ///
+    /// This method fails if the actor has already exited.
+    pub fn spawn_onto<Fun, Fut>(&mut self, fun: Fun) -> Result<(), SpawnError<Fun>>
+    where
+        Fun: FnOnce(A) -> Fut + Send + 'static,
+        Fut: Future<Output = E> + Send + 'static,
+        A: MultiProcessInbox,
+    {
+        match self.channel.try_increment_process_count() {
+            Ok(_) => {
+                let inbox = A::from_channel(self.channel.clone());
+                let handle = tokio::task::spawn(async move { fun(inbox).await });
+                self.join_handles.as_mut().unwrap().push(handle);
+                Ok(())
+            }
+            Err(e) => {
+                match e {
+                    AddProcessError::ActorHasExited => Err(SpawnError(fun)),
+                    AddProcessError::SingleProcessOnly => {
+                        panic!("Error with implementation of the Inbox. This is a Bug, please report it.")
+                    }
+                }
+            }
+        }
+    }
+
+    /// Attempt to spawn an additional process onto the channel.
+    ///
+    /// This method can fail if
+    /// - The [`ActorType`] `T` does not match that of the actor.
+    /// - The actor has already exited.
+    pub fn try_spawn_onto<T, Fun, Fut>(&mut self, fun: Fun) -> Result<(), TrySpawnError<Fun>>
+    where
+        Fun: FnOnce(T) -> Fut + Send + 'static,
+        Fut: Future<Output = E> + Send + 'static,
+        A: DynActorType,
+        T: MultiProcessInbox,
+        T::Channel: Sized,
+    {
+        let channel = match Arc::downcast::<T::Channel>(self.channel.clone().into_any()) {
+            Ok(channel) => channel,
+            Err(_) => return Err(TrySpawnError::WrongInbox(fun)),
+        };
+
+        match channel.try_increment_process_count() {
+            Ok(_) => {
+                let inbox = T::from_channel(channel);
+                let handle = tokio::task::spawn(async move { fun(inbox).await });
+                self.join_handles.as_mut().unwrap().push(handle);
+                Ok(())
+            }
+            Err(e) => {
+                match e {
+                    AddProcessError::ActorHasExited => Err(TrySpawnError::Exited(fun)),
+                    AddProcessError::SingleProcessOnly => {
+                        panic!("Error with implementation of the Inbox. This is a Bug, please report it.")
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<E, A, C> ActorRef for Child<E, A, C>
+where
+    E: Send + 'static,
+    A: ActorType,
+    C: ChildType,
+{
+    type ActorType = A;
+    fn channel_ref(this: &Self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
+        &this.channel
+    }
+}
+
+impl<E, A, C> Transformable for Child<E, A, C>
+where
+    E: Send + 'static,
+    A: ActorType,
+    C: ChildType,
+{
+    type IntoRef<T> = Child<E, T, C> where T: ActorType;
+
+    fn transform_unchecked_into<T>(self) -> Self::IntoRef<T>
     where
         T: DynActorType,
     {
@@ -148,9 +312,9 @@ where
         }
     }
 
-    pub fn transform_into<T>(self) -> Child<E, T, C>
+    fn transform_into<T>(self) -> Self::IntoRef<T>
     where
-        A: TransformInto<T>,
+        Self::ActorType: TransformInto<T>,
         T: ActorType,
     {
         let (channel, join_handles, link, is_aborted) = self.into_parts();
@@ -162,24 +326,9 @@ where
         }
     }
 
-    pub fn into_dyn(self) -> Child<E, Accepts!(), C> {
-        self.transform_unchecked_into()
-    }
-
-    pub fn try_transform_into<T>(self) -> Result<Child<E, T, C>, Self>
+    fn downcast<T>(self) -> Result<Self::IntoRef<T>, Self>
     where
-        A: DynActorType,
-        T: DynActorType,
-    {
-        if T::msg_ids().iter().all(|id| self.accepts(id)) {
-            Ok(self.transform_unchecked_into())
-        } else {
-            Err(self)
-        }
-    }
-
-    pub fn downcast<T>(self) -> Result<Child<E, T, C>, Self>
-    where
+        Self::ActorType: DynActorType,
         T: ActorType,
         T::Channel: Sized + 'static,
     {
@@ -201,137 +350,6 @@ where
     }
 }
 
-/// # Methods valid for children that are not pooled.
-impl<E, A> Child<E, A, Single>
-where
-    E: Send + 'static,
-    A: ActorType,
-{
-    /// Convert the [Child] into a [ChildPool].
-    pub fn into_pool(self) -> ChildPool<E, A> {
-        let (channel, mut join_handles, link, is_aborted) = self.into_parts();
-        ChildPool {
-            channel,
-            join_handles: Some(vec![join_handles.take().unwrap()]),
-            link,
-            is_aborted,
-        }
-    }
-
-    /// Halts the actor, and then waits for it to exit. This always returns with the
-    /// result of the task, and closes the channel.
-    ///
-    /// If the timeout expires before the actor has exited, the actor will be aborted.
-    pub fn shutdown_with(&mut self, timeout: ShutdownTime) -> ShutdownFut<'_, E, A> {
-        ShutdownFut::new(self, timeout.duration())
-    }
-
-    pub fn shutdown(&mut self) -> ShutdownFut<'_, E, A> {
-        let time = match self.link {
-            Link::Detached => ShutdownTime::Default,
-            Link::Attached(time) => time,
-        };
-        self.shutdown_with(time)
-    }
-}
-
-//-------------------------------------------------
-//  Pooled children
-//-------------------------------------------------
-
-/// # Methods valid for children that are pooled.
-impl<E, A> Child<E, A, Pool>
-where
-    E: Send + 'static,
-    A: ActorType,
-{
-    pub fn task_count(&self) -> usize {
-        self.join_handles
-            .as_ref()
-            .unwrap()
-            .iter()
-            .filter(|handle| !handle.is_finished())
-            .collect::<Vec<_>>()
-            .len()
-    }
-
-    pub fn handle_count(&self) -> usize {
-        self.join_handles.as_ref().unwrap().len()
-    }
-
-    /// Attempt to spawn an additional process on the channel. // todo: make this work
-    ///
-    /// This method can fail if
-    /// * the message-type does not match that of the channel.
-    /// * the channel has already exited.
-    pub fn try_spawn_onto<I, Fun, Fut>(&mut self, fun: Fun) -> Result<(), TrySpawnError<Fun>>
-    where
-        Fun: FnOnce(I) -> Fut + Send + 'static,
-        Fut: Future<Output = E> + Send + 'static,
-        I: MultiActorInbox,
-        I::Channel: Sized,
-        E: Send + 'static,
-    {
-        let channel = match Arc::downcast::<I::Channel>(self.channel.clone().into_any()) {
-            Ok(channel) => channel,
-            Err(_) => return Err(TrySpawnError::IncorrectType(fun)),
-        };
-
-        match channel.try_increment_process_count() {
-            Ok(_) => {
-                let inbox = I::from_channel(channel);
-                let handle = tokio::task::spawn(async move { fun(inbox).await });
-                self.join_handles.as_mut().unwrap().push(handle);
-                Ok(())
-            }
-            Err(_) => Err(TrySpawnError::Exited(fun)),
-        }
-    }
-
-    pub fn shutdown(&mut self, timeout: Duration) -> ShutdownStream<'_, E, A> {
-        ShutdownStream::new(self, timeout)
-    }
-
-    /// Attempt to spawn an additional process on the channel.
-    ///
-    /// This method fails if the channel has already exited.
-    pub fn spawn_onto<Fun, Fut>(&mut self, fun: Fun) -> Result<(), SpawnError<Fun>>
-    where
-        Fun: FnOnce(A) -> Fut + Send + 'static,
-        Fut: Future<Output = E> + Send + 'static,
-        E: Send + 'static,
-        A: MultiActorInbox,
-        A::Channel: Sized,
-    {
-        match self.channel.try_increment_process_count() {
-            Ok(_) => {
-                let inbox = A::from_channel(self.channel.clone());
-                let handle = tokio::task::spawn(async move { fun(inbox).await });
-                self.join_handles.as_mut().unwrap().push(handle);
-                Ok(())
-            }
-            Err(e) => match e {
-                AddProcessError::ActorHasExited => Err(SpawnError(fun)),
-                AddProcessError::SingleProcessOnly => {
-                    panic!("Error with implementation `try_add_process()` of the inboxtype")
-                }
-            },
-        }
-    }
-}
-
-impl<E, A, C> ActorRef for Child<E, A, C>
-where
-    E: Send + 'static,
-    A: ActorType,
-    C: ChildType,
-{
-    type ActorType = A;
-    fn channel_ref(this: &Self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
-        &this.channel
-    }
-}
-
 impl<E, A, C> Unpin for Child<E, A, C>
 where
     E: Send + 'static,
@@ -340,8 +358,8 @@ where
 {
 }
 
-/// # Future is implemented for non-pooled children only.
-impl<E, A> Future for Child<E, A, Single>
+/// # Future is implemented for single-process children only.
+impl<E, A> Future for Child<E, A, SingleProcess>
 where
     E: Send + 'static,
     A: ActorType,
@@ -357,8 +375,8 @@ where
     }
 }
 
-/// # Stream is implemented for pooled children only.
-impl<E, A> Stream for Child<E, A, Pool>
+/// # Stream is implemented for multi-process children only.
+impl<E, A> Stream for Child<E, A, MultiProcess>
 where
     E: Send + 'static,
     A: ActorType,
@@ -389,18 +407,14 @@ where
 {
     fn drop(&mut self) {
         if let Link::Attached(shutdown_time) = &mut self.link {
-            let duration = shutdown_time.duration();
+            let duration = shutdown_time.get_duration();
             if !self.is_aborted && !self.is_finished() {
-                if duration.is_zero() {
-                    self.abort();
-                } else {
-                    self.halt();
-                    let handles = self.join_handles.take().unwrap();
-                    tokio::task::spawn(async move {
-                        tokio::time::sleep(duration).await;
-                        C::abort(&handles)
-                    });
-                }
+                self.halt();
+                let handles = self.join_handles.take().unwrap();
+                tokio::task::spawn(async move {
+                    tokio::time::sleep(duration).await;
+                    C::abort(&handles)
+                });
             }
         }
     }
@@ -410,7 +424,8 @@ where
 //  IntoChild
 //------------------------------------------------------------------------------------------------
 
-pub trait IntoChild<E, A, C>
+/// Implemented for any type that can be transformed into a [`Child<E, A, C>`].
+pub trait IntoChild<E, A = DynActor!(), C = SingleProcess>
 where
     E: Send + 'static,
     A: ActorType,
@@ -419,35 +434,35 @@ where
     fn into_child(self) -> Child<E, A, C>;
 }
 
-impl<E, T, A> IntoChild<E, T, Single> for Child<E, A, Single>
+impl<E, T, A> IntoChild<E, T, SingleProcess> for Child<E, A, SingleProcess>
 where
     E: Send + 'static,
     T: ActorType,
     A: TransformInto<T>,
 {
-    fn into_child(self) -> Child<E, T, Single> {
+    fn into_child(self) -> Child<E, T, SingleProcess> {
         self.transform_into()
     }
 }
 
-impl<E, T, A> IntoChild<E, T, Pool> for Child<E, A, Single>
+impl<E, T, A> IntoChild<E, T, MultiProcess> for Child<E, A, SingleProcess>
 where
     E: Send + 'static,
     T: ActorType,
-    A: TransformInto<T>,
+    A: TransformInto<T> + MultiProcessInbox,
 {
-    fn into_child(self) -> Child<E, T, Pool> {
+    fn into_child(self) -> Child<E, T, MultiProcess> {
         self.into_pool().transform_into()
     }
 }
 
-impl<E, G, T> IntoChild<E, T, Pool> for Child<E, G, Pool>
+impl<E, G, T> IntoChild<E, T, MultiProcess> for Child<E, G, MultiProcess>
 where
     E: Send + 'static,
     T: ActorType,
     G: TransformInto<T>,
 {
-    fn into_child(self) -> Child<E, T, Pool> {
+    fn into_child(self) -> Child<E, T, MultiProcess> {
         self.transform_into()
     }
 }
@@ -520,7 +535,7 @@ mod test {
     async fn downcast() {
         let (child, _addr) = spawn(basic_actor!());
         assert!(matches!(
-            child.transform_into::<Accepts![]>().downcast::<Inbox<()>>(),
+            child.transform_into::<DynActor!()>().downcast::<Inbox<()>>(),
             Ok(_)
         ));
     }
@@ -630,7 +645,7 @@ mod test_pooled {
         let (mut child, _addr) = spawn_many(0..1, pooled_basic_actor!());
         assert!(child.spawn_onto(basic_actor!()).is_ok());
         assert!(child
-            .transform_into::<Accepts![]>()
+            .transform_into::<DynActor!()>()
             .try_spawn_onto(basic_actor!())
             .is_ok());
     }
@@ -646,7 +661,7 @@ mod test_pooled {
         ));
         assert!(matches!(
             child
-                .transform_into::<Accepts![]>()
+                .transform_into::<DynActor!()>()
                 .try_spawn_onto(basic_actor!()),
             Err(TrySpawnError::Exited(_))
         ));
@@ -658,9 +673,9 @@ mod test_pooled {
         assert!(matches!(
             child
                 .into_pool()
-                .transform_into::<Accepts![]>()
+                .transform_into::<DynActor!()>()
                 .try_spawn_onto(basic_actor!(())),
-            Err(TrySpawnError::IncorrectType(_))
+            Err(TrySpawnError::WrongInbox(_))
         ));
     }
 }

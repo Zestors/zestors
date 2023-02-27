@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+/// Error returned when trying to send a message, checking at compile-time that
+/// the message is actually accepted by the actor.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, Hash)]
 pub enum TrySendCheckedError<M> {
     Full(M),
@@ -7,13 +9,15 @@ pub enum TrySendCheckedError<M> {
     NotAccepted(M),
 }
 
+/// Error returned when sending a message, checking at compile-time that
+/// the message is actually accepted by the actor.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, Hash)]
 pub enum SendCheckedError<M> {
     Closed(M),
     NotAccepted(M),
 }
 
-/// An error returned when trying to send a message into a channel.
+/// An error returned when trying to send a message.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Error)]
 pub enum TrySendError<M> {
     /// The channel has been closed, and no longer accepts new messages.
@@ -24,13 +28,11 @@ pub enum TrySendError<M> {
     Full(M),
 }
 
-/// Error returned when sending a message into a channel.
-///
 /// The channel has been closed, and no longer accepts new messages.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Error)]
 pub struct SendError<M>(pub M);
 
-/// Error returned when using the [IntoRecv] trait.
+/// Error returned when sending a request.
 ///
 /// This error combines failures in sending and receiving.
 #[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
@@ -39,7 +41,7 @@ pub enum RequestError<M, E> {
     Closed(M),
 }
 
-/// Error returned when using the [IntoRecv] trait.
+/// Error returned when trying to send a request.
 ///
 /// This error combines failures in sending and receiving.
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -49,7 +51,7 @@ pub enum TryRequestError<M, E> {
     Full(M),
 }
 
-/// Error returned when receiving a message from an inbox.
+/// Error returned when receiving a message.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Error)]
 pub enum RecvError {
     /// Process has been halted and should now exit.
@@ -61,13 +63,13 @@ pub enum RecvError {
     ClosedAndEmpty,
 }
 
-/// Error returned when receiving a message from an inbox.
+/// Error returned when trying to receive a message.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Error)]
 pub enum TryRecvError {
     /// Process has been halted and should now exit.
     #[error("Couldn't receive because the process has been halted")]
     Halted,
-    /// The channel is empty, but is not yet closed. New messges may arrive
+    /// The channel is empty, but is not yet closed. New messges may arrive.
     #[error("Couldn't receive because the channel is empty")]
     Empty,
     /// Channel has been closed, and contains no more messages. It is impossible for new

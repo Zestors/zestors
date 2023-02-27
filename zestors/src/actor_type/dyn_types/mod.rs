@@ -32,7 +32,7 @@ macro_rules! create_dynamic_actor_types {
         // Accept<M> all the messages
         impl<I, $($($msg: Message + 'static,)?)*> TransformInto<DynActor<dyn $actor_ty<$($($msg,)?)*>>> for I
         where
-            I: ActorInbox $($( + Accept<$msg> )?)*,
+            I: ActorInbox $($( + Accepts<$msg> )?)*,
             I::Channel: Sized
         {
             fn transform_into(channel: Arc<Self::Channel>) -> Arc<dyn Channel> {

@@ -25,7 +25,7 @@ enum MyProtocol {
     C(u32)
 }
 
-type MyProtocol = Dyn<Accepts![u32, SayHello, OtherMessage]>;
+type MyProtocol = Dyn<DynActor!(u32, SayHello, OtherMessage)>;
 
 // Now it's time to define our actor!
 // It accepts messages of the `MyProtocol`.

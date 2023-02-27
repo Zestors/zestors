@@ -6,7 +6,7 @@ use std::any::Any;
 pub struct BoxPayload(Box<dyn Any + Send>);
 
 impl BoxPayload {
-    /// Create a new [AnyMessage] from [`Sent<M>`].
+    /// Create a new [`BoxPayload`] from the [`Message::Payload`].
     pub fn new<M>(sent: M::Payload) -> Self
     where
         M: Message,
@@ -15,7 +15,7 @@ impl BoxPayload {
         Self(Box::new(sent))
     }
 
-    /// Downcast the [AnyMessage] into [`Sent<M>`].
+    /// Downcast the [`BoxPayload`] into a [`Message::Payload`].
     pub fn downcast<M>(self) -> Result<M::Payload, Self>
     where
         M: Message,
@@ -27,8 +27,7 @@ impl BoxPayload {
         }
     }
 
-    /// Attempts to downcast the message, and if successful cancels the message afterwards.
-    pub fn downcast_and_cancel<M>(self, returned: M::Returned) -> Result<M, Self>
+    pub(crate) fn downcast_and_cancel<M>(self, returned: M::Returned) -> Result<M, Self>
     where
         M: Message,
         M::Payload: 'static,

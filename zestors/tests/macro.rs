@@ -1,6 +1,6 @@
 use zestors::{
     actor_ref::{ActorRefExt, Address},
-    Accepts,
+    DynActor,
 };
 use zestors_codegen::{Envelope, Message};
 
@@ -12,7 +12,7 @@ pub struct SayHello {
     field_b: String,
 }
 
-async fn test(address: Address<Accepts![SayHello]>) {
+async fn test(address: Address<DynActor!(SayHello)>) {
     address
         .request(SayHello {
             field_a: 10,

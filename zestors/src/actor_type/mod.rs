@@ -7,20 +7,20 @@ actor-type can be defined using [`Dyn<T>`] where `T` is [`dyn AcceptsNone`](Acce
 [`dyn AcceptsOne<_>`](AcceptsOne), [`dyn AcceptsTwo<_, _>`](AcceptsTwo) etc. By specifying an actor type
 by the messages it accepts, we can cast addresses and inboxes of different types to the same type!
 
-# Accepts! macro
+# DynActor! macro
 Instead of writing and remembering long and complicated types, we can use the [`Accepts`] macro:
-- `Accepts![]` = `Dyn<dyn AcceptsNone>`
-- `Accepts![u32]` = `Dyn<dyn AcceptsOne<u32>>`
-- `Accepts![u32, u64]` = `Dyn<dyn AcceptsTwo<u32, u64>>`
+- `DynActor!()` = `Dyn<dyn AcceptsNone>`
+- `DynActor!(u32)` = `Dyn<dyn AcceptsOne<u32>>`
+- `DynActor!(u32, u64)` = `Dyn<dyn AcceptsTwo<u32, u64>>`
 - etc.
 
 # Transforming
 Addresses and children of a given actor type `A` can be transformed into those of actor type `T`
 as long as [`A: TransformInto<T>`](TransformInto). This is implemented in the following cases:
-- If `A` is a [`Halter`] then this can be transformed into `Accepts![]`.
+- If `A` is a [`Halter`] then this can be transformed into `DynActor!()`.
 - If `A` is an [`Inbox<P>`] then if `P` implements [`ProtocolFrom<X>`] for `X = M1, ..., Mx`, the
-actor-type can be transformed into `Accepts![M1, ..., Mx]`
-- if `A` is an `Accepts[M1, ..., Mx]` then this can be transformed into `Accepts![T1, ..., Ty]` as long
+actor-type can be transformed into `DynActor!(M1, ..., Mx)`
+- if `A` is an `Accepts[M1, ..., Mx]` then this can be transformed into `DynActor!(T1, ..., Ty)` as long
 as `T1, ..., Ty` is a subset of `M1, ..., Mx`.
 
 A dynamic actor-types can also be transformed with `try_transform_into` or `transform_unchecked_into`.
@@ -63,37 +63,37 @@ async fn main() {
 
     // Let's cast the address to a few different types:
     let _: Address = address.clone().transform_into();
-    let _: Address<Accepts![u32]> = address.clone().transform_into();
-    let _: Address<Accepts![u32, u64]> = address.clone().transform_into();
+    let _: Address<DynActor!(u32)> = address.clone().transform_into();
+    let _: Address<DynActor!(u32, u64)> = address.clone().transform_into();
     // But this won't compile!
-    // let _: Address<Accepts![String]> = address.clone().transform_into();
+    // let _: Address<DynActor!(String)> = address.clone().transform_into();
 
     // We can also transform a child:
-    let dyn_child: Child<_, Accepts![u32]> = child.transform_into();
+    let dyn_child: Child<_, DynActor!(u32)> = child.transform_into();
     // And then downcast it to the original child:
     let child: Child<_, Inbox<MyProtocol>> = dyn_child.downcast().unwrap();
 
     // We can also keep transforming an address (or child) even if it is already dynamic.
     address
         .clone()
-        .transform_into::<Accepts![u64, u32]>()
-        .transform_into::<Accepts![u32]>()
-        .transform_into::<Accepts![]>()
+        .transform_into::<DynActor!(u64, u32)>()
+        .transform_into::<DynActor!(u32)>()
+        .transform_into::<DynActor!()>()
         .downcast::<Inbox<MyProtocol>>()
         .unwrap();
 
     // This is a transformation that should fail:
     address
         .clone()
-        .transform_into::<Accepts![]>()
-        .try_transform_into::<Accepts![String]>()
+        .transform_into::<DynActor!()>()
+        .try_transform_into::<DynActor!(String)>()
         .unwrap_err();
 
     // But if we use the unchecked transformation it doesn't complain
     let incorrect_address = address
         .clone()
-        .transform_into::<Accepts![]>()
-        .transform_unchecked_into::<Accepts![u32, String]>();
+        .transform_into::<DynActor!()>()
+        .transform_unchecked_into::<DynActor!(u32, String)>();
 
     // If we sent it this message, it would panic
     // -> incorrect_address.send("error".to_string()).await;
@@ -142,7 +142,8 @@ mod actor_type;
 mod capacity;
 mod channel;
 mod errors;
-pub use {actor_id::*, actor_type::*, capacity::*, channel::*, errors::*};
+mod dyn_actor;
+pub use {actor_id::*, actor_type::*, capacity::*, channel::*, errors::*, dyn_actor::*};
 
 pub mod dyn_types;
 pub mod halter;

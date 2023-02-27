@@ -1,10 +1,10 @@
 use futures::{future::pending, StreamExt};
 use std::{collections::HashSet, time::Duration};
 use zestors::{
-    actor_ref::ActorRefExt,
+    actor_ref::{ActorRefExt, Transformable, Link},
     actor_type::{inbox::Inbox, BackPressure, Capacity},
     protocol,
-    spawning::{spawn, spawn_many, spawn_many_with, spawn_with, Link}, messaging::RecvError,
+    spawning::{spawn, spawn_many, spawn_many_with, spawn_with}, messaging::RecvError,
 };
 
 #[tokio::test]

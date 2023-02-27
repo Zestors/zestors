@@ -118,7 +118,7 @@ where
 {
     type Spec = MapRefSpec<S, F, T>;
 
-    fn shutdown_time(self: Pin<&Self>) -> ShutdownTime {
+    fn shutdown_time(self: Pin<&Self>) -> ShutdownDuration {
         self.project_ref().supervisee.shutdown_time()
     }
 

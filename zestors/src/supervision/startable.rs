@@ -94,7 +94,7 @@ pub trait Supervisable: Send + Sized {
 
     fn poll_supervise(self: Pin<&mut Self>, cx: &mut Context) -> Poll<SuperviseResult<Self::Spec>>;
 
-    fn shutdown_time(self: Pin<&Self>) -> ShutdownTime;
+    fn shutdown_time(self: Pin<&Self>) -> ShutdownDuration;
 
     fn halt(self: Pin<&mut Self>);
 

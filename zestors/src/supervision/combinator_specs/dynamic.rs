@@ -72,7 +72,7 @@ impl<Ref: 'static> DynSupervisee<Ref> {
 impl<Ref: Send + 'static> Supervisable for DynSupervisee<Ref> {
     type Spec = DynSpec<Ref>;
 
-    fn shutdown_time(self: Pin<&Self>) -> ShutdownTime {
+    fn shutdown_time(self: Pin<&Self>) -> ShutdownDuration {
         self.0.as_ref().unwrap().as_ref()._abort_timeout()
     }
 
@@ -113,7 +113,7 @@ trait DynSpecification<Ref>: Send + Debug + 'static {
     fn _poll_supervise_fut(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<DynSupervisedExit>;
     fn _abort(self: Pin<&mut Self>);
     fn _halt(self: Pin<&mut Self>);
-    fn _abort_timeout(self: Pin<&Self>) -> ShutdownTime;
+    fn _abort_timeout(self: Pin<&Self>) -> ShutdownDuration;
 }
 
 // todo: it should be possible to provide an implementation that does not require Unpin for
@@ -232,7 +232,7 @@ where
         supervisee.halt()
     }
 
-    fn _abort_timeout(self: Pin<&Self>) -> ShutdownTime {
+    fn _abort_timeout(self: Pin<&Self>) -> ShutdownDuration {
         let DynMultiSpecProjRef::Supervised(supervisee) = self.project_ref() else { panic!() };
         supervisee.shutdown_time()
     }
