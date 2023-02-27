@@ -311,8 +311,8 @@ where
                 Ok(())
             }
             Err(e) => match e {
-                TryAddProcessError::ActorHasExited => Err(SpawnError(fun)),
-                TryAddProcessError::SingleProcessOnly => {
+                AddProcessError::ActorHasExited => Err(SpawnError(fun)),
+                AddProcessError::SingleProcessOnly => {
                     panic!("Error with implementation `try_add_process()` of the inboxtype")
                 }
             },
@@ -327,8 +327,8 @@ where
     C: ChildType,
 {
     type ActorType = A;
-    fn channel_ref(&self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
-        &self.channel
+    fn channel_ref(this: &Self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
+        &this.channel
     }
 }
 

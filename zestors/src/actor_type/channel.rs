@@ -41,11 +41,11 @@ pub trait Channel: Send + Sync + Debug {
     fn capacity(&self) -> Capacity;
     /// Closes the channel and returns `true` if the channel was not closed before.
     ///
-    /// For channels that do not accept messages, this must return `false`.
+    /// For channels that do not accept messages, this can return `false`.
     fn close(&self) -> bool;
     /// Whether the channel is closed.
     ///
-    /// For channels that do not accept messages, this must return `true`.
+    /// For channels that do not accept messages, this can return `true`.
     fn is_closed(&self) -> bool;
 
     /// Whether all processes of the actor have exited.
@@ -59,7 +59,7 @@ pub trait Channel: Send + Sync + Debug {
     fn process_count(&self) -> usize;
     /// Attempt to add another process to the channel. If successful, this returns the previous
     /// process-count.
-    fn try_increment_process_count(&self) -> Result<usize, TryAddProcessError>;
+    fn try_increment_process_count(&self) -> Result<usize, AddProcessError>;
 
     /// Whether the channel accepts the type-id of a given message.
     ///
@@ -89,9 +89,7 @@ impl dyn Channel {
         msg: M,
     ) -> Result<M::Returned, TrySendCheckedError<M>> {
         let (sends, returns) = M::create(msg);
-        let res = self.try_send_box(BoxPayload::new::<M>(sends));
-
-        match res {
+        match self.try_send_box(BoxPayload::new::<M>(sends)) {
             Ok(()) => Ok(returns),
             Err(e) => match e {
                 TrySendCheckedError::Full(boxed) => Err(TrySendCheckedError::Full(

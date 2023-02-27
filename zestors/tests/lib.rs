@@ -1,6 +1,11 @@
 use futures::{future::pending, StreamExt};
-use zestors::{spawning::{spawn, spawn_with, Link, spawn_many, spawn_many_with}, channel::inbox::{Inbox, RecvError, Capacity, BackPressure}, monitoring::ActorRefExt, protocol};
 use std::{collections::HashSet, time::Duration};
+use zestors::{
+    actor_ref::ActorRefExt,
+    actor_type::{inbox::Inbox, BackPressure, Capacity},
+    protocol,
+    spawning::{spawn, spawn_many, spawn_many_with, spawn_with, Link}, messaging::RecvError,
+};
 
 #[tokio::test]
 async fn spawn_and_abort() {
@@ -108,11 +113,10 @@ async fn inbox_counts() {
     tokio::time::sleep(Duration::from_millis(10)).await;
     assert_eq!(pool.process_count(), 3);
 
-    pool
-        .try_spawn_onto(|mut inbox: Inbox<()>| async move {
-            inbox.recv().await.unwrap_err();
-        })
-        .unwrap();
+    pool.try_spawn_onto(|mut inbox: Inbox<()>| async move {
+        inbox.recv().await.unwrap_err();
+    })
+    .unwrap();
     assert_eq!(pool.process_count(), 4);
 
     pool.halt_some(2);

@@ -1,23 +1,24 @@
-mod channel;
-pub use channel::*;
-
 use crate::all::*;
 use event_listener::EventListener;
 use futures::{ready, Future, FutureExt};
 use std::{sync::Arc, task::Poll};
 
+mod channel;
+pub use channel::*;
+
 /// A halter can be used for processes that do not handle any messages, but that should still be
-/// supervisable. The halter can be awaited, and returns when the task should halt.
+/// supervisable. The halter can be awaited and resolves when the task should halt.
 ///
-/// For a halter that can contain multiple processes, see [PoolHalter]
+/// For a halter that can spawn multiple processes, see [`MultiHalter`].
 pub struct Halter {
     channel: Arc<HalterChannel>,
     halt_event_listener: Option<EventListener>,
 }
 
 impl Halter {
-    pub fn to_halt(&self) -> bool {
-        self.channel.to_halt()
+    /// Whether this process should halt.
+    pub fn halted(&self) -> bool {
+        self.channel.halted()
     }
 }
 
@@ -46,12 +47,10 @@ impl ActorInbox for Halter {
 
 impl ActorRef for Halter {
     type ActorType = Self;
-    fn channel_ref(&self) -> &Arc<<Self as ActorType>::Channel> {
-        &self.channel
+    fn channel_ref(this: &Self) -> &Arc<<Self as ActorType>::Channel> {
+        &this.channel
     }
 }
-
-impl Unpin for Halter {}
 
 impl Future for Halter {
     type Output = ();
@@ -62,7 +61,7 @@ impl Future for Halter {
     ) -> std::task::Poll<Self::Output> {
         loop {
             // If we have already halted before, then return immeadeately..
-            if self.to_halt() {
+            if self.halted() {
                 return Poll::Ready(());
             }
 
@@ -86,3 +85,5 @@ impl Drop for Halter {
         self.channel.exit();
     }
 }
+
+impl Unpin for Halter {}

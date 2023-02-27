@@ -1,5 +1,5 @@
 use zestors::{
-    monitoring::{ActorRefExt, Address},
+    actor_ref::{ActorRefExt, Address},
     Accepts,
 };
 use zestors_codegen::{Envelope, Message};

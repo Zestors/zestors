@@ -1,6 +1,6 @@
 use crate::{
-    channel::{ActorType, ActorInbox},
-    monitoring::{Address, ActorRefExt, Child, ExitError},
+    actor_type::{ActorType, ActorInbox},
+    actor_ref::{Address, ActorRefExt, Child, ExitError},
     supervision::{
         combinator_specs::{spawn, Link, ShutdownTime},
         StartError, StartResult, Specifies, Supervisable, SuperviseResult,

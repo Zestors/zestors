@@ -169,7 +169,7 @@ impl<S: Specifies> Future for SupervisorProcess<S> {
         let mut proj = self.as_mut().project();
 
         if !proj.supervision_fut.to_shutdown() {
-            if proj.inbox.is_halted() {
+            if proj.inbox.halted() {
                 proj.supervision_fut.shutdown();
             } else {
                 if let Poll::Ready(res) = proj.inbox.next().poll_unpin(cx) {
@@ -177,7 +177,7 @@ impl<S: Specifies> Future for SupervisorProcess<S> {
                         Some(Ok(_msg)) => {
                             unreachable!("No messages handled yet");
                         }
-                        Some(Err(HaltedError)) => proj.supervision_fut.shutdown(),
+                        Some(Err(Halted)) => proj.supervision_fut.shutdown(),
                         None => {
                             println!("WARN: Inbox of supervisor has been closed!");
                             proj.supervision_fut.shutdown();

@@ -3,28 +3,28 @@ use event_listener::{Event, EventListener};
 use std::{
     any::Any,
     sync::{
-        atomic::{AtomicI32, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
 };
 
-/// A [Channel] that does not have any kind of inbox, so it cannot receive messages.
+/// The [`Channel`] of a [`Halter`].
 #[derive(Debug)]
-pub struct MultiHalterChannel {
+pub struct HalterChannel {
     address_count: AtomicUsize,
-    halter_count: AtomicUsize,
-    to_halt: AtomicI32,
+    halted: AtomicBool,
+    has_exited: AtomicBool,
     actor_id: ActorId,
     exit_event: Event,
     halt_event: Event,
 }
 
-impl MultiHalterChannel {
-    pub(crate) fn new(address_count: usize, halter_count: usize, actor_id: ActorId) -> Self {
+impl HalterChannel {
+    pub(crate) fn new(address_count: usize, actor_id: ActorId) -> Self {
         Self {
             address_count: AtomicUsize::new(address_count),
-            halter_count: AtomicUsize::new(halter_count),
-            to_halt: AtomicI32::new(0),
+            halted: AtomicBool::new(false),
+            has_exited: AtomicBool::new(false),
             actor_id,
             exit_event: Event::new(),
             halt_event: Event::new(),
@@ -35,97 +35,77 @@ impl MultiHalterChannel {
         self.halt_event.listen()
     }
 
-    pub(crate) fn should_halt(&self) -> bool {
-        let halt_count = self.to_halt.fetch_sub(1, Ordering::AcqRel);
-        if halt_count > 0 {
-            true
-        } else {
-            if halt_count < -1000 {
-                // If it was smaller than -1000, reset the halt-count to 0 to prevent overflow.
-                self.to_halt
-                    .fetch_update(Ordering::AcqRel, Ordering::Acquire, |x| {
-                        // Check here again, since it might have been updated in the mean time.
-                        if x < -1_000 {
-                            Some(0)
-                        } else {
-                            Some(x)
-                        }
-                    })
-                    .unwrap();
-            };
-            false
-        }
+    pub(crate) fn halted(&self) -> bool {
+        self.halted.load(Ordering::Acquire)
     }
 
-    pub(crate) fn decrement_halter_count(&self, n: usize) {
-        self.halter_count.fetch_sub(n, Ordering::AcqRel);
+    pub(crate) fn exit(&self) {
+        self.has_exited.store(true, Ordering::Release)
     }
 }
 
-impl Channel for MultiHalterChannel {
+impl Channel for HalterChannel {
     fn close(&self) -> bool {
         false
     }
-    fn halt_some(&self, n: u32) {
-        let n = n.try_into().unwrap_or(i32::MAX);
-        self.to_halt
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |x| {
-                Some(x.saturating_add(n))
-            })
-            .unwrap();
-        self.halt_event.notify(n as usize)
+
+    fn halt_some(&self, _n: u32) {
+        self.halt()
     }
+
     fn halt(&self) {
-        self.to_halt.store(i32::MAX, Ordering::Release);
-        self.halt_event.notify(usize::MAX)
+        self.halted.store(true, Ordering::Release);
+        self.halt_event.notify(1)
     }
+
     fn process_count(&self) -> usize {
-        self.halter_count.load(Ordering::Acquire)
+        if self.has_exited() {
+            0
+        } else {
+            1
+        }
     }
+
     fn msg_count(&self) -> usize {
         0
     }
+
     fn address_count(&self) -> usize {
         self.address_count.load(Ordering::Acquire)
     }
+
     fn is_closed(&self) -> bool {
         true
     }
+
     fn has_exited(&self) -> bool {
-        self.halter_count.load(Ordering::Acquire) == 0
+        self.has_exited.load(Ordering::Acquire)
     }
+
     fn get_exit_listener(&self) -> EventListener {
         self.exit_event.listen()
     }
+
     fn actor_id(&self) -> ActorId {
         self.actor_id
     }
+
     fn capacity(&self) -> Capacity {
         Capacity::Bounded(0)
     }
+
     fn increment_address_count(&self) -> usize {
         self.address_count.fetch_add(1, Ordering::Acquire)
     }
+
     fn decrement_address_count(&self) -> usize {
         let prev_address_count = self.address_count.fetch_sub(1, Ordering::Acquire);
         assert!(prev_address_count >= 1);
         prev_address_count
     }
-    fn try_increment_process_count(&self) -> Result<usize, TryAddProcessError> {
-        let result = self
-            .halter_count
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |val| {
-                if val < 1 {
-                    None
-                } else {
-                    Some(val + 1)
-                }
-            });
 
-        match result {
-            Ok(prev) => Ok(prev),
-            Err(_) => Err(TryAddProcessError::ActorHasExited),
-        }
+    fn try_increment_process_count(&self) -> Result<usize, AddProcessError> {
+        Err(AddProcessError::SingleProcessOnly)
     }
 
     fn try_send_box(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {

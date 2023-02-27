@@ -7,9 +7,9 @@ use std::{sync::Arc, task::Poll};
 use crate::all::*;
 
 /// A halter can be used for processes that do not handle any messages, but that should still be
-/// supervisable. The halter can be awaited, and returns when the task should halt.
-/// 
-/// If you only need a single process for the actor, use a [Halter] instead.
+/// supervisable. The halter can be awaited and resolves when the task should halt.
+///
+/// For a halter that can only spawn a single processes, see [`Halter`].
 pub struct MultiHalter {
     channel: Arc<MultiHalterChannel>,
     halt_event_listener: Option<EventListener>,
@@ -29,8 +29,8 @@ impl ActorType for MultiHalter {
 
 impl ActorRef for MultiHalter {
     type ActorType = Self;
-    fn channel_ref(&self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
-        &self.channel
+    fn channel_ref(this: &Self) -> &Arc<<Self::ActorType as ActorType>::Channel> {
+        &this.channel
     }
 }
 

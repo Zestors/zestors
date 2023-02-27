@@ -2,13 +2,15 @@ use crate::*;
 use futures::{future::BoxFuture, Future};
 use std::{any::TypeId, sync::Arc};
 
-/// Implemented for any reference to an actor, which allows interaction with the actor.
+/// Implemented for any reference to an actor, which allows interaction with the actor like
+/// sending messages or closing the inbox.
 ///
 /// See [`ChannelRefExt`] and [`DynChannelRefExt`] for callable methods.
 pub trait ActorRef: Sized {
     type ActorType: ActorType;
-    fn channel_ref(&self) -> &Arc<<Self::ActorType as ActorType>::Channel>;
+    fn channel_ref(actor_ref: &Self) -> &Arc<<Self::ActorType as ActorType>::Channel>;
 }
+
 
 pub trait ActorRefExt: ActorRef {
     fn envelope<M>(&self, msg: M) -> Envelope<'_, Self::ActorType, M>
@@ -16,11 +18,11 @@ pub trait ActorRefExt: ActorRef {
         M: Message,
         Self::ActorType: Accept<M>,
     {
-        Envelope::new(self.channel_ref(), msg)
+        Envelope::new(Self::channel_ref(self), msg)
     }
 
     fn get_address(&self) -> Address<Self::ActorType> {
-        let channel = self.channel_ref().clone();
+        let channel = Self::channel_ref(self).clone();
         channel.increment_address_count();
         Address::from_channel(channel)
     }
@@ -74,7 +76,7 @@ pub trait ActorRefExt: ActorRef {
         M: Message,
         Self::ActorType: Accept<M>,
     {
-        <Self::ActorType as Accept<M>>::try_send(self.channel_ref(), msg)
+        <Self::ActorType as Accept<M>>::try_send(Self::channel_ref(self), msg)
     }
 
     fn force_send<M>(&self, msg: M) -> Result<M::Returned, TrySendError<M>>
@@ -82,7 +84,7 @@ pub trait ActorRefExt: ActorRef {
         M: Message,
         Self::ActorType: Accept<M>,
     {
-        <Self::ActorType as Accept<M>>::force_send(self.channel_ref(), msg)
+        <Self::ActorType as Accept<M>>::force_send(Self::channel_ref(self), msg)
     }
 
     fn send_blocking<M>(&self, msg: M) -> Result<M::Returned, SendError<M>>
@@ -90,7 +92,7 @@ pub trait ActorRefExt: ActorRef {
         M: Message,
         Self::ActorType: Accept<M>,
     {
-        <Self::ActorType as Accept<M>>::send_blocking(self.channel_ref(), msg)
+        <Self::ActorType as Accept<M>>::send_blocking(Self::channel_ref(self), msg)
     }
 
     fn send<M>(&self, msg: M) -> <Self::ActorType as Accept<M>>::SendFut<'_>
@@ -98,7 +100,7 @@ pub trait ActorRefExt: ActorRef {
         M: Message,
         Self::ActorType: Accept<M>,
     {
-        <Self::ActorType as Accept<M>>::send(self.channel_ref(), msg)
+        <Self::ActorType as Accept<M>>::send(Self::channel_ref(self), msg)
     }
 
     fn try_request<M, F, E, R>(&self, msg: M) -> BoxFuture<'_, Result<R, TryRequestError<M, E>>>
@@ -107,7 +109,7 @@ pub trait ActorRefExt: ActorRef {
         F: Future<Output = Result<R, E>> + Send,
         Self::ActorType: Accept<M>,
     {
-        <Self::ActorType as AcceptExt<M>>::try_request(self.channel_ref(), msg)
+        <Self::ActorType as AcceptExt<M>>::try_request(Self::channel_ref(self), msg)
     }
 
     fn force_request<M, F, E, R>(&self, msg: M) -> BoxFuture<'_, Result<R, TryRequestError<M, E>>>
@@ -116,7 +118,7 @@ pub trait ActorRefExt: ActorRef {
         F: Future<Output = Result<R, E>> + Send,
         Self::ActorType: Accept<M>,
     {
-        <Self::ActorType as AcceptExt<M>>::force_request(self.channel_ref(), msg)
+        <Self::ActorType as AcceptExt<M>>::force_request(Self::channel_ref(self), msg)
     }
 
     fn request<M, F, E, R>(&self, msg: M) -> BoxFuture<'_, Result<R, RequestError<M, E>>>
@@ -125,7 +127,7 @@ pub trait ActorRefExt: ActorRef {
         F: Future<Output = Result<R, E>> + Send,
         Self::ActorType: Accept<M>,
     {
-        <Self::ActorType as AcceptExt<M>>::request(self.channel_ref(), msg)
+        <Self::ActorType as AcceptExt<M>>::request(Self::channel_ref(self), msg)
     }
 }
 impl<T> ActorRefExt for T where T: ActorRef {}

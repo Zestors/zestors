@@ -4,28 +4,28 @@ Zestors is a dynamic actor-framework built for Rust applications.
 # Documentation
 All modules are self-documented. For a new user it is recommended to read the documentation in
 the following order.
-- [`messaging`] - Using a protocol to send messages.
-- [`monitoring`] - Monitoring a running actor.
+- [`messaging`] - Defining a protocol to send messages.
+- [`actor_ref`] - Interacting with an actor through it's child or address.
+- [`actor_type`] - Specifying the type of an actor.
 - [`spawning`] - Spawning of actors.
-- [`channel`] - Using different channels for your actors.
-- [`supervision`] : todo
+- [`handler`] - A simple way to write actors.
+- [`supervision`] : Supervision of actors.
 - [`distribution`] : todo
 */
 
-pub mod actor;
-pub mod channel;
+pub mod actor_type;
 pub mod distribution;
 pub mod messaging;
-pub mod monitoring;
+pub mod actor_ref;
 pub mod spawning;
 pub mod supervision;
 pub mod handler;
 
 mod all {
     pub use crate::handler::*;
-    pub use crate::channel::{halter::*, inbox::*, multi_halter::*, *};
+    pub use crate::actor_type::{halter::*, inbox::*, multi_halter::*, *};
     pub use crate::messaging::*;
-    pub use crate::monitoring::*;
+    pub use crate::actor_ref::*;
     pub use crate::spawning::*;
     pub use crate::supervision::*;
     pub use crate::Accepts;

@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use zestors::{
     action, async_trait,
-    channel::inbox::Inbox,
+    actor_type::inbox::Inbox,
     handler::{Action, ExitReason, Flow, HandleMessage, Handler, HandlerExt},
     messaging::Tx,
-    monitoring::ActorRefExt,
+    actor_ref::ActorRefExt,
     protocol, Envelope, Message,
 };
 use zestors_codegen::HandleExit;
