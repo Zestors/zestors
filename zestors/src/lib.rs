@@ -19,9 +19,9 @@ pub mod messaging;
 pub mod monitoring;
 pub mod spawning;
 pub mod supervision;
-mod handler;
+pub mod handler;
 
-pub mod all {
+mod all {
     pub use crate::handler::*;
     pub use crate::channel::{halter::*, inbox::*, multi_halter::*, *};
     pub use crate::messaging::*;
@@ -35,3 +35,4 @@ pub(crate) mod _priv;
 use crate::all::*;
 
 pub use zestors_codegen::{protocol, Envelope, Message};
+pub use async_trait::async_trait;

@@ -9,7 +9,7 @@ macro_rules! create_dynamic_actor_types {
         pub trait $actor_ty< $($($msg: Message,)?)*>: std::fmt::Debug + $($( FromPayload<$msg> + )?)* {}
 
         // Implement the dynamic actor-type for Dyn<dyn _>
-        impl<$($($msg: Message + 'static,)?)*> DynActorType for Dyn<dyn $actor_ty< $($($msg,)?)*>> {
+        impl<$($($msg: Message + 'static,)?)*> DynActorType for DynActor<dyn $actor_ty< $($($msg,)?)*>> {
             fn msg_ids() -> Box<[TypeId]> {
                 Box::new([$($(TypeId::of::<$msg>(),)?)*])
             }
@@ -17,7 +17,7 @@ macro_rules! create_dynamic_actor_types {
 
         // Any sized channel can transform into this Dyn<dyn _>, as long as it impl FromPayload<M> 
         // for all the messages
-        impl<D, $($($msg: Message + 'static,)?)*> TransformInto<Dyn<dyn $actor_ty<$($($msg,)?)*>>> for Dyn<D>
+        impl<D, $($($msg: Message + 'static,)?)*> TransformInto<DynActor<dyn $actor_ty<$($($msg,)?)*>>> for DynActor<D>
         where
             D: ?Sized $($( + FromPayload<$msg> )?)*
         {
@@ -28,9 +28,9 @@ macro_rules! create_dynamic_actor_types {
 
         // Any sized channel can transform into this Dyn<dyn _>, as long as it implements 
         // Accept<M> all the messages
-        impl<I, $($($msg: Message + 'static,)?)*> TransformInto<Dyn<dyn $actor_ty<$($($msg,)?)*>>> for I
+        impl<I, $($($msg: Message + 'static,)?)*> TransformInto<DynActor<dyn $actor_ty<$($($msg,)?)*>>> for I
         where
-            I: InboxType $($( + Accept<$msg> )?)*,
+            I: ActorInbox $($( + Accept<$msg> )?)*,
             I::Channel: Sized
         {
             fn transform_into(channel: Arc<Self::Channel>) -> Arc<dyn Channel> {

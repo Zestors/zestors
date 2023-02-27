@@ -34,10 +34,10 @@ pub use errors::*;
 mod config;
 pub use config::*;
 
-use super::{InboxType, MultiInboxType};
+use super::{ActorInbox, MultiActorInbox};
 use crate::{
     all::*,
-    handler::{HandlerEvent, HandlerState},
+    handler::{Event, HandlerState},
 };
 use event_listener::EventListener;
 use futures::{future::BoxFuture, stream::FusedStream, FutureExt, Stream, StreamExt};
@@ -45,7 +45,7 @@ use std::{
     fmt::Debug,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 
 /// An Inbox is a non clone-able receiver part of a channel.
@@ -109,8 +109,8 @@ impl<P: Protocol> ActorRef for Inbox<P> {
     }
 }
 
-impl<P: Protocol + Send> MultiInboxType for Inbox<P> {
-    fn setup_multi_channel(
+impl<P: Protocol + Send> MultiActorInbox for Inbox<P> {
+    fn init_multi_inbox(
         config: Self::Config,
         process_count: usize,
         address_count: usize,
@@ -123,21 +123,22 @@ impl<P: Protocol + Send> MultiInboxType for Inbox<P> {
             actor_id,
         ))
     }
-}
-
-impl<P: Protocol + Send> InboxType for Inbox<P> {
-    type Config = Capacity;
-
-    fn setup_channel(
-        config: Capacity,
-        address_count: usize,
-        actor_id: ActorId,
-    ) -> Arc<Self::Channel> {
-        Self::setup_multi_channel(config, 1, address_count, actor_id)
-    }
 
     fn from_channel(channel: Arc<Self::Channel>) -> Self {
         Self::new(channel)
+    }
+}
+
+impl<P: Protocol + Send> ActorInbox for Inbox<P> {
+    type Config = Capacity;
+
+    fn init_single_inbox(
+        config: Capacity,
+        address_count: usize,
+        actor_id: ActorId,
+    ) -> (Arc<Self::Channel>, Self) {
+        let channel = Self::init_multi_inbox(config, 1, address_count, actor_id);
+        (channel.clone(), Self::new(channel))
     }
 }
 
@@ -153,16 +154,13 @@ where
         inbox
     }
 
-    fn poll_next_action(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context,
-    ) -> Poll<Result<Action<H>, crate::handler::HandlerEvent>> {
+    fn poll_next_action(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<HandlerItem<H>> {
         self.poll_next_unpin(cx).map(|res| match res {
             Some(res) => match res {
-                Ok(protocol) => Ok(Action::Protocol(protocol)),
-                Err(_halted) => Err(HandlerEvent::Halt),
+                Ok(protocol) => HandlerItem::Protocol(protocol),
+                Err(_halted) => HandlerItem::Event(Event::Halt),
             },
-            None => Err(HandlerEvent::Dead),
+            None => HandlerItem::Event(Event::Dead),
         })
     }
 }
@@ -243,13 +241,30 @@ impl<P: Protocol> Stream for Inbox<P> {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        self.recv().poll_unpin(cx).map(|res| match res {
-            Ok(msg) => Some(Ok(msg)),
-            Err(e) => match e {
-                RecvError::Halted => Some(Err(HaltedError)),
-                RecvError::ClosedAndEmpty => None,
-            },
-        })
+        let this = &mut *self;
+
+        let result = loop {
+            let recv_listener = this
+                .recv_listener
+                .get_or_insert(this.channel.get_recv_listener());
+
+            match this.channel.try_recv(&mut this.signaled_halt) {
+                Ok(msg) => break Poll::Ready(Some(Ok(msg))),
+                Err(error) => match error {
+                    TryRecvError::Halted => break Poll::Ready(Some(Err(HaltedError))),
+                    TryRecvError::ClosedAndEmpty => break Poll::Ready(None),
+                    TryRecvError::Empty => {
+                        ready!(recv_listener.poll_unpin(cx));
+                        this.recv_listener = None;
+                    }
+                },
+            };
+        };
+
+        if result.is_ready() {
+            this.recv_listener = None;
+        }
+        result
     }
 }
 

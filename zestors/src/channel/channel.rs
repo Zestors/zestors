@@ -7,167 +7,144 @@ use std::{
     sync::Arc,
 };
 
-/// The channel trait that must be implemented for all channel types.
-///
-/// Depending on the type of channel, certain methods may have mock-implementations.
-/// This is described in those methods.
+/// This trait must be implemented for a channel.
 pub trait Channel: Send + Sync + Debug {
     /// Convert the channel into a `dyn Channel`.
     fn into_dyn(self: Arc<Self>) -> Arc<dyn Channel>;
-
     /// Convert the channel into a `dyn Any + Send + Sync`.
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
-
-    /// Halts all processes of the actor.
-    fn halt(&self);
-
-    /// The amount of addresses of the actor.
-    fn address_count(&self) -> usize;
-
-    /// Whether all processes of the actor have exited.
-    fn has_exited(&self) -> bool;
-
-    /// Adds a new address to the actor.
-    fn add_address(&self) -> usize;
-
-    /// Removes an address from the actor.
-    fn remove_address(&self) -> usize;
-
-    /// Get an event-listener for when the actor exits.
-    fn get_exit_listener(&self) -> EventListener;
 
     /// The id of the actor.
     fn actor_id(&self) -> ActorId;
 
+    /// Halts all processes of the actor.
+    fn halt(&self);
+    /// Halt `n` processes of the actor.
+    ///
+    /// For channels that do not allow multiple processes, this can defer to `self.halt()`.
+    fn halt_some(&self, n: u32);
+
+    /// The amount of addresses of the actor.
+    fn address_count(&self) -> usize;
+    /// Removes an address from the actor. Returns the old address-count.
+    fn decrement_address_count(&self) -> usize;
+    /// Adds a new address to the actor. Returns the old address-count.
+    fn increment_address_count(&self) -> usize;
+
+    /// The amount of messages in the channel.
+    ///
+    /// For channels that do not accept messages, this can return `0`.
+    fn msg_count(&self) -> usize;
+    /// The capacity of this channel.
+    ///
+    /// For channels that do not accept messages, this can return a `Capacity::Bounded(0)`
+    fn capacity(&self) -> Capacity;
     /// Closes the channel and returns `true` if the channel was not closed before.
     ///
     /// For channels that do not accept messages, this must return `false`.
     fn close(&self) -> bool;
-
     /// Whether the channel is closed.
     ///
     /// For channels that do not accept messages, this must return `true`.
     fn is_closed(&self) -> bool;
 
-    /// Whether the channel accepts the type-id of a given message.
-    ///
-    /// For channels that do not accept messages, this must return `false`.
-    fn accepts(&self, id: &TypeId) -> bool;
-
-    /// The amount of messages in the channel.
-    ///
-    /// For channels that do not accept messages, this must return `0`.
-    fn msg_count(&self) -> usize;
-
-    /// The capacity of this channel.
-    ///
-    /// For channels that do not accept messages, this must return a `&'static Capacity::Bounded(0)`
-    fn capacity(&self) -> &Capacity;
+    /// Whether all processes of the actor have exited.
+    fn has_exited(&self) -> bool;
+    /// Get an event-listener for when the actor exits.
+    fn get_exit_listener(&self) -> EventListener;
 
     /// The amount of processes of the actor.
     ///
-    /// For channels that do not allow multiple processes, this must return `0`.
+    /// For channels that do not allow multiple processes, this can return `1` or `0`.
     fn process_count(&self) -> usize;
-
-    /// Halt `n` processes of the actor.
-    ///
-    /// For channels that do not allow multiple processes, this must defer to `self.halt()`.
-    fn halt_some(&self, n: u32);
-
     /// Attempt to add another process to the channel. If successful, this returns the previous
     /// process-count.
-    ///
-    /// This method must fail if:
-    /// 1) The channel does not allow for multiple processes.
-    /// 2) The actor has already exited.
-    fn try_add_process(&self) -> Result<usize, TryAddProcessError>;
+    fn try_increment_process_count(&self) -> Result<usize, TryAddProcessError>;
 
+    /// Whether the channel accepts the type-id of a given message.
+    ///
+    /// For channels that do not accept messages, this can return `false`.
+    fn accepts(&self, id: &TypeId) -> bool;
     /// Try to send a payload to the actor.
     ///
-    /// For channels that do not accept messages, this must fail with `NotAccepted`.
-    fn try_send_any(&self, msg: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>>;
-
+    /// For channels that do not accept messages, this can fail with `NotAccepted`.
+    fn try_send_box(&self, msg: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>>;
     /// Try to force-send a message to the actor.
     ///
-    /// For channels that do not accept messages, this must fail with `NotAccepted`.
-    fn force_send_any(&self, msg: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>>;
-
+    /// For channels that do not accept messages, this can fail with `NotAccepted`.
+    fn force_send_box(&self, msg: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>>;
     /// Send a payload to the actor while blocking the thread when waiting for space.
     ///
-    /// For channels that do not accept messages, this must fail with `NotAccepted`.
-    fn send_any_blocking(&self, msg: BoxPayload) -> Result<(), SendCheckedError<BoxPayload>>;
-
+    /// For channels that do not accept messages, this can fail with `NotAccepted`.
+    fn send_box_blocking(&self, msg: BoxPayload) -> Result<(), SendCheckedError<BoxPayload>>;
     /// Send a payload to the actor waiting for space.
     ///
-    /// For channels that do not accept messages, this must fail with `NotAccepted`.
-    fn send_any(&self, msg: BoxPayload) -> BoxFuture<'_, Result<(), SendCheckedError<BoxPayload>>>;
+    /// For channels that do not accept messages, this can fail with `NotAccepted`.
+    fn send_box(&self, msg: BoxPayload) -> BoxFuture<'_, Result<(), SendCheckedError<BoxPayload>>>;
 }
 
 impl dyn Channel {
-    pub fn try_send_checked<M>(&self, msg: M) -> Result<M::Returned, TrySendCheckedError<M>>
-    where
-        M: Message,
-        M::Payload: Send + 'static,
-    {
+    pub fn try_send_checked<M: Message>(
+        &self,
+        msg: M,
+    ) -> Result<M::Returned, TrySendCheckedError<M>> {
         let (sends, returns) = M::create(msg);
-        let res = self.try_send_any(BoxPayload::new::<M>(sends));
+        let res = self.try_send_box(BoxPayload::new::<M>(sends));
 
         match res {
             Ok(()) => Ok(returns),
             Err(e) => match e {
                 TrySendCheckedError::Full(boxed) => Err(TrySendCheckedError::Full(
-                    boxed.downcast_then_cancel(returns).unwrap(),
+                    boxed.downcast_and_cancel(returns).unwrap(),
                 )),
                 TrySendCheckedError::Closed(boxed) => Err(TrySendCheckedError::Closed(
-                    boxed.downcast_then_cancel(returns).unwrap(),
+                    boxed.downcast_and_cancel(returns).unwrap(),
                 )),
                 TrySendCheckedError::NotAccepted(boxed) => Err(TrySendCheckedError::NotAccepted(
-                    boxed.downcast_then_cancel(returns).unwrap(),
+                    boxed.downcast_and_cancel(returns).unwrap(),
                 )),
             },
         }
     }
 
-    pub fn force_send_unchecked<M>(&self, msg: M) -> Result<M::Returned, TrySendCheckedError<M>>
-    where
-        M: Message,
-        M::Payload: Send + 'static,
-    {
+    pub fn force_send_checked<M: Message>(
+        &self,
+        msg: M,
+    ) -> Result<M::Returned, TrySendCheckedError<M>> {
         let (sends, returns) = M::create(msg);
-        let res = self.force_send_any(BoxPayload::new::<M>(sends));
+        let res = self.force_send_box(BoxPayload::new::<M>(sends));
 
         match res {
             Ok(()) => Ok(returns),
             Err(e) => match e {
                 TrySendCheckedError::Full(boxed) => Err(TrySendCheckedError::Full(
-                    boxed.downcast_then_cancel(returns).unwrap(),
+                    boxed.downcast_and_cancel(returns).unwrap(),
                 )),
                 TrySendCheckedError::Closed(boxed) => Err(TrySendCheckedError::Closed(
-                    boxed.downcast_then_cancel(returns).unwrap(),
+                    boxed.downcast_and_cancel(returns).unwrap(),
                 )),
                 TrySendCheckedError::NotAccepted(boxed) => Err(TrySendCheckedError::NotAccepted(
-                    boxed.downcast_then_cancel(returns).unwrap(),
+                    boxed.downcast_and_cancel(returns).unwrap(),
                 )),
             },
         }
     }
 
-    pub fn send_blocking_checked<M>(&self, msg: M) -> Result<M::Returned, SendCheckedError<M>>
-    where
-        M: Message,
-        M::Payload: Send + 'static,
-    {
+    pub fn send_blocking_checked<M: Message>(
+        &self,
+        msg: M,
+    ) -> Result<M::Returned, SendCheckedError<M>> {
         let (sends, returns) = M::create(msg);
-        let res = self.send_any_blocking(BoxPayload::new::<M>(sends));
+        let res = self.send_box_blocking(BoxPayload::new::<M>(sends));
 
         match res {
             Ok(()) => Ok(returns),
             Err(e) => match e {
                 SendCheckedError::Closed(boxed) => Err(SendCheckedError::Closed(
-                    boxed.downcast_then_cancel(returns).unwrap(),
+                    boxed.downcast_and_cancel(returns).unwrap(),
                 )),
                 SendCheckedError::NotAccepted(boxed) => Err(SendCheckedError::NotAccepted(
-                    boxed.downcast_then_cancel(returns).unwrap(),
+                    boxed.downcast_and_cancel(returns).unwrap(),
                 )),
             },
         }
@@ -177,24 +154,22 @@ impl dyn Channel {
     where
         M::Returned: Send,
         M: Message + Send + 'static,
-        M::Payload: Send + 'static,
     {
         Box::pin(async move {
             let (sends, returns) = M::create(msg);
-            let res = self.send_any(BoxPayload::new::<M>(sends)).await;
+            let res = self.send_box(BoxPayload::new::<M>(sends)).await;
 
             match res {
                 Ok(()) => Ok(returns),
                 Err(e) => match e {
                     SendCheckedError::Closed(boxed) => Err(SendCheckedError::Closed(
-                        boxed.downcast_then_cancel(returns).unwrap(),
+                        boxed.downcast_and_cancel(returns).unwrap(),
                     )),
                     SendCheckedError::NotAccepted(boxed) => Err(SendCheckedError::NotAccepted(
-                        boxed.downcast_then_cancel(returns).unwrap(),
+                        boxed.downcast_and_cancel(returns).unwrap(),
                     )),
                 },
             }
         })
     }
 }
-

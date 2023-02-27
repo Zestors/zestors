@@ -2,74 +2,75 @@ use crate::all::*;
 use futures::future::BoxFuture;
 use std::{any::TypeId, marker::PhantomData, sync::Arc};
 
-/// An actor's [`ActorType`] specifies the [`Channel`] of the actor.
-/// The [`ActorType`] can be one of the following:
-/// - An sized [`InboxType`].
-/// - A [`Dyn`] type, usually written with the [`Accepts!`] macro.
+/// The [`ActorType`] defines what kind of inbox the actor uses. An actor-type can
+/// either be statically or dynamically typed:
+/// - __Static__: A static actor-type is defined as the [`ActorInbox`].
+/// - __Dynamic__: A dynamic actor-type is defined as a [`DynActor<dyn _>`], usually written
+/// as [`Accepts![Msg1, Msg2, ..]`](Accepts!).
+///
+/// The actor-type is used as the generic parameter `A` in for example a [`Child<_, A, _>`] and
+/// an [`Address<A>`]. These can then be `transformed` into and between dynamic actor-types.
 pub trait ActorType {
+    /// The unerlying [`Channel`] that this actor uses.
     type Channel: Channel + ?Sized;
 }
 
-/// A specialization of [`ActorType`] for a dynamically specified channel.
+/// A specialization of [`ActorType`] for dynamic actor-types.
 pub trait DynActorType: ActorType<Channel = dyn Channel> {
+    /// Get all [`Message`] type-ids that this actor accepts.
     fn msg_ids() -> Box<[TypeId]>;
 }
 
-/// Anything that can be passed along as the argument to the spawn function.
-/// An inbox also defines the [`ActorType`] of spawned actor.
-pub trait InboxType: ActorType + ActorRef<ActorType = Self> + Send + 'static {
+/// All actors are spawned with an [`ActorInbox`] which defines the [`ActorType`] of that actor.
+pub trait ActorInbox: ActorType + ActorRef<ActorType = Self> + Send + 'static {
+    /// The inbox's configuration.
     type Config: Send;
 
-    /// Sets up the channel with the given address count and actor-id.
-    fn setup_channel(
+    /// Sets up the channel with the given address-count and actor-id.
+    fn init_single_inbox(
         config: Self::Config,
         address_count: usize,
         actor_id: ActorId,
-    ) -> Arc<Self::Channel>;
-
-    /// Creates another inbox from the channel, without adding anything to its process count.
-    fn from_channel(channel: Arc<Self::Channel>) -> Self;
+    ) -> (Arc<Self::Channel>, Self);
 }
 
-/// An [`InboxType`] that allows for spawning multiple processes onto an actor.
-pub trait MultiInboxType: InboxType {
+/// An [`ActorInbox`] that allows for spawning multiple processes onto an actor.
+pub trait MultiActorInbox: ActorInbox {
     /// Sets up the channel, preparing for x processes to be spawned.
-    fn setup_multi_channel(
+    fn init_multi_inbox(
         config: Self::Config,
         process_count: usize,
         address_count: usize,
         actor_id: ActorId,
     ) -> Arc<Self::Channel>;
+
+    /// Create an inbox from the channel.
+    ///
+    /// The inbox-count should be incremented outside of this method.
+    fn from_channel(channel: Arc<Self::Channel>) -> Self;
 }
 
-/// Allows for the transformation of one [`ActorType`] into another.
-pub trait TransformInto<A: ActorType>: ActorType {
-    fn transform_into(channel: Arc<Self::Channel>) -> Arc<A::Channel>;
-}
-
-/// A [`DynActorType`] with that accepts specific messages:
-/// - `Dyn<dyn AcceptsNone>` -> Accepts no messages
-/// - `Dyn<dyn AcceptsTwo<u32, u64>` -> Accepts two messages: `u32` and `u64`.
+/// A dynamic [`ActorType`] that accepts specific messages:
+/// - `DynActor<dyn AcceptsNone>` -> Accepts no messages.
+/// - `DynActor<dyn AcceptsTwo<u32, u64>` -> Accepts two messages: `u32` and `u64`.
 ///
-/// Any [InboxType] which accepts these messages can be transformed into a dynamic channel using
-/// [TransformInto].
+/// Any [`ActorType`] which accepts these messages implements [`TransformInto`], and can
+/// thus be transformed into a dynamic actor-type.
 #[derive(Debug)]
-pub struct Dyn<T: ?Sized>(PhantomData<*const T>);
+pub struct DynActor<T: ?Sized>(PhantomData<*const T>);
 
-unsafe impl<T: ?Sized> Send for Dyn<T> {}
-unsafe impl<T: ?Sized> Sync for Dyn<T> {}
+unsafe impl<T: ?Sized> Send for DynActor<T> {}
+unsafe impl<T: ?Sized> Sync for DynActor<T> {}
 
-impl<D: ?Sized> ActorType for Dyn<D> {
+impl<T: ?Sized> ActorType for DynActor<T> {
     type Channel = dyn Channel;
 }
 
-impl<M, D> Accept<M> for Dyn<D>
+impl<M, T: ?Sized> Accept<M> for DynActor<T>
 where
     Self: DynActorType + TransformInto<Accepts![M]>,
     M: Message + Send + 'static,
-    M::Payload: Send,
     M::Returned: Send,
-    D: ?Sized,
 {
     fn try_send(channel: &Self::Channel, msg: M) -> Result<M::Returned, TrySendError<M>> {
         channel.try_send_checked(msg).map_err(|e| match e {
@@ -82,7 +83,7 @@ where
     }
 
     fn force_send(channel: &Self::Channel, msg: M) -> Result<M::Returned, TrySendError<M>> {
-        channel.force_send_unchecked(msg).map_err(|e| match e {
+        channel.force_send_checked(msg).map_err(|e| match e {
             TrySendCheckedError::Full(msg) => TrySendError::Full(msg),
             TrySendCheckedError::Closed(msg) => TrySendError::Closed(msg),
             TrySendCheckedError::NotAccepted(_) => {
@@ -112,6 +113,12 @@ where
             })
         })
     }
+}
+
+/// Allows for the transformation of one [`ActorType`]'s [`Channel`] into another one's.
+pub trait TransformInto<A: ActorType>: ActorType {
+    /// Transform the channel into another one.
+    fn transform_into(channel: Arc<Self::Channel>) -> Arc<A::Channel>;
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@ use super::*;
 use crate::all::*;
 use concurrent_queue::{ConcurrentQueue, PopError, PushError};
 use event_listener::{Event, EventListener};
-use futures::{future::BoxFuture, pin_mut, Future, FutureExt};
+use futures::{executor::block_on, future::BoxFuture, pin_mut, Future, FutureExt};
 use std::{
     any::{Any, TypeId},
     fmt::Debug,
@@ -11,7 +11,7 @@ use std::{
         atomic::{AtomicI32, AtomicUsize, Ordering},
         Arc,
     },
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 use tokio::{task::yield_now, time::Sleep};
 
@@ -54,7 +54,7 @@ impl<P: Protocol> InboxChannel<P> {
         Self {
             queue: match &capacity {
                 Capacity::Bounded(size) => ConcurrentQueue::bounded(size.to_owned()),
-                Capacity::Unbounded(_) => ConcurrentQueue::unbounded(),
+                Capacity::BackPressure(_) | Capacity::Unbounded => ConcurrentQueue::unbounded(),
             },
             capacity,
             address_count: AtomicUsize::new(address_count),
@@ -107,8 +107,8 @@ impl<P: Protocol> InboxChannel<P> {
     /// on success -> 1 send_listener & 1 recv_listener
     pub(crate) fn pop_msg(&self) -> Result<P, PopError> {
         self.queue.pop().map(|msg| {
-            self.send_event.notify(1);
-            self.recv_event.notify(1);
+            self.send_event.notify(usize::MAX);
+            self.recv_event.notify(usize::MAX);
             msg
         })
     }
@@ -122,7 +122,7 @@ impl<P: Protocol> InboxChannel<P> {
     pub(crate) fn push_msg(&self, msg: P) -> Result<(), PushError<P>> {
         match self.queue.push(msg) {
             Ok(()) => {
-                self.recv_event.notify(1);
+                self.recv_event.notify(usize::MAX);
                 Ok(())
             }
             Err(e) => Err(e),
@@ -188,31 +188,7 @@ impl<P: Protocol> InboxChannel<P> {
         RecvFut {
             channel: self,
             signaled_halt,
-            listener,
-        }
-    }
-
-    fn poll_try_recv(
-        &self,
-        signaled_halt: &mut bool,
-        listener: &mut Option<EventListener>,
-    ) -> Option<Result<P, RecvError>> {
-        match self.try_recv(signaled_halt) {
-            Ok(msg) => {
-                *listener = None;
-                Some(Ok(msg))
-            }
-            Err(signal) => match signal {
-                TryRecvError::Halted => {
-                    *listener = None;
-                    Some(Err(RecvError::Halted))
-                }
-                TryRecvError::ClosedAndEmpty => {
-                    *listener = None;
-                    Some(Err(RecvError::ClosedAndEmpty))
-                }
-                TryRecvError::Empty => None,
-            },
+            recv_listener: listener,
         }
     }
 
@@ -229,8 +205,8 @@ impl<P: Protocol> InboxChannel<P> {
 
     pub(crate) fn try_send_protocol(&self, msg: P) -> Result<(), TrySendError<P>> {
         match self.capacity() {
-            Capacity::Bounded(_) => self.push_msg(msg),
-            Capacity::Unbounded(backoff) => match backoff.get_timeout(self.msg_count()) {
+            Capacity::Bounded(_) | Capacity::Unbounded => self.push_msg(msg),
+            Capacity::BackPressure(backoff) => match backoff.get_timeout(self.msg_count()) {
                 Some(_) => return Err(TrySendError::Full(msg)),
                 None => self.push_msg(msg),
             },
@@ -241,32 +217,8 @@ impl<P: Protocol> InboxChannel<P> {
         })
     }
 
-    pub(crate) fn send_protocol_blocking(&self, mut msg: P) -> Result<(), SendError<P>> {
-        match self.capacity() {
-            Capacity::Bounded(_) => loop {
-                msg = match self.push_msg(msg) {
-                    Ok(()) => {
-                        return Ok(());
-                    }
-                    Err(PushError::Closed(msg)) => {
-                        return Err(SendError(msg));
-                    }
-                    Err(PushError::Full(msg)) => msg,
-                };
-
-                self.get_send_listener().wait();
-            },
-            Capacity::Unbounded(backoff) => {
-                let timeout = backoff.get_timeout(self.msg_count());
-                if let Some(timeout) = timeout {
-                    std::thread::sleep(timeout);
-                }
-                self.push_msg(msg).map_err(|e| match e {
-                    PushError::Full(_) => unreachable!("unbounded"),
-                    PushError::Closed(msg) => SendError(msg),
-                })
-            }
-        }
+    pub(crate) fn send_protocol_blocking(&self, msg: P) -> Result<(), SendError<P>> {
+        futures::executor::block_on(self.send_protocol(msg))
     }
 }
 
@@ -331,8 +283,8 @@ impl<P: Protocol> Channel for InboxChannel<P> {
     }
 
     /// Capacity of the inbox.
-    fn capacity(&self) -> &Capacity {
-        &self.capacity
+    fn capacity(&self) -> Capacity {
+        self.capacity.clone()
     }
 
     /// Whether all inboxes linked to this channel have exited.
@@ -344,7 +296,7 @@ impl<P: Protocol> Channel for InboxChannel<P> {
     /// a new Address may be created from this channel.
     ///
     /// Returns the previous inbox-count
-    fn add_address(&self) -> usize {
+    fn increment_address_count(&self) -> usize {
         self.address_count.fetch_add(1, Ordering::AcqRel)
     }
 
@@ -356,7 +308,7 @@ impl<P: Protocol> Channel for InboxChannel<P> {
     ///
     /// ## Panics
     /// * `prev-address-count == 0`
-    fn remove_address(&self) -> usize {
+    fn decrement_address_count(&self) -> usize {
         let prev_address_count = self.address_count.fetch_sub(1, Ordering::AcqRel);
         assert!(prev_address_count >= 1);
         prev_address_count
@@ -373,11 +325,10 @@ impl<P: Protocol> Channel for InboxChannel<P> {
 
     // Closes the channel and halts all actors.
     fn halt(&self) {
-        self.close();
         self.halt_some(u32::MAX);
     }
 
-    fn try_add_process(&self) -> Result<usize, TryAddProcessError> {
+    fn try_increment_process_count(&self) -> Result<usize, TryAddProcessError> {
         let result = self
             .inbox_count
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |val| {
@@ -394,27 +345,31 @@ impl<P: Protocol> Channel for InboxChannel<P> {
         }
     }
 
-    fn try_send_any(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {
+    fn try_send_box(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {
         match P::try_from_boxed_payload(boxed) {
             Ok(prot) => self.try_send_protocol(prot).map_err(|e| match e {
                 TrySendError::Full(prot) => TrySendCheckedError::Full(prot.into_boxed_payload()),
-                TrySendError::Closed(prot) => TrySendCheckedError::Closed(prot.into_boxed_payload()),
+                TrySendError::Closed(prot) => {
+                    TrySendCheckedError::Closed(prot.into_boxed_payload())
+                }
             }),
             Err(boxed) => Err(TrySendCheckedError::NotAccepted(boxed)),
         }
     }
 
-    fn force_send_any(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {
+    fn force_send_box(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {
         match P::try_from_boxed_payload(boxed) {
             Ok(prot) => self.send_protocol_now(prot).map_err(|e| match e {
                 TrySendError::Full(prot) => TrySendCheckedError::Full(prot.into_boxed_payload()),
-                TrySendError::Closed(prot) => TrySendCheckedError::Closed(prot.into_boxed_payload()),
+                TrySendError::Closed(prot) => {
+                    TrySendCheckedError::Closed(prot.into_boxed_payload())
+                }
             }),
             Err(boxed) => Err(TrySendCheckedError::NotAccepted(boxed)),
         }
     }
 
-    fn send_any_blocking(&self, boxed: BoxPayload) -> Result<(), SendCheckedError<BoxPayload>> {
+    fn send_box_blocking(&self, boxed: BoxPayload) -> Result<(), SendCheckedError<BoxPayload>> {
         match P::try_from_boxed_payload(boxed) {
             Ok(prot) => self
                 .send_protocol_blocking(prot)
@@ -423,7 +378,7 @@ impl<P: Protocol> Channel for InboxChannel<P> {
         }
     }
 
-    fn send_any(
+    fn send_box(
         &self,
         boxed: BoxPayload,
     ) -> BoxFuture<'_, Result<(), SendCheckedError<BoxPayload>>> {
@@ -463,18 +418,11 @@ impl<M> Debug for InboxChannel<M> {
     }
 }
 
-//------------------------------------------------------------------------------------------------
-//  RecvFut
-//------------------------------------------------------------------------------------------------
-
-/// A future returned by receiving messages from an [Inbox].
-///
-/// This can be awaited or streamed to get the messages.
 #[derive(Debug)]
 pub struct RecvFut<'a, P> {
     channel: &'a InboxChannel<P>,
     signaled_halt: &'a mut bool,
-    listener: &'a mut Option<EventListener>,
+    recv_listener: &'a mut Option<EventListener>,
 }
 
 impl<'a, P: Protocol> Unpin for RecvFut<'a, P> {}
@@ -483,49 +431,38 @@ impl<'a, P: Protocol> Future for RecvFut<'a, P> {
     type Output = Result<P, RecvError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let Self {
-            channel,
-            signaled_halt,
-            listener,
-        } = &mut *self;
+        let this = &mut *self;
 
-        // First try to receive once, and yield if successful
-        if let Some(res) = channel.poll_try_recv(signaled_halt, listener) {
-            let fut = yield_now();
-            pin_mut!(fut);
-            let _ = fut.poll(cx);
-            return Poll::Ready(res);
-        }
+        let result = loop {
+            let recv_listener = this
+                .recv_listener
+                .get_or_insert(this.channel.get_recv_listener());
 
-        loop {
-            // Otherwise, acquire a listener, if we don't have one yet
-            if listener.is_none() {
-                **listener = Some(channel.get_recv_listener())
-            }
-
-            // Attempt to receive a message, and return if ready
-            if let Some(res) = channel.poll_try_recv(signaled_halt, listener) {
-                return Poll::Ready(res);
-            }
-
-            // And poll the listener
-            match listener.as_mut().unwrap().poll_unpin(cx) {
-                Poll::Ready(()) => {
-                    **listener = None;
-                    // Attempt to receive a message, and return if ready
-                    if let Some(res) = channel.poll_try_recv(signaled_halt, listener) {
-                        return Poll::Ready(res);
+            match this.channel.try_recv(&mut this.signaled_halt) {
+                Ok(msg) => break Poll::Ready(Ok(msg)),
+                Err(error) => match error {
+                    TryRecvError::Halted => break Poll::Ready(Err(RecvError::Halted)),
+                    TryRecvError::ClosedAndEmpty => {
+                        break Poll::Ready(Err(RecvError::ClosedAndEmpty))
                     }
-                }
-                Poll::Pending => return Poll::Pending,
-            }
+                    TryRecvError::Empty => {
+                        ready!(recv_listener.poll_unpin(cx));
+                        *this.recv_listener = None;
+                    }
+                },
+            };
+        };
+
+        if result.is_ready() {
+            *this.recv_listener = None;
         }
+        result
     }
 }
 
 impl<'a, M> Drop for RecvFut<'a, M> {
     fn drop(&mut self) {
-        *self.listener = None;
+        *self.recv_listener = None;
     }
 }
 
@@ -563,12 +500,12 @@ impl Future for InnerSendFut {
 impl<'a, P: Protocol> SendProtocolFut<'a, P> {
     pub(crate) fn new(channel: &'a InboxChannel<P>, msg: P) -> Self {
         match channel.capacity() {
-            Capacity::Bounded(_) => SendProtocolFut {
+            Capacity::Bounded(_) | Capacity::Unbounded => SendProtocolFut {
                 channel,
                 msg: Some(msg),
                 fut: None,
             },
-            Capacity::Unbounded(back_pressure) => SendProtocolFut {
+            Capacity::BackPressure(back_pressure) => SendProtocolFut {
                 channel,
                 msg: Some(msg),
                 fut: back_pressure
@@ -646,7 +583,7 @@ impl<'a, P: Protocol> Future for SendProtocolFut<'a, P> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.channel.capacity() {
             Capacity::Bounded(_) => self.poll_bounded_send(cx),
-            Capacity::Unbounded(_) => self.poll_unbounded_send(cx),
+            Capacity::BackPressure(_) | Capacity::Unbounded => self.poll_unbounded_send(cx),
         }
     }
 }
@@ -654,9 +591,11 @@ impl<'a, P: Protocol> Future for SendProtocolFut<'a, P> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::inbox::BackPressure;
+    use crate::inbox::{RecvError, TryRecvError};
+    use std::future::ready;
     use std::{sync::Arc, time::Duration};
     use tokio::time::Instant;
-    use crate::inbox::BackPressure;
 
     #[test]
     fn try_send_with_space() {
@@ -668,7 +607,7 @@ mod test {
         let channel = InboxChannel::<()>::new(
             1,
             1,
-            Capacity::Unbounded(BackPressure::disabled()),
+            Capacity::Unbounded,
             ActorId::generate(),
         );
         channel.try_send_protocol(()).unwrap();
@@ -681,7 +620,7 @@ mod test {
         let channel = InboxChannel::<()>::new(
             1,
             1,
-            Capacity::Unbounded(BackPressure::linear(0, Duration::from_secs(1))),
+            Capacity::BackPressure(BackPressure::linear(0, Duration::from_secs(1))),
             ActorId::generate(),
         );
         assert_eq!(channel.try_send_protocol(()), Err(TrySendError::Full(())));
@@ -707,7 +646,7 @@ mod test {
         let channel = InboxChannel::<()>::new(
             1,
             1,
-            Capacity::Unbounded(BackPressure::disabled()),
+            Capacity::Unbounded,
             ActorId::generate(),
         );
         channel.send_protocol(()).await.unwrap();
@@ -719,7 +658,7 @@ mod test {
         let channel = InboxChannel::<()>::new(
             1,
             1,
-            Capacity::Unbounded(BackPressure::linear(0, Duration::from_millis(1))),
+            Capacity::BackPressure(BackPressure::linear(0, Duration::from_millis(1))),
             ActorId::generate(),
         );
         let time = Instant::now();
@@ -749,18 +688,11 @@ mod test {
         });
 
         channel.recv(&mut false, &mut None).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(1)).await;
+        tokio::time::sleep(Duration::from_millis(2)).await;
         channel.recv(&mut false, &mut None).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(1)).await;
+        tokio::time::sleep(Duration::from_millis(2)).await;
         channel.recv(&mut false, &mut None).await.unwrap();
     }
-}
-
-#[cfg(test)]
-mod test3 {
-    use super::*;
-    use crate::inbox::{RecvError, TryRecvError};
-    use std::{future::ready, sync::Arc, time::Duration};
 
     #[test]
     fn try_recv() {
@@ -881,19 +813,6 @@ mod test3 {
         channel.close();
         handle.await.unwrap();
     }
-}
-
-#[cfg(test)]
-mod test2 {
-    use std::{
-        sync::{atomic::Ordering, Arc},
-    };
-
-    use super::*;
-    use concurrent_queue::{PopError, PushError};
-    use event_listener::EventListener;
-    use futures::FutureExt;
-    use crate::inbox::BackPressure;
 
     #[test]
     fn channels_have_actor_ids() {
@@ -912,7 +831,7 @@ mod test2 {
         let channel = InboxChannel::<()>::new(
             1,
             1,
-            Capacity::Unbounded(BackPressure::default()),
+            Capacity::BackPressure(BackPressure::default()),
             ActorId::generate(),
         );
         assert!(channel.queue.capacity().is_none());
@@ -923,11 +842,11 @@ mod test2 {
     fn adding_removing_addresses() {
         let channel = InboxChannel::<()>::new(1, 1, Capacity::default(), ActorId::generate());
         assert_eq!(channel.address_count(), 1);
-        channel.add_address();
+        channel.increment_address_count();
         assert_eq!(channel.address_count(), 2);
-        channel.remove_address();
+        channel.decrement_address_count();
         assert_eq!(channel.address_count(), 1);
-        channel.remove_address();
+        channel.decrement_address_count();
         assert_eq!(channel.address_count(), 0);
     }
 
@@ -935,14 +854,14 @@ mod test2 {
     #[should_panic]
     fn remove_address_below_0() {
         let channel = InboxChannel::<()>::new(0, 1, Capacity::default(), ActorId::generate());
-        channel.remove_address();
+        channel.decrement_address_count();
     }
 
     #[test]
     fn adding_removing_inboxes() {
         let channel = InboxChannel::<()>::new(1, 1, Capacity::default(), ActorId::generate());
         assert_eq!(channel.process_count(), 1);
-        channel.try_add_process().unwrap();
+        channel.try_increment_process_count().unwrap();
         assert_eq!(channel.process_count(), 2);
         channel.remove_inbox();
         assert_eq!(channel.process_count(), 1);
@@ -1000,7 +919,7 @@ mod test2 {
         let channel = InboxChannel::<()>::new(1, 1, Capacity::default(), ActorId::generate());
         let listeners = Listeners::size_10(&channel);
 
-        channel.remove_address();
+        channel.decrement_address_count();
 
         assert!(!channel.is_closed());
         assert!(!channel.has_exited());
@@ -1008,7 +927,7 @@ mod test2 {
         assert_eq!(channel.process_count(), 1);
         assert_eq!(channel.push_msg(()), Ok(()));
         listeners.assert_notified(Assert {
-            recv: 1,
+            recv: 10,
             exit: 0,
             send: 0,
         });
@@ -1041,7 +960,7 @@ mod test2 {
         let channel = InboxChannel::<Arc<()>>::new(1, 1, Capacity::default(), ActorId::generate());
         channel.remove_inbox();
         assert_eq!(
-            channel.try_add_process(),
+            channel.try_increment_process_count(),
             Err(TryAddProcessError::ActorHasExited)
         );
         assert_eq!(channel.process_count(), 0);
@@ -1051,7 +970,7 @@ mod test2 {
     fn add_inbox_with_0_addresses_is_ok() {
         let channel = InboxChannel::<Arc<()>>::new(1, 1, Capacity::default(), ActorId::generate());
         channel.remove_inbox();
-        assert!(matches!(channel.try_add_process(), Err(_)));
+        assert!(matches!(channel.try_increment_process_count(), Err(_)));
         assert_eq!(channel.process_count(), 0);
     }
 
@@ -1064,7 +983,7 @@ mod test2 {
 
         assert_eq!(channel.msg_count(), 1);
         listeners.assert_notified(Assert {
-            recv: 1,
+            recv: 10,
             exit: 0,
             send: 0,
         });
@@ -1079,9 +998,9 @@ mod test2 {
         channel.pop_msg().unwrap();
         assert_eq!(channel.msg_count(), 0);
         listeners.assert_notified(Assert {
-            recv: 1,
+            recv: 10,
             exit: 0,
-            send: 1,
+            send: 10,
         });
     }
 
@@ -1096,15 +1015,15 @@ mod test2 {
         listeners.assert_notified(Assert {
             recv: 10,
             exit: 0,
-            send: 10,
+            send: 0,
         });
     }
 
     #[test]
-    fn halt_closes_channel() {
+    fn halt_doesnt_close_channel() {
         let channel = InboxChannel::<()>::new(1, 3, Capacity::default(), ActorId::generate());
         channel.halt();
-        assert!(channel.is_closed());
+        assert!(!channel.is_closed());
     }
 
     #[test]

@@ -34,26 +34,14 @@ impl ActorRef for MultiHalter {
     }
 }
 
-impl MultiInboxType for MultiHalter {
-    fn setup_multi_channel(
+impl MultiActorInbox for MultiHalter {
+    fn init_multi_inbox(
         config: Self::Config,
         process_count: usize,
         address_count: usize,
         actor_id: ActorId,
     ) -> Arc<Self::Channel> {
         Arc::new(MultiHalterChannel::new(address_count, process_count, actor_id))
-    }
-}
-
-impl InboxType for MultiHalter {
-    type Config = ();
-
-    fn setup_channel(
-        config: Self::Config,
-        address_count: usize,
-        actor_id: ActorId,
-    ) -> Arc<Self::Channel> {
-        Self::setup_multi_channel(config, 1, address_count, actor_id)
     }
 
     fn from_channel(channel: Arc<Self::Channel>) -> Self {
@@ -63,6 +51,21 @@ impl InboxType for MultiHalter {
             halted: false,
         }
     }
+}
+
+impl ActorInbox for MultiHalter {
+    type Config = ();
+
+    fn init_single_inbox(
+        config: Self::Config,
+        address_count: usize,
+        actor_id: ActorId,
+    ) -> (Arc<Self::Channel>, Self) {
+        let channel = Self::init_multi_inbox(config, 1, address_count, actor_id);
+        (channel.clone(), Self::from_channel(channel))
+    }
+
+
 }
 
 impl Unpin for MultiHalter {}

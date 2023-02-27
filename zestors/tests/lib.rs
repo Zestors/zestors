@@ -1,6 +1,6 @@
 use futures::{future::pending, StreamExt};
+use zestors::{spawning::{spawn, spawn_with, Link, spawn_many, spawn_many_with}, channel::inbox::{Inbox, RecvError, Capacity, BackPressure}, monitoring::ActorRefExt, protocol};
 use std::{collections::HashSet, time::Duration};
-use zestors::all::*;
 
 #[tokio::test]
 async fn spawn_and_abort() {
@@ -59,7 +59,7 @@ async fn spawn_and_drop() {
 async fn spawn_and_drop_detached() {
     let (child, address) = spawn_with(
         Link::Detached,
-        Capacity::Unbounded(BackPressure::default()),
+        Capacity::BackPressure(BackPressure::default()),
         |mut inbox: Inbox<()>| async move {
             assert_eq!(inbox.recv().await.unwrap(), ());
         },

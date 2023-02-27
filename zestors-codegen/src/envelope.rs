@@ -2,24 +2,21 @@ use heck::ToSnakeCase;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, ToTokens};
 use syn::{
-    parse::Parse, parse2, parse_quote, punctuated::Punctuated, spanned::Spanned, token::Colon,
-    Attribute, Error, Field, Fields, FnArg, Generics, Item, Meta, Pat, PatIdent, PatType, Token,
+    parse2, parse_quote, punctuated::Punctuated, spanned::Spanned, token::Colon, Error, Fields,
+    ItemStruct, Meta, Pat, PatType, Token,
 };
 
 pub fn derive_envelope(item: TokenStream) -> Result<TokenStream, Error> {
-    let item = match parse2::<Item>(item)? {
-        Item::Enum(item) => Err(Error::new_spanned(
-            item,
-            "Only implemented for structs right now",
-        ))?,
-        Item::Struct(item) => item,
-        item => Err(Error::new_spanned(item, "Must be enum, struct"))?,
-    };
+    let item = parse2::<ItemStruct>(item)?;
 
-    let ident = item.ident;
-    let vis = item.vis;
-    let (field_params, field_idents) = parse_fields(item.fields);
-    let (trait_ident, method_ident) = match item
+    if !item.generics.params.is_empty() {
+        Err(Error::new_spanned(
+            item.generics.params,
+            "Generics currently not supported with Envelope",
+        ))?
+    }
+
+    let (trait_name, method_name) = match item
         .attrs
         .iter()
         .find(|attr| attr.path.is_ident("envelope"))
@@ -27,37 +24,53 @@ pub fn derive_envelope(item: TokenStream) -> Result<TokenStream, Error> {
         Some(attr) => {
             let Meta::List(meta_list) = attr.parse_meta()? else { panic!() };
             let mut iter = meta_list.nested.into_iter();
-            let trait_name = iter.next().unwrap().to_token_stream();
-            let fn_name = iter.next().unwrap().to_token_stream();
-            (parse2(trait_name)?, parse2(fn_name)?)
+            let Some(trait_name) = iter.next() else {
+                Err(Error::new_spanned(&meta_list.path, "Expected trait name"))?
+            };
+            let Some(fn_name) = iter.next() else {
+                Err(Error::new_spanned(&meta_list.path, "Expected method name"))?
+            };
+            (
+                parse2(trait_name.to_token_stream())?,
+                parse2(fn_name.to_token_stream())?,
+            )
         }
         None => {
-            let trait_ident = Ident::new(&format!("{}Envelope", ident.to_string()), ident.span());
-            let method_ident = Ident::new(&ident.to_string().to_snake_case(), ident.span());
+            let trait_ident = Ident::new(
+                &format!("{}Envelope", item.ident.to_string()),
+                item.ident.span(),
+            );
+            let method_ident =
+                Ident::new(&item.ident.to_string().to_snake_case(), item.ident.span());
             (trait_ident, method_ident)
         }
     };
     let trait_doc = format!(
         "
         Automatically generated trait for creating envelopes of the 
-        message[`{ident}`].
-        "
+        message[`{}`].
+        ",
+        item.ident
     );
     let method_doc = format!(
         "
         Creates an [`Envelope`](zestors::messaging::Envelope) for the 
-        message[`{ident}`].
-        "
+        message[`{}`].
+        ",
+        item.ident
     );
+    let ident = item.ident;
+    let vis = item.vis;
+    let (field_params, field_idents) = parse_fields(item.fields);
 
     Ok(quote! {
         #[doc = #trait_doc]
-        #vis trait #trait_ident: zestors::monitoring::ActorRef
+        #vis trait #trait_name: zestors::monitoring::ActorRef
         where
-            Self::ActorType: zestors::messaging::Accept<#ident>,
+            Self::ActorType: zestors::messaging::Accept<#ident>
         {
             #[doc = #method_doc]
-            fn #method_ident(
+            fn #method_name(
                 &self,
                 #field_params
             ) -> zestors::messaging::Envelope<'_, Self::ActorType, #ident> {
@@ -67,7 +80,7 @@ pub fn derive_envelope(item: TokenStream) -> Result<TokenStream, Error> {
             }
         }
 
-        impl<T> #trait_ident for T
+        impl<T> #trait_name for T
         where
             T: zestors::monitoring::ActorRef,
             T::ActorType: zestors::messaging::Accept<#ident>

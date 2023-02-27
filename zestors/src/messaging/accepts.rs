@@ -21,37 +21,37 @@ pub trait Accept<M: Message>: ActorType {
 #[macro_export]
 macro_rules! Accepts {
     () => {
-        $crate::channel::Dyn<dyn $crate::channel::dyn_actor_types::AcceptsNone>
+        $crate::channel::DynActor<dyn $crate::channel::dyn_actor_types::AcceptsNone>
     };
     ($ty1:ty) => {
-        $crate::channel::Dyn<dyn $crate::channel::dyn_actor_types::AcceptsOne<$ty1>>
+        $crate::channel::DynActor<dyn $crate::channel::dyn_actor_types::AcceptsOne<$ty1>>
     };
     ($ty1:ty, $ty2:ty) => {
-        $crate::channel::Dyn<dyn $crate::channel::dyn_actor_types::AcceptsTwo<$ty1, $ty2>>
+        $crate::channel::DynActor<dyn $crate::channel::dyn_actor_types::AcceptsTwo<$ty1, $ty2>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty) => {
-        $crate::channel::Dyn<dyn $crate::channel::dyn_actor_types::AcceptsThree<$ty1, $ty2, $ty3>>
+        $crate::channel::DynActor<dyn $crate::channel::dyn_actor_types::AcceptsThree<$ty1, $ty2, $ty3>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty) => {
-        $crate::channel::Dyn<dyn $crate::channel::dyn_actor_types::AcceptsFour<$ty1, $ty2, $ty3, $ty4>>
+        $crate::channel::DynActor<dyn $crate::channel::dyn_actor_types::AcceptsFour<$ty1, $ty2, $ty3, $ty4>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty) => {
-        $crate::channel::Dyn<dyn $crate::channel::dyn_actor_types::AcceptsFive<$ty1, $ty2, $ty3, $ty4, $ty5>>
+        $crate::channel::DynActor<dyn $crate::channel::dyn_actor_types::AcceptsFive<$ty1, $ty2, $ty3, $ty4, $ty5>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty) => {
-        $crate::channel::Dyn<dyn $crate::channel::dyn_actor_types::AcceptsSix<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6>>
+        $crate::channel::DynActor<dyn $crate::channel::dyn_actor_types::AcceptsSix<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty, $ty7:ty) => {
-        $crate::channel::Dyn<dyn $crate::channel::dyn_actor_types::AcceptsSeven<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7>>
+        $crate::channel::DynActor<dyn $crate::channel::dyn_actor_types::AcceptsSeven<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty, $ty7:ty, $ty8:ty) => {
-        $crate::channel::Dyn<dyn $crate::channel::dyn_actor_types::AcceptsEight<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8>>
+        $crate::channel::DynActor<dyn $crate::channel::dyn_actor_types::AcceptsEight<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty, $ty7:ty, $ty8:ty, $ty9:ty) => {
-        $crate::channel::Dyn<dyn $crate::channel::dyn_actor_types::AcceptsNine<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8, $ty9>>
+        $crate::channel::DynActor<dyn $crate::channel::dyn_actor_types::AcceptsNine<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8, $ty9>>
     };
     ($ty1:ty, $ty2:ty, $ty3:ty, $ty4:ty, $ty5:ty, $ty6:ty, $ty7:ty, $ty8:ty, $ty9:ty, $ty10:ty) => {
-        $crate::channel::Dyn<dyn $crate::channel::dyn_actor_types::AcceptsTen<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8, $ty9, $ty10>>
+        $crate::channel::DynActor<dyn $crate::channel::dyn_actor_types::AcceptsTen<$ty1, $ty2, $ty3, $ty4, $ty5, $ty6, $ty7, $ty8, $ty9, $ty10>>
     };
 }
 pub use Accepts;

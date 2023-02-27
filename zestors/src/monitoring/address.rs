@@ -131,7 +131,7 @@ impl<A: ActorType> Unpin for Address<A> {}
 
 impl<A: ActorType> Clone for Address<A> {
     fn clone(&self) -> Self {
-        self.channel.add_address();
+        self.channel.increment_address_count();
         Self {
             channel: self.channel.clone(),
             exit_listener: None,
@@ -141,7 +141,7 @@ impl<A: ActorType> Clone for Address<A> {
 
 impl<T: ActorType> Drop for Address<T> {
     fn drop(&mut self) {
-        self.channel.remove_address();
+        self.channel.decrement_address_count();
     }
 }
 

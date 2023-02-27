@@ -25,22 +25,22 @@ impl ActorType for Halter {
     type Channel = HalterChannel;
 }
 
-impl InboxType for Halter {
+impl ActorInbox for Halter {
     type Config = ();
 
-    fn setup_channel(
+    fn init_single_inbox(
         _config: (),
         address_count: usize,
         actor_id: ActorId,
-    ) -> Arc<Self::Channel> {
-        Arc::new(HalterChannel::new(address_count, actor_id))
-    }
-
-    fn from_channel(channel: Arc<Self::Channel>) -> Self {
-        Self {
-            channel,
-            halt_event_listener: None,
-        }
+    ) -> (Arc<Self::Channel>, Self) {
+        let channel = Arc::new(HalterChannel::new(address_count, actor_id));
+        (
+            channel.clone(),
+            Self {
+                channel,
+                halt_event_listener: None,
+            },
+        )
     }
 }
 

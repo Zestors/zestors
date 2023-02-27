@@ -1,33 +1,38 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
-use syn::{parse2, parse_quote, Error, Field, Fields, ItemEnum, Type, Visibility};
+use syn::{
+    parse2, parse_quote, punctuated::Punctuated, Error, Field, Fields, ItemEnum, Token, Type,
+    Visibility,
+};
 
 pub fn protocol(_attr: TokenStream, item: TokenStream) -> Result<TokenStream, Error> {
-    let mut item = parse2::<ItemEnum>(item)?;
+    let mut item_enum = parse2::<ItemEnum>(item)?;
 
-    let variants = extend_enum(&mut item)?;
-    let impl_protocol = impl_protocol(&item, &variants)?;
-    let impl_accepts = impl_accepts(&item, &variants)?;
+    let protocol_msgs = modify_protocol_enum(&mut item_enum)?;
+    let impl_protocol = impl_protocol(&item_enum, &protocol_msgs)?;
+    let impl_accepts = impl_accepts(&item_enum, &protocol_msgs)?;
+    let impl_handled_by = impl_handled_by(&item_enum, &protocol_msgs)?;
 
     Ok(quote! {
-        #item
+        #item_enum
         #impl_protocol
+        #impl_handled_by
         #impl_accepts
     })
 }
 
-struct ProtocolVariant {
-    ident: Ident,
-    ty: Type,
+struct ProtocolMsg {
+    enum_ident: Ident,
+    msg_ty: Type,
 }
 
-fn impl_accepts(item: &ItemEnum, variants: &Vec<ProtocolVariant>) -> Result<TokenStream, Error> {
+fn impl_accepts(item: &ItemEnum, variants: &Vec<ProtocolMsg>) -> Result<TokenStream, Error> {
     let ident = &item.ident;
     let (impl_generics, ty_generics, where_clause) = item.generics.split_for_impl();
 
     let accepts = variants.iter().map(|variant| {
-            let variant_ty = &variant.ty;
-            let variant_ident = &variant.ident;
+            let variant_ty = &variant.msg_ty;
+            let variant_ident = &variant.enum_ident;
             quote! {
                 impl #impl_generics zestors::messaging::FromPayload<#variant_ty> for #ident #ty_generics #where_clause {
                     fn from_payload(
@@ -54,15 +59,15 @@ fn impl_accepts(item: &ItemEnum, variants: &Vec<ProtocolVariant>) -> Result<Toke
     })
 }
 
-fn impl_protocol(item: &ItemEnum, variants: &Vec<ProtocolVariant>) -> Result<TokenStream, Error> {
+fn impl_protocol(item: &ItemEnum, variants: &Vec<ProtocolMsg>) -> Result<TokenStream, Error> {
     let ident = &item.ident;
     let (impl_generics, ty_generics, where_clause) = item.generics.split_for_impl();
 
     let downcasts = variants
         .iter()
         .map(|variant| {
-            let variant_ident = &variant.ident;
-            let variant_ty = &variant.ty;
+            let variant_ident = &variant.enum_ident;
+            let variant_ty = &variant.msg_ty;
             quote! {
                 let boxed = match boxed.downcast::<#variant_ty>() {
                     Ok(msg) => {
@@ -77,7 +82,7 @@ fn impl_protocol(item: &ItemEnum, variants: &Vec<ProtocolVariant>) -> Result<Tok
     let accepts = variants
         .iter()
         .map(|variant| {
-            let variant_ty = &variant.ty;
+            let variant_ty = &variant.msg_ty;
             quote! {
                 if *msg_type_id == std::any::TypeId::of::<#variant_ty>() {
                     return true
@@ -89,8 +94,8 @@ fn impl_protocol(item: &ItemEnum, variants: &Vec<ProtocolVariant>) -> Result<Tok
     let matches = variants
         .iter()
         .map(|variant| {
-            let variant_ident = &variant.ident;
-            let variant_ty = &variant.ty;
+            let variant_ident = &variant.enum_ident;
+            let variant_ty = &variant.msg_ty;
             quote! {
                 Self::#variant_ident(msg) => {
                     zestors::messaging::BoxPayload::new::<#variant_ty>(msg)
@@ -121,7 +126,68 @@ fn impl_protocol(item: &ItemEnum, variants: &Vec<ProtocolVariant>) -> Result<Tok
     })
 }
 
-fn extend_enum(item: &mut ItemEnum) -> Result<Vec<ProtocolVariant>, Error> {
+fn impl_handled_by(item: &ItemEnum, variants: &Vec<ProtocolMsg>) -> Result<TokenStream, Error> {
+    let new_generics = {
+        let handle_msg_traits: Punctuated<Type, Token![+]> = variants
+            .into_iter()
+            .map(|variant| {
+                let msg_ty = &variant.msg_ty;
+                let ty: Type = parse_quote! { zestors::handler::HandleMessage<#msg_ty> };
+                ty
+            })
+            .collect();
+
+        let mut new_generics = item.generics.clone();
+        if new_generics.where_clause.is_none() {
+            new_generics.where_clause = Some(parse_quote!{ where })
+        };
+        new_generics.params.push(parse_quote! { H });
+        new_generics
+            .where_clause
+            .as_mut()
+            .unwrap()
+            .predicates
+            .push(parse_quote! {
+                H: zestors::handler::Handler + #handle_msg_traits
+            });
+        new_generics
+    };
+
+    let matches: Vec<TokenStream> = variants
+        .iter()
+        .map(|variant| {
+            let variant_ident = &variant.enum_ident;
+            let variant_ty = &variant.msg_ty;
+            quote! {
+                Self::#variant_ident(payload) => {
+                    zestors::handler::HandleMessage::<#variant_ty>::handle_msg(
+                        handler, state, payload
+                    ).await
+                }
+            }
+        })
+        .collect();
+
+    let (impl_generics, _, where_clause) = new_generics.split_for_impl();
+    let (_, ty_generics, _) = item.generics.split_for_impl();
+    let ident = &item.ident;
+    Ok(quote! {
+        #[zestors::async_trait]
+        impl #impl_generics zestors::handler::HandledBy<H> for #ident #ty_generics #where_clause {
+            async fn handle_with(
+                self,
+                handler: &mut H,
+                state: &mut H::State,
+            ) -> Result<zestors::handler::Flow, H::Exception> {
+                match self {
+                    #(#matches)*
+                }
+            }
+        }
+    })
+}
+
+fn modify_protocol_enum(item: &mut ItemEnum) -> Result<Vec<ProtocolMsg>, Error> {
     item.variants
         .iter_mut()
         .map(|variant| {
@@ -141,7 +207,10 @@ fn extend_enum(item: &mut ItemEnum) -> Result<Vec<ProtocolVariant>, Error> {
                         },
                     });
 
-                    Ok(ProtocolVariant { ident, ty })
+                    Ok(ProtocolMsg {
+                        enum_ident: ident,
+                        msg_ty: ty,
+                    })
                 } else {
                     Err(Error::new_spanned(fields, "Must have one field"))
                 }

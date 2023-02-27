@@ -28,7 +28,7 @@ impl BoxPayload {
     }
 
     /// Attempts to downcast the message, and if successful cancels the message afterwards.
-    pub fn downcast_then_cancel<M>(self, returned: M::Returned) -> Result<M, Self>
+    pub fn downcast_and_cancel<M>(self, returned: M::Returned) -> Result<M, Self>
     where
         M: Message,
         M::Payload: 'static,

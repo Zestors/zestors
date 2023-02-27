@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use futures::{future::BoxFuture, Future};
 
-use super::{request::Rx, Message, RequestError, SendError, TrySendError};
+use super::{Message, RequestError, SendError, TrySendError};
 use crate::all::*;
 
 pub struct Envelope<'a, A: ActorType, M> {

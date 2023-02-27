@@ -52,7 +52,6 @@ mod restart_limiter;
 mod child_spec;
 mod startable;
 mod supervisor;
-mod action;
 pub use combinator_specs::*;
 use futures::Future;
 pub(super) use restart_limiter::*;

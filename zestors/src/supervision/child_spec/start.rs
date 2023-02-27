@@ -1,5 +1,5 @@
 use crate::{
-    channel::{ActorType, InboxType},
+    channel::{ActorType, ActorInbox},
     monitoring::{Address, ActorRefExt, Child, ExitError},
     supervision::{
         combinator_specs::{spawn, Link, ShutdownTime},
@@ -23,7 +23,7 @@ fn from_spawn_fn<D, I, SFut, E, EFut>(
 ) where
     E: Send + 'static,
     D: Send + 'static,
-    I: InboxType,
+    I: ActorInbox,
     I::Config: Default,
     SFut: Future<Output = E> + Send + 'static,
     EFut: Future<Output = SuperviseResult<D>> + Send + 'static,

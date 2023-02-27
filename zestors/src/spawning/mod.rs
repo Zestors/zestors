@@ -119,7 +119,7 @@ pub fn spawn<I, E, Fun, Fut>(function: Fun) -> (Child<E, I>, Address<I>)
 where
     Fun: FnOnce(I) -> Fut + Send + 'static,
     Fut: Future<Output = E> + Send,
-    I: InboxType,
+    I: ActorInbox,
     I::Config: Default,
     E: Send + 'static,
 {
@@ -134,11 +134,11 @@ pub fn spawn_with<I, E, Fun, Fut>(
 where
     Fun: FnOnce(I) -> Fut + Send + 'static,
     Fut: Future<Output = E> + Send,
-    I: InboxType,
+    I: ActorInbox,
     E: Send + 'static,
 {
-    let channel = I::setup_channel(config, 1, ActorId::generate());
-    let inbox = I::from_channel(channel.clone());
+    let (channel, inbox) = I::init_single_inbox(config, 1, ActorId::generate());
+    // let inbox = I::from_channel(channel.clone());
     let handle = tokio::task::spawn(async move { function(inbox).await });
     (
         Child::new(channel.clone(), handle, link),
@@ -153,7 +153,7 @@ pub fn spawn_many<I, E, Itm, Fun, Fut>(
 where
     Fun: FnOnce(Itm, I) -> Fut + Clone + Send + 'static,
     Fut: Future<Output = E> + Send,
-    I: MultiInboxType,
+    I: MultiActorInbox,
     I::Config: Default,
     E: Send + 'static,
     Itm: Send + 'static,
@@ -170,11 +170,11 @@ pub fn spawn_many_with<I, E, Itm, Fun, Fut>(
 where
     Fun: FnOnce(Itm, I) -> Fut + Clone + Send + 'static,
     Fut: Future<Output = E> + Send,
-    I: MultiInboxType,
+    I: MultiActorInbox,
     E: Send + 'static,
     Itm: Send + 'static,
 {
-    let channel = I::setup_multi_channel(config, iter.len(), 1, ActorId::generate());
+    let channel = I::init_multi_inbox(config, iter.len(), 1, ActorId::generate());
     let handles = iter
         .map(|i| {
             let fun = function.clone();

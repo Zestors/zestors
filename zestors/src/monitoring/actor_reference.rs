@@ -21,7 +21,7 @@ pub trait ActorRefExt: ActorRef {
 
     fn get_address(&self) -> Address<Self::ActorType> {
         let channel = self.channel_ref().clone();
-        channel.add_address();
+        channel.increment_address_count();
         Address::from_channel(channel)
     }
 
@@ -38,7 +38,7 @@ pub trait ActorRefExt: ActorRef {
     }
 
     fn halt(&self) {
-        <Self as ActorRef>::channel_ref(self).halt()
+        <Self as ActorRef>::channel_ref(self).halt_some(u32::MAX)
     }
 
     fn process_count(&self) -> usize {
@@ -57,7 +57,7 @@ pub trait ActorRefExt: ActorRef {
         <Self as ActorRef>::channel_ref(self).is_closed()
     }
 
-    fn capacity(&self) -> &Capacity {
+    fn capacity(&self) -> Capacity {
         <Self as ActorRef>::channel_ref(self).capacity()
     }
 
@@ -148,7 +148,7 @@ where
         M: Message + Send + 'static,
         M::Payload: Send + 'static,
     {
-        <Self as ActorRef>::channel_ref(self).force_send_unchecked(msg)
+        <Self as ActorRef>::channel_ref(self).force_send_checked(msg)
     }
     fn send_blocking_checked<M>(&self, msg: M) -> Result<M::Returned, SendCheckedError<M>>
     where

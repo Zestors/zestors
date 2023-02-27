@@ -100,19 +100,18 @@ impl Channel for MultiHalterChannel {
     fn actor_id(&self) -> ActorId {
         self.actor_id
     }
-    fn capacity(&self) -> &Capacity {
-        static CAPACITY: Capacity = Capacity::Bounded(0);
-        &CAPACITY
+    fn capacity(&self) -> Capacity {
+        Capacity::Bounded(0)
     }
-    fn add_address(&self) -> usize {
+    fn increment_address_count(&self) -> usize {
         self.address_count.fetch_add(1, Ordering::Acquire)
     }
-    fn remove_address(&self) -> usize {
+    fn decrement_address_count(&self) -> usize {
         let prev_address_count = self.address_count.fetch_sub(1, Ordering::Acquire);
         assert!(prev_address_count >= 1);
         prev_address_count
     }
-    fn try_add_process(&self) -> Result<usize, TryAddProcessError> {
+    fn try_increment_process_count(&self) -> Result<usize, TryAddProcessError> {
         let result = self
             .halter_count
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |val| {
@@ -129,19 +128,19 @@ impl Channel for MultiHalterChannel {
         }
     }
 
-    fn try_send_any(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {
+    fn try_send_box(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {
         Err(TrySendCheckedError::NotAccepted(boxed))
     }
 
-    fn force_send_any(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {
+    fn force_send_box(&self, boxed: BoxPayload) -> Result<(), TrySendCheckedError<BoxPayload>> {
         Err(TrySendCheckedError::NotAccepted(boxed))
     }
 
-    fn send_any_blocking(&self, boxed: BoxPayload) -> Result<(), SendCheckedError<BoxPayload>> {
+    fn send_box_blocking(&self, boxed: BoxPayload) -> Result<(), SendCheckedError<BoxPayload>> {
         Err(SendCheckedError::NotAccepted(boxed))
     }
 
-    fn send_any<'a>(
+    fn send_box<'a>(
         &'a self,
         boxed: BoxPayload,
     ) -> std::pin::Pin<

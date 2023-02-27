@@ -268,7 +268,7 @@ where
     where
         Fun: FnOnce(I) -> Fut + Send + 'static,
         Fut: Future<Output = E> + Send + 'static,
-        I: InboxType,
+        I: MultiActorInbox,
         I::Channel: Sized,
         E: Send + 'static,
     {
@@ -277,7 +277,7 @@ where
             Err(_) => return Err(TrySpawnError::IncorrectType(fun)),
         };
 
-        match channel.try_add_process() {
+        match channel.try_increment_process_count() {
             Ok(_) => {
                 let inbox = I::from_channel(channel);
                 let handle = tokio::task::spawn(async move { fun(inbox).await });
@@ -300,10 +300,10 @@ where
         Fun: FnOnce(A) -> Fut + Send + 'static,
         Fut: Future<Output = E> + Send + 'static,
         E: Send + 'static,
-        A: MultiInboxType,
+        A: MultiActorInbox,
         A::Channel: Sized,
     {
-        match self.channel.try_add_process() {
+        match self.channel.try_increment_process_count() {
             Ok(_) => {
                 let inbox = A::from_channel(self.channel.clone());
                 let handle = tokio::task::spawn(async move { fun(inbox).await });
@@ -312,7 +312,7 @@ where
             }
             Err(e) => match e {
                 TryAddProcessError::ActorHasExited => Err(SpawnError(fun)),
-                TryAddProcessError::SingleInboxOnly => {
+                TryAddProcessError::SingleProcessOnly => {
                     panic!("Error with implementation `try_add_process()` of the inboxtype")
                 }
             },

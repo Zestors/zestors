@@ -10,7 +10,7 @@ use std::sync::Arc;
 /// - `Returned = ()`
 pub trait Message: Sized {
     /// The message that is actually sent to the receiver.
-    type Payload;
+    type Payload: Send + 'static;
 
     /// The value that is returned to the sender once the message has been sent.
     type Returned;
@@ -22,12 +22,8 @@ pub trait Message: Sized {
     fn cancel(sent: Self::Payload, returned: Self::Returned) -> Self;
 }
 
-/// A message where the payload is equal to the message and which doesn't return anything.
-pub trait SimpleMessage: Message<Payload = Self, Returned = ()> {}
-impl<T> SimpleMessage for T where T: Message<Payload = Self, Returned = ()> {}
-
 /// A version of the [`Message`] trait generic over `M` used as an argument to the `derive Message`
-/// macro. The  macro just forwards messages from `Message` to `DefineMessage<Self>`.
+/// macro. The  macro just forwards messages from `Message` to `DeriveMessage<Self>`.
 pub trait MessageDerive<M> {
     /// See [`Message::Payload`].
     type Payload;
@@ -60,6 +56,9 @@ impl<M: Send + 'static> MessageDerive<M> for () {
 //------------------------------------------------------------------------------------------------
 //  Message: Default implementations
 //------------------------------------------------------------------------------------------------
+
+trait SimpleMessage: Message<Payload = Self, Returned = ()> {}
+impl<T> SimpleMessage for T where T: Message<Payload = Self, Returned = ()> {}
 
 macro_rules! implement_message_for_base_types {
     ($(

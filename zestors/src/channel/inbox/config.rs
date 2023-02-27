@@ -5,7 +5,8 @@ use std::time::Duration;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Capacity {
     Bounded(usize),
-    Unbounded(BackPressure),
+    BackPressure(BackPressure),
+    Unbounded
 }
 
 impl Capacity {
@@ -17,7 +18,7 @@ impl Capacity {
 
 impl Default for Capacity {
     fn default() -> Self {
-        Capacity::Unbounded(BackPressure::default())
+        Capacity::BackPressure(BackPressure::default())
     }
 }
 
@@ -71,15 +72,6 @@ impl BackPressure {
             starts_at,
             base_ns,
             exp_growth: Some(factor),
-        }
-    }
-
-    /// Create a new backpressure that is disabled.
-    pub fn disabled() -> Self {
-        Self {
-            starts_at: usize::MAX,
-            base_ns: 0,
-            exp_growth: None,
         }
     }
 
@@ -153,13 +145,4 @@ mod test {
         assert_eq!(bp.get_timeout(3), Some(Duration::from_nanos(1_331_000_086)));
     }
 
-    #[test]
-    fn disabled() {
-        let bp = BackPressure::disabled();
-
-        assert_eq!(bp.get_timeout(0), None);
-        assert_eq!(bp.get_timeout(9), None);
-        assert_eq!(bp.get_timeout(usize::MAX - 1), None);
-        assert_eq!(bp.get_timeout(usize::MAX), Some(Duration::from_nanos(0)));
-    }
 }

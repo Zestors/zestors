@@ -19,7 +19,7 @@ pub fn from_spawn_fn<I, D, SFut, E, EFut>(
 ) -> impl Specifies<Ref = Address<I>> + 'static
 where
     E: Send + 'static,
-    I: InboxType,
+    I: ActorInbox,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFut: Future<Output = E> + Send + 'static,
@@ -32,7 +32,7 @@ where
 pub(crate) struct SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
-    I: InboxType,
+    I: ActorInbox,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
@@ -47,7 +47,7 @@ where
 impl<SFun, SFut, EFun, EFut, D, E, I> SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
-    I: InboxType,
+    I: ActorInbox,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
@@ -78,7 +78,7 @@ where
 impl<SFun, SFut, EFun, EFut, D, E, I> Specifies for SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
-    I: InboxType,
+    I: ActorInbox,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
@@ -116,7 +116,7 @@ where
 pub(crate) struct SpawnSupervisee<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
-    I: InboxType,
+    I: ActorInbox,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
@@ -134,7 +134,7 @@ impl<SFun, SFut, EFun, EFut, D, E, I> Supervisable
     for SpawnSupervisee<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
-    I: InboxType,
+    I: ActorInbox,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
@@ -234,7 +234,7 @@ mod test {
 struct Inner<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
-    I: InboxType,
+    I: ActorInbox,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
@@ -252,7 +252,7 @@ where
 impl<SFun, SFut, EFun, EFut, D, E, I> Clone for Inner<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
-    I: InboxType,
+    I: ActorInbox,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
