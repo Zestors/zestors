@@ -23,6 +23,12 @@ impl Default for Capacity {
 }
 
 /// The backpressure mechanism for unbounded inboxes.
+/// 
+/// # Default
+/// - `starts_at: 5` - The backpressure mechanism should start if the inbox contains 5 or more 
+/// messages.
+/// - `timeout: 25ns` - The timeout at which the backpressure mechanism starts is 25ns.
+/// - `factor: 1.3` - For every message in the inbox, the timeout is multiplied by 1.3.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BackPressure {
     starts_at: usize,

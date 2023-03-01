@@ -1,11 +1,13 @@
-use super::*;
+use crate::all::*;
 use futures::Future;
 use pin_project::pin_project;
 use std::{
     pin::Pin,
-    task::{Context, Poll},
+    task::{Context, Poll}, time::Duration,
 };
 use tokio::sync::mpsc;
+
+use super::BoxError;
 
 //------------------------------------------------------------------------------------------------
 //  Startable
@@ -94,7 +96,7 @@ pub trait Supervisable: Send + Sized {
 
     fn poll_supervise(self: Pin<&mut Self>, cx: &mut Context) -> Poll<SuperviseResult<Self::Spec>>;
 
-    fn shutdown_time(self: Pin<&Self>) -> ShutdownDuration;
+    fn shutdown_time(self: Pin<&Self>) -> Duration;
 
     fn halt(self: Pin<&mut Self>);
 

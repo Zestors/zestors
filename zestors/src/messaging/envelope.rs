@@ -1,4 +1,3 @@
-use super::{Message, RequestError, SendError, TrySendError};
 use crate::all::*;
 use futures::{future::BoxFuture, Future};
 use std::sync::Arc;

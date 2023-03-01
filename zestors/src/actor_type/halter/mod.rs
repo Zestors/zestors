@@ -26,7 +26,7 @@ impl ActorType for Halter {
     type Channel = HalterChannel;
 }
 
-impl ActorInbox for Halter {
+impl InboxType for Halter {
     type Config = ();
 
     fn init_single_inbox(

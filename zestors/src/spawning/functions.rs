@@ -1,12 +1,12 @@
 use crate::all::*;
 use futures::Future;
 
-/// Same as [`spawn_with`] but with a default [`Link`] and [`ActorInbox::Config`].
+/// Same as [`spawn_with`] but with a default [`Link`] and [`InboxType::Config`].
 /// 
 /// # Usage
 /// ```
 /// # tokio_test::block_on(main());
-/// use zestors::{actor_type::inbox::Inbox, spawning::spawn};
+/// use zestors::prelude::*;
 /// 
 /// # async fn main() {
 /// let (child, address) = spawn(|inbox: Inbox<()>| async move {
@@ -18,19 +18,19 @@ pub fn spawn<I, E, Fun, Fut>(function: Fun) -> (Child<E, I>, Address<I>)
 where
     Fun: FnOnce(I) -> Fut + Send + 'static,
     Fut: Future<Output = E> + Send,
-    I: ActorInbox,
+    I: InboxType,
     I::Config: Default,
     E: Send + 'static,
 {
     spawn_with(Default::default(), Default::default(), function)
 }
 
-/// Spawn an actor with the given function using the [`Link`] and [`ActorInbox::Config`].
+/// Spawn an actor with the given function using the [`Link`] and [`InboxType::Config`].
 /// 
 /// # Usage
 /// ```
 /// # tokio_test::block_on(main());
-/// use zestors::{actor_type::{Capacity, inbox::Inbox}, actor_ref::Link, spawning::spawn_with};
+/// use zestors::prelude::*;
 /// 
 /// # async fn main() {
 /// let (child, address) = spawn_with(
@@ -50,7 +50,7 @@ pub fn spawn_with<I, E, Fun, Fut>(
 where
     Fun: FnOnce(I) -> Fut + Send + 'static,
     Fut: Future<Output = E> + Send,
-    I: ActorInbox,
+    I: InboxType,
     E: Send + 'static,
 {
     let (channel, inbox) = I::init_single_inbox(config, 1, ActorId::generate());
@@ -63,12 +63,12 @@ where
 }
 
 /// Spawn an actor consisting of multiple processes with the given function using a default
-/// [`Link`] and [`ActorInbox::Config`].
+/// [`Link`] and [`InboxType::Config`].
 ///
 /// # Usage
 /// ```
 /// # tokio_test::block_on(main());
-/// use zestors::{actor_type::inbox::Inbox, spawning::spawn_many};
+/// use zestors::prelude::*;
 /// 
 /// # async fn main() {
 /// let (child, address) = spawn_many(0..5, |i: u32, inbox: Inbox<()>| async move {
@@ -92,12 +92,12 @@ where
 }
 
 /// Spawn an actor consisting of multiple processes with the given function using a custom
-/// [`Link`] and [`ActorInbox::Config`].
+/// [`Link`] and [`InboxType::Config`].
 ///
 /// # Usage
 /// ```
 /// # tokio_test::block_on(main());
-/// use zestors::{actor_type::{Capacity, inbox::Inbox}, actor_ref::Link, spawning::spawn_many_with};
+/// use zestors::prelude::*;
 /// 
 /// # async fn main() {
 /// let (child, address) = spawn_many_with(

@@ -1,4 +1,3 @@
-use super::action::Action;
 use crate::all::*;
 use futures::Future;
 use std::{
@@ -7,58 +6,39 @@ use std::{
     task::{Context, Poll},
 };
 
+/// The handler-state generates [`HandlerItem`]s that the [`Handler`] can subsequently handle. It
+/// is also passed along to every handler-function as the second argument.
 pub trait HandlerState<H: Handler>:
     ActorRef<ActorType = Self::InboxType> + Unpin + Send + 'static
 {
-    /// The protocol that this state returns.
+    /// The [`Protocol`] of this state.
     type Protocol: Protocol + HandledBy<H>;
 
-    /// The inbox that this state uses under the hood.
-    type InboxType: ActorInbox;
+    /// The [`InboxType`] of this state.
+    type InboxType: InboxType;
 
-    /// Create the state from the inbox.
+    /// Create the state from the [`Self::InboxType`].
     fn from_inbox(inbox: Self::InboxType) -> Self;
 
-    /// Poll the next [`Action<H>`] or [`HandlerEvent`].
-    /// This should be repeatedly pollable, even after a [`HandlerEvent::Dead`] has been
-    /// returned.
+    /// Poll the next [`HandlerItem`].
+    /// 
+    /// This method is very similar to [`futures::Stream::poll_next`], with the main difference that this
+    /// should not panic, even after a [`HandlerEvent::Dead`] has been returned.
     fn poll_next_action(self: Pin<&mut Self>, cx: &mut Context) -> Poll<HandlerItem<H>>;
 }
 
+/// An item returned from a [`HandlerState`].
 pub enum HandlerItem<H: Handler> {
     Protocol(HandlerProtocol<H>),
     Action(Action<H>),
-    Event(Event),
-}
-
-impl<H: Handler> HandlerItem<H> {
-    pub async fn handle_with(
-        self,
-        handler: &mut H,
-        state: &mut H::State,
-    ) -> Result<Flow, H::Exception> {
-        match self {
-            HandlerItem::Protocol(protocol) => protocol.handle_with(handler, state).await,
-            HandlerItem::Action(action) => action.handle(handler, state).await,
-            HandlerItem::Event(event) => handler.handle_event(state, event).await,
-        }
-    }
-}
-
-/// A special event that should be handled.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Event {
-    /// This process has been halted.
-    Halt,
-    /// This actor's inbox is closed and empty.
+    Halted,
     ClosedAndEmpty,
-    /// This actor's inbox is closed and empty, and no futures have been scheduled either.
-    /// The actor may be revived by scheduling a new future.
     Dead,
 }
 
+/// An extension to [`HandlerState`].
 pub trait HandlerStateExt<H: Handler>: HandlerState<H> {
-    /// Get the next [`Action<H>`] or [`HandlerEvent`] from this handler-state.
+    /// Get the next [`HandlerItem`] from this handler-state.
     fn next_handler_item(&mut self) -> NextHandlerItem<'_, Self, H> {
         NextHandlerItem(self, PhantomData)
     }

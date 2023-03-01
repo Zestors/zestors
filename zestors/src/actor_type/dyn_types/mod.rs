@@ -7,7 +7,7 @@ use std::{any::TypeId, sync::Arc};
 macro_rules! create_dynamic_actor_types {
     ($($actor_ty:ident $(<$( $msg:ident ),*>)?),*) => {$(
         // creates the dynamic actor-type trait which implements FromPayload<..> as a marker-trait.
-        /// Used as an argument to a [`DynActor<dyn _>`].
+        /// Used as an argument to a [`DynActor<dyn _>`](struct@DynActor).
         pub trait $actor_ty< $($($msg: Message,)?)*>: std::fmt::Debug + $($( FromPayload<$msg> + )?)* {}
 
         // Implement the dynamic actor-type for DynActor<dyn _>
@@ -32,7 +32,7 @@ macro_rules! create_dynamic_actor_types {
         // Accept<M> all the messages
         impl<I, $($($msg: Message + 'static,)?)*> TransformInto<DynActor<dyn $actor_ty<$($($msg,)?)*>>> for I
         where
-            I: ActorInbox $($( + Accepts<$msg> )?)*,
+            I: InboxType $($( + Accepts<$msg> )?)*,
             I::Channel: Sized
         {
             fn transform_into(channel: Arc<Self::Channel>) -> Arc<dyn Channel> {

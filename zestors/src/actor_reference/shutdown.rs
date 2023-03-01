@@ -63,12 +63,12 @@ pub struct ShutdownStream<'a, E: Send + 'static, T: ActorType> {
 }
 
 impl<'a, E: Send + 'static, T: ActorType> ShutdownStream<'a, E, T> {
-    pub(super) fn new(pool: &'a mut ChildPool<E, T>, duration: ShutdownDuration) -> Self {
+    pub(super) fn new(pool: &'a mut ChildPool<E, T>, duration: Duration) -> Self {
         pool.halt();
 
         ShutdownStream {
             pool,
-            sleep: Some(Box::pin(tokio::time::sleep(duration.get_duration()))),
+            sleep: Some(Box::pin(tokio::time::sleep(duration))),
         }
     }
 }

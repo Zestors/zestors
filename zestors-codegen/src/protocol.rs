@@ -172,13 +172,13 @@ fn impl_handled_by(item: &ItemEnum, variants: &Vec<ProtocolMsg>) -> Result<Token
     let (_, ty_generics, _) = item.generics.split_for_impl();
     let ident = &item.ident;
     Ok(quote! {
-        #[zestors::async_trait]
+        #[zestors::export::async_trait]
         impl #impl_generics zestors::handler::HandledBy<H> for #ident #ty_generics #where_clause {
             async fn handle_with(
                 self,
                 handler: &mut H,
                 state: &mut H::State,
-            ) -> Result<zestors::handler::Flow, H::Exception> {
+            ) -> Result<zestors::handler::Flow<H>, H::Exception> {
                 match self {
                     #(#matches)*
                 }

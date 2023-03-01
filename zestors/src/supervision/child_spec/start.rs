@@ -1,11 +1,4 @@
-use crate::{
-    actor_type::{ActorType, ActorInbox},
-    actor_ref::{ActorRefExt, Child, ExitError},
-    supervision::{
-        combinator_specs::{Link, ShutdownDuration},
-        StartError, StartResult, Specifies, Supervisable, SuperviseResult,
-    },
-};
+use crate::all::*;
 use futures::{future::BoxFuture, Future, FutureExt};
 use pin_project::pin_project;
 use std::{
@@ -15,6 +8,8 @@ use std::{
     time::Duration,
 };
 
+use super::get_default_shutdown_time;
+
 fn from_spawn_fn<D, I, SFut, E, EFut>(
     _spawn_fn: impl (FnOnce(I, D) -> SFut) + Clone + 'static,
     _exit_fn: impl (FnOnce(Result<E, ExitError>) -> EFut) + Send + Clone,
@@ -23,7 +18,7 @@ fn from_spawn_fn<D, I, SFut, E, EFut>(
 ) where
     E: Send + 'static,
     D: Send + 'static,
-    I: ActorInbox,
+    I: InboxType,
     I::Config: Default,
     SFut: Future<Output = E> + Send + 'static,
     EFut: Future<Output = SuperviseResult<D>> + Send + 'static,
@@ -123,7 +118,6 @@ where
             }
         })
     }
-
 }
 
 #[pin_project]
@@ -184,9 +178,9 @@ where
         }
     }
 
-    fn shutdown_time(self: Pin<&Self>) -> ShutdownDuration {
+    fn shutdown_time(self: Pin<&Self>) -> Duration {
         match self.child.link() {
-            Link::Detached => ShutdownDuration::Dynamic,
+            Link::Detached => get_default_shutdown_time(),
             Link::Attached(duration) => duration.to_owned(),
         }
     }

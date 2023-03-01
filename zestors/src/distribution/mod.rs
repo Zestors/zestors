@@ -1,6 +1,6 @@
 //! # todo
 //! 
-//! | __<--__ [`supervision`] | `?` __-->__ |
+//! | __<--__ [`supervision`](crate::supervision) | `?` __-->__ |
 //! |---|---|
 #[allow(unused)]
 use crate::*;

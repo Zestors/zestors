@@ -1,4 +1,5 @@
-use super::*;
+use crate as zestors;
+use crate::all::*;
 use futures::{Future, FutureExt, StreamExt};
 use pin_project::pin_project;
 use std::{
@@ -7,7 +8,6 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::time::{sleep, Sleep};
-use crate as zestors;
 
 //------------------------------------------------------------------------------------------------
 //  SupervisorFut
@@ -112,7 +112,7 @@ impl<S: Specifies> Future for SupervisorFut<S> {
                         if this.to_shutdown {
                             supervisee.as_mut().halt();
                             *aborting = Some((
-                                Box::pin(sleep(supervisee.as_ref().shutdown_time().get_duration())),
+                                Box::pin(sleep(supervisee.as_ref().shutdown_time())),
                                 false,
                             ));
                         } else {

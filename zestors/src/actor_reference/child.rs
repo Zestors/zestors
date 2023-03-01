@@ -4,7 +4,7 @@ use std::{
     mem,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
+    task::{Context, Poll}, time::Duration,
 };
 
 /// A child is a unique [reference](ActorRef) to an actor similar to a [`tokio::task::JoinHandle`]. The
@@ -90,15 +90,15 @@ where
 
     /// Attach the actor.
     ///
-    /// Returns the old [`ShutdownDuration`] if it was already attached.
-    pub fn attach(&mut self, duration: ShutdownDuration) -> Option<ShutdownDuration> {
+    /// Returns the old shutdown-ime if it was already attached.
+    pub fn attach(&mut self, duration: Duration) -> Option<Duration> {
         self.link.attach(duration)
     }
 
     /// Detach the actor.
     ///
-    /// Returns the old [`ShutdownDuration`] if it was attached.
-    pub fn detach(&mut self) -> Option<ShutdownDuration> {
+    /// Returns the old shutdown-time if it was attached.
+    pub fn detach(&mut self) -> Option<Duration> {
         self.link.detach()
     }
 
@@ -156,18 +156,18 @@ where
         }
     }
 
-    /// Same as [`Self::shutdown`] but with a custom [`ShutdownDuration`].
-    pub fn shutdown_with(&mut self, duration: ShutdownDuration) -> ShutdownFut<'_, E, A> {
-        ShutdownFut::new(self, duration.get_duration())
+    /// Same as [`Self::shutdown`] but with a custom shutdown-time.
+    pub fn shutdown_with(&mut self, time: Duration) -> ShutdownFut<'_, E, A> {
+        ShutdownFut::new(self, time)
     }
 
     /// Halts the actor and then waits for it to exit. If the actor does not exit after the
-    /// [`ShutdownDuration`] specified by the [`Link`] of this actor, the actor will be aborted.
+    /// shutdown-time specified by the [`Link`] of this actor, the actor will be aborted.
     ///
-    /// If the actor has a [`Link::Detached`], then [`ShutdownDuration::Dynamic`] is used.
+    /// If the actor has a [`Link::Detached`], then [`get_default_shutdown_time`] is used.
     pub fn shutdown(&mut self) -> ShutdownFut<'_, E, A> {
         let duration = match self.link {
-            Link::Detached => ShutdownDuration::Dynamic,
+            Link::Detached => get_default_shutdown_time(),
             Link::Attached(duration) => duration,
         };
         self.shutdown_with(duration)
@@ -196,20 +196,20 @@ where
         self.join_handles.as_ref().unwrap().len()
     }
 
-    /// Same as [`Self::shutdown`] but with a custom [`ShutdownDuration`].
-    pub fn shutdown_with(&mut self, duration: ShutdownDuration) -> ShutdownStream<'_, E, A> {
-        ShutdownStream::new(self, duration)
+    /// Same as [`Self::shutdown`] but with a custom shutdown-time.
+    pub fn shutdown_with(&mut self, time: Duration) -> ShutdownStream<'_, E, A> {
+        ShutdownStream::new(self, time)
     }
 
     /// Halts the actor and then waits for all processes to exit. If the actor does not exit after the
-    /// [`ShutdownDuration`] specified by the [`Link`] of this actor, the actor will be aborted.
+    /// shutdown-time specified by the [`Link`] of this actor, the actor will be aborted.
     ///
     /// The returned value is a [`Stream`] that resolves one-by-one for every process.
     ///
-    /// If the actor has a [`Link::Detached`], then [`ShutdownDuration::Dynamic`] is used.
+    /// If the actor has a [`Link::Detached`], then [`get_default_shutdown_time`] is used.
     pub fn shutdown(&mut self) -> ShutdownStream<'_, E, A> {
         let duration = match self.link {
-            Link::Detached => ShutdownDuration::Dynamic,
+            Link::Detached => get_default_shutdown_time(),
             Link::Attached(duration) => duration,
         };
         self.shutdown_with(duration)
@@ -407,12 +407,12 @@ where
 {
     fn drop(&mut self) {
         if let Link::Attached(shutdown_time) = &mut self.link {
-            let duration = shutdown_time.get_duration();
+            let shutdown_time = shutdown_time.clone();
             if !self.is_aborted && !self.is_finished() {
                 self.halt();
                 let handles = self.join_handles.take().unwrap();
                 tokio::task::spawn(async move {
-                    tokio::time::sleep(duration).await;
+                    tokio::time::sleep(shutdown_time.clone()).await;
                     C::abort(&handles)
                 });
             }

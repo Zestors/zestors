@@ -1,39 +1,45 @@
 /*!
-
 # Spawn functions
 When spawning an actor, there are a couple of options to choose from:
-- [`spawn(f)`](spawn) - This is the simplest way to spawn an actor, and uses the default [`Link`] and
-[`InboxType::Config`] to spawn function `f`.
-- [`spawn_with(link, cfg, f)`](spawn_with) - Same as `spawn`, but allows for a
-custom link and config.
-- [`spawn_pool(iter, f)`](spawn_pool) - Same as `spawn`, but instead spawns many processes using
-the iterator as the first argument to `f`.
-- [`spawn_pool_with(iter, link, cfg, f)`](spawn_pool_with) - Same as `spawn_pool`, but allows for a
+- [`spawn(FnOnce)`](spawn) - This is the simplest way to spawn an actor and uses a default [`Link`] and
+[`InboxType::Config`].
+- [`spawn_with(link, cfg, FnOnce)`](spawn_with) - Same as `spawn`, but allows for a custom link and config.
+- [`spawn_many(iter, FnOnce)`](spawn_many) - Same as `spawn`, but instead spawns many processes using
+the iterator as the first argument to the function.
+- [`spawn_many_with(iter, link, cfg, FnOnce)`](spawn_many_with) - Same as `spawn_many`, but allows for a
 custom link and config.
 
-The inbox's config can be different for any [`InboxType`]. A [`Halter`] has `()` as it's config,
-while an [`Inbox`] uses a [`Capacity`].
-
-## Spawning onto an actor that is running
-It is also possible to spawn more processes onto an actor that is already running using
-[`ChildPool::spawn_onto`] and [`ChildPool::try_spawn_onto`]. These methods will fail if the actor has
-already exited.
+It is also possible to spawn more processes onto an actor that is already running with
+[`ChildPool::spawn_onto`] and [`ChildPool::try_spawn_onto`].
 
 # Link
-Every actor that is spawned must be spawned with a [`Link`] that indicates whether the actor is attached
+Every actor is spawned with a [`Link`] that indicates whether the actor is attached
 or detached. By default a [`Link`] is attached with an abort-timer of 1 second; this means that when the
 [`Child`] is dropped, the actor has 1 second to halt before it is aborted. If the link is detached, then
 the child can be dropped without halting or aborting the actor.
 
-| __<--__ [`actor_type`] | [`inboxes`] __-->__ |
+# Inbox configuration
+Actors can be spawned with any [`InboxType`], where the [`InboxType::Config`] specifies the configuration-options
+for that inbox. The config for an [`Inbox`] is [`Capacity`] and for a [`Halter`] it is `()`.
+
+The [`Capacity`] of an inbox can be one of three options:
+- [`Capacity::Bounded(size)`](`Capacity::Bounded) --> An inbox that doesn't accept new messages after the
+given size has been reached.
+- [`Capacity::Unbounded`](Capacity::Unbounded) --> An inbox that grows in size infinitely when new messages
+ are received.
+- [`Capacity::BackPressure(BackPressure)`](Capacity::BackPressure) (default) --> An unbounded inbox with
+a [`BackPressure`] mechanic. An overflow of messages is handled by increasing the delay for sending a message.
+
+| __<--__ [`actor_type`](crate::actor_type) | [`handler`](crate::handler) __-->__ |
 |---|---|
 
 # Example
 ```
     use std::time::Duration;
-    use zestors::{inboxes::inbox::RecvError, *};
+    use zestors::{messaging::RecvError, prelude::*};
     use tokio::time::sleep;
 
+    // Let's start by writing an actor that receives messages until it is halted ..
     async fn inbox_actor(mut inbox: Inbox<()>) {
         loop {
             if let Err(RecvError::Halted) = inbox.recv().await {
@@ -42,71 +48,67 @@ the child can be dropped without halting or aborting the actor.
         }
     }
 
-    async fn halter_actor(halter: MultiHalter) {
+    //  .. and an actor that simply waits until it is halted.
+    async fn halter_actor(halter: Halter) {
         halter.await
     }
 
     # tokio_test::block_on(main());
     async fn main() {
-        // When we spawn a `Halter`, we give it `()` as config...
+        // The `Halter` takes `()` as its config ..
         let _ = spawn_with(Link::default(), (), halter_actor);
-        // while an `Inbox` takes `Capacity`.
+        // .. while an `Inbox` takes a `Capacity`.
         let _ = spawn_with(Link::default(), Capacity::default(), inbox_actor);
 
-        // Now if we spawn a basic actor with defaults...
+        // Let's spawn an actor with default parameters ..
         let (child, address) = spawn(inbox_actor);
         drop(child);
         sleep(Duration::from_millis(10)).await;
-        // when the child is dropped, the actor is aborted.
+        // .. and when the child is dropped, the actor is aborted.
         assert!(address.has_exited());
 
-        // But if we spawn a child that is not linked...
+        // But if we spawn a detached child ..
         let (child, address) = spawn_with(Link::Detached, Capacity::default(), inbox_actor);
         drop(child);
         sleep(Duration::from_millis(10)).await;
-        // the actor does not get halted
+        // .. the actor does not get halted.
         assert!(!address.has_exited());
 
-        // It is also possible to spawn a process-pool using an `Inbox`...
-        let _ = spawn_pool(0..10, |i, inbox| async move {
+        // We can also spawn a multi-process actor with the `Inbox` ..
+        let (mut child_pool, address) = spawn_many(0..10, |i, inbox| async move {
             println!("Spawning process nr {i}");
             inbox_actor(inbox).await
         });
-        // or a `Halter`...
-        let _ = spawn_pool(0..10, |i, halter| async move {
-            println!("Spawning process nr {i}");
-            halter_actor(halter).await
-        });
-        // or either one using a custom config.
-        let (mut child_pool, address) = spawn_pool_with(
-            Link::Attached(Duration::from_millis(100)),
-            Capacity::default(),
-            0..10,
-            |i, inbox| async move {
-                println!("Spawning process nr {i}");
-                inbox_actor(inbox).await
-            },
-        );
+        // .. but that does not compile with a `Halter`. (use the `MultiHalter` instead)
+        // let _ = spawn_many(0..10, |i, halter| async move {
+        //     println!("Spawning process nr {i}");
+        //     halter_actor(halter).await
+        // });
 
-        // Since we have a child_pool, it is possible to spawn more processes onto
-        // the actor:
-        child_pool.spawn_onto(inbox_actor).unwrap();
-        child_pool.spawn_onto(inbox_actor).unwrap();
+        // We can now spawn additional processes onto the actor ..
+        child_pool.spawn_onto(
+            |_inbox: Inbox<()>| async move { () }
+        ).unwrap();
 
-        // This can even be done if the child_pool is dynamic:
+        // .. and that is also possible with a dynamic child-pool ..
         let mut child_pool = child_pool.into_dyn();
-        child_pool.try_spawn_onto(inbox_actor).unwrap();
-        child_pool.try_spawn_onto(inbox_actor).unwrap();
+        child_pool.try_spawn_onto(
+            |_inbox: Inbox<()>| async move { () }
+        ).unwrap();
 
-        // But fails if we spawn an actor with a different inbox-type:
-        child_pool.try_spawn_onto(halter_actor).unwrap_err();
+        // .. but fails if given the wrong inbox-type.
+        child_pool.try_spawn_onto(
+            |_inbox: MultiHalter| async move { unreachable!() }
+        ).unwrap_err();
     }
 ```
  */
 
 mod errors;
-mod spawn;
-pub use {errors::*, spawn::*};
+mod functions;
+mod capacity;
+mod link;
+pub use {capacity::*, errors::*, functions::*, link::*};
 #[allow(unused)]
 use crate::all::*;
 

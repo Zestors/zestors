@@ -43,7 +43,7 @@ The supervisee has completed it's task successfully and can not be restarted.
 #### __`(5)` Unrecoverable__:
 The supervisee is not completed but is not able to restart either.
 
-| __<--__ [`inboxes`] | [`distribution`] __-->__ |
+| __<--__ [`handler`](crate::handler) | [`distribution`](crate::distribution) __-->__ |
 |---|---|
 */
 
@@ -59,9 +59,8 @@ pub use child_spec::*;
 pub use startable::*;
 pub use supervisor::*;
 
-use crate as zestors;
 #[allow(unused)]
-use crate::*;
+use crate::all::*;
 use std::error::Error;
 
 

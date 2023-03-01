@@ -1,6 +1,6 @@
 use std::{
     pin::Pin,
-    task::{Context, Poll},
+    task::{Context, Poll}, time::Duration,
 };
 
 use super::*;
@@ -118,7 +118,7 @@ where
 {
     type Spec = MapRefSpec<S, F, T>;
 
-    fn shutdown_time(self: Pin<&Self>) -> ShutdownDuration {
+    fn shutdown_time(self: Pin<&Self>) -> Duration {
         self.project_ref().supervisee.shutdown_time()
     }
 

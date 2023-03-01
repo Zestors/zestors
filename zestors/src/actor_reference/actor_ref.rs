@@ -1,9 +1,9 @@
-use crate::*;
+use crate::all::*;
 use futures::{future::BoxFuture, Future};
 use std::{any::TypeId, sync::Arc};
 
 /// This is the main trait for interacting with an actor, and is implemented for any
-/// [`ActorInbox`], [`Child`] and [`Address`].
+/// [`InboxType`], [`Child`] and [`Address`].
 ///
 /// See [`ActorRefExt`] and [`Transformable`] for methods to call on an actor-reference.
 pub trait ActorRef: Sized {
@@ -181,7 +181,7 @@ pub trait ActorRefExt: ActorRef {
 
     /// Same as [`force_send`](`Self::force_send`), but checks at runtime that the message
     /// is actually accepted by the actor. (see [messaging] for details)
-    fn force_send_unchecked<M>(&self, msg: M) -> Result<M::Returned, TrySendCheckedError<M>>
+    fn force_send_checked<M>(&self, msg: M) -> Result<M::Returned, TrySendCheckedError<M>>
     where
         M: Message + Send + 'static,
         M::Payload: Send + 'static,
@@ -239,7 +239,7 @@ pub trait Transformable: ActorRef {
         Self::ActorType: TransformInto<T>,
         T: ActorType;
 
-    /// Attempt to downcast the dynamic actor-type into an [`ActorInbox`].
+    /// Attempt to downcast the dynamic actor-type into an [`InboxType`].
     fn downcast<T>(self) -> Result<Self::IntoRef<T>, Self>
     where
         Self::ActorType: DynActorType,

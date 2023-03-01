@@ -1,14 +1,13 @@
-
-
 use zestors::{
-    action, async_trait,
-    actor_type::inbox::Inbox,
-    handler::{Action, ExitReason, Flow, HandleMessage, Handler, HandlerExt},
+    action,
+    actor_type::Inbox,
+    export::async_trait,
+    handler::{Action, Flow, HandleMessage, HandlerExt},
     messaging::Tx,
-    actor_ref::ActorRefExt,
+    prelude::ActorRefExt,
     protocol, Envelope, Message,
 };
-use zestors_codegen::HandleExit;
+use zestors_codegen::Handler;
 
 #[derive(Message, Envelope, Debug)]
 #[request(u32)]
@@ -25,14 +24,10 @@ pub enum MyProtocol {
     C(Action<MyHandler>),
 }
 
-#[derive(HandleExit)]
+#[derive(Debug, Handler)]
+#[state(Inbox<MyProtocol>)]
 pub struct MyHandler {
-    pub handled: u32,
-}
-
-impl Handler for MyHandler {
-    type Exception = anyhow::Error;
-    type State = Inbox<MyProtocol>;
+    handled: u32,
 }
 
 #[async_trait]
@@ -41,7 +36,7 @@ impl HandleMessage<u32> for MyHandler {
         &mut self,
         _state: &mut Self::State,
         msg: u32,
-    ) -> Result<Flow, Self::Exception> {
+    ) -> Result<Flow<Self>, Self::Exception> {
         self.handled += msg;
         Ok(Flow::Continue)
     }
@@ -53,7 +48,7 @@ impl HandleMessage<GetAndPrint> for MyHandler {
         &mut self,
         _state: &mut Self::State,
         (msg, tx): (GetAndPrint, Tx<u32>),
-    ) -> Result<Flow, Self::Exception> {
+    ) -> Result<Flow<Self>, Self::Exception> {
         self.handled += msg.val_a;
         println!("{}", msg.val_b);
         let _ = tx.send(self.handled);

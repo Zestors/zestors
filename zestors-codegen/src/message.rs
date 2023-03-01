@@ -65,7 +65,10 @@ pub fn get_msg_type(attrs: &Vec<Attribute>) -> Result<TokenStream, Error> {
 
     if let Some(attr) = attrs.iter().find(|attr| attr.path.is_ident("request")) {
         if msg_type.is_some() {
-            Err(Error::new_spanned(attr, "Can't have both msg and request"))?
+            Err(Error::new_spanned(
+                attr,
+                "Can't have both #[msg(..)] and #[request(..)]",
+            ))?
         }
         let ty = attr.parse_args::<Type>()?;
         msg_type = Some(quote! { zestors::messaging::Rx<#ty> })

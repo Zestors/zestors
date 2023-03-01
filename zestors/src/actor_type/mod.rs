@@ -1,48 +1,50 @@
 /*!
-# Specifying an actor-type
-The [`ActorType`]  of a [`Child<_, A, _>`] or [`Address<A>`] specifies what type of actor it refers
-to with the parameter `A`. Normally this type is the [`InboxType`] that the actor is spawned with,
-i.e. an [`Inbox<P>`] or a [`Halter`], however this can also be defined dynamically. A dynamic
-actor-type can be defined using [`Dyn<T>`] where `T` is [`dyn AcceptsNone`](AcceptsNone),
-[`dyn AcceptsOne<_>`](AcceptsOne), [`dyn AcceptsTwo<_, _>`](AcceptsTwo) etc. By specifying an actor type
-by the messages it accepts, we can cast addresses and inboxes of different types to the same type!
+# Overview
+The [`ActorType`] of a [`Child<_, A, _>`] or [`Address<A>`] specifies what type of actor it refers
+to. Some of the things it specifies are the messages the actor can accept and the type of [`Channel`] used.
 
-# DynActor! macro
-Instead of writing and remembering long and complicated types, we can use the [`Accepts`] macro:
-- `DynActor!()` = `Dyn<dyn AcceptsNone>`
-- `DynActor!(u32)` = `Dyn<dyn AcceptsOne<u32>>`
-- `DynActor!(u32, u64)` = `Dyn<dyn AcceptsTwo<u32, u64>>`
+An [`ActorType`] can be specified in two different ways:
+1) As the [`InboxType`] the actor is spawned with. Some examples of built-in inboxes are the [`Inbox<Protocol>`]
+and the [`Halter`]. An actor can choose what inbox it is spawned with, and new inboxes can be created in third-party
+crates.
+2) As a [`DynActor<dyn T>`](struct@DynActor) where `T` is one of the [`dyn_types`], usually written with [`DynActor!`].
+The actor is not specified by it's inbox, but instead by the messages it [`Accepts`].
+
+# `DynActor!` macro
+Writing [`DynActor`](struct@DynActor) types can become complicated, nstead of writing and remembering these types,
+use the [`DynActor!`] macro to specify the [`ActorType`]:
+- `DynActor!()` = `DynActor<dyn AcceptsNone>`
+- `DynActor!(u32)` = `DynActor<dyn AcceptsOne<u32>>`
+- `DynActor!(u32, u64)` = `DynActor<dyn AcceptsTwo<u32, u64>>`
 - etc.
 
-# Transforming
-Addresses and children of a given actor type `A` can be transformed into those of actor type `T`
-as long as [`A: TransformInto<T>`](TransformInto). This is implemented in the following cases:
-- If `A` is a [`Halter`] then this can be transformed into `DynActor!()`.
-- If `A` is an [`Inbox<P>`] then if `P` implements [`ProtocolFrom<X>`] for `X = M1, ..., Mx`, the
-actor-type can be transformed into `DynActor!(M1, ..., Mx)`
-- if `A` is an `Accepts[M1, ..., Mx]` then this can be transformed into `DynActor!(T1, ..., Ty)` as long
-as `T1, ..., Ty` is a subset of `M1, ..., Mx`.
+# Transforming actor-types
+Any [`ActorRef`] that implements [`Transformable`] allows it's [`ActorType`] to be transformed into and
+from a dynamic one. This allows references to different inbox-types to be transformed into ones of the same
+actor-type.
 
-A dynamic actor-types can also be transformed with `try_transform_into` or `transform_unchecked_into`.
-The first method checks at runtime if the actor accepts all methods, while the second one transforms
-without doing any checks. Sending messages to an actor which does not accept those messages will
-panic.
+[`Transformable`] is implemented for an [`Address<A>`] and [`Child<_, A, _>`], which allows them to be transformed
+into an `Address<T>` and `Child<_, T, _>` as long as [`A: TransformInto<T>`](TransformInto).
+Some examples with the default inbox-types:
+- A [`Halter`] can be transformed into a `DynActor!()`.
+- An [`Inbox<P>`] can be transformed into a `DynActor!(M1 .. Mn)` as long as `P` implements
+[`FromPayload<M>`] for `M in [M1 .. Mn]`.
+- A [`DynActor!(M1 .. Mn)`](DynActor!) can be transformed into a `DynActor!(T1 .. Tm)` as long
+as [`T1 .. Tn`] ⊆ [`M1 .. Mm`].
 
-# Downcasting
-If an address is of a [`Dyn<_>`] type, it can be downcast back into the original [`ActorType`] `T` using
-`downcast<T>`. This succeeds only if the actor-type is the same as the one the actor was spawned with.
+For these examples transformation can be done with [`Transformable::transform_into`] with transformations
+checked at compile-time. Transformations can also be checked at run-time (or not at all)
+with [`Transformable::try_transform_into`] and [`Transformable::transform_unchecked_into`].
 
-# Sending messages
-As long as the [`ActorType`] implements [`Accept<M>`], messages of type `M` can be sent to that
-actor. Therefore messages can be sent to actors that are statically or dynamically typed.
+A [`DynActor`](struct@DynActor) can be downcast into the original [`InboxType`] with [`Transformable::downcast`].
 
-| __<--__ [`monitoring`] | [`spawning`] __-->__ |
+| __<--__ [`actor_reference`](crate::actor_reference) | [`spawning`](crate::spawning) __-->__ |
 |---|---|
 
 # Example
 ```
-use zestors::*;
-use futures::future::pending;
+# tokio_test::block_on(main());
+use zestors::{prelude::*, protocol, DynActor};
 
 // Simple protocol which accepts `u32` and `u64`
 #[protocol]
@@ -51,11 +53,11 @@ enum MyProtocol {
     B(u64),
 }
 
-# tokio_test::block_on(main());
-# #[allow(unused)]
 async fn main() {
-    // Here we spawn a process that never exits.
-    let (child, address) = spawn( |_: Inbox<MyProtocol>| pending::<()>());
+    // Let's spawn a process that will live forever
+    let (child, address) = spawn(|_inbox: Inbox<MyProtocol>| {
+        futures::future::pending::<()>();
+    });
 
     // As we can see, the address and child are typed by `Inbox<MyProtocol>`.
     let child: Child<_, Inbox<MyProtocol>> = child;
@@ -65,7 +67,7 @@ async fn main() {
     let _: Address = address.clone().transform_into();
     let _: Address<DynActor!(u32)> = address.clone().transform_into();
     let _: Address<DynActor!(u32, u64)> = address.clone().transform_into();
-    // But this won't compile!
+    // But this won't compile! The actor does not accept strings
     // let _: Address<DynActor!(String)> = address.clone().transform_into();
 
     // We can also transform a child:
@@ -82,11 +84,11 @@ async fn main() {
         .downcast::<Inbox<MyProtocol>>()
         .unwrap();
 
-    // This is a transformation that should fail:
+    // This is a transformation fails at runtime:
     address
         .clone()
         .transform_into::<DynActor!()>()
-        .try_transform_into::<DynActor!(String)>()
+        .try_transform_into::<DynActor!(u32, String)>()
         .unwrap_err();
 
     // But if we use the unchecked transformation it doesn't complain
@@ -105,47 +107,20 @@ async fn main() {
 ```
 */
 
-/*!
-# Inbox type
-Actors can be spawned using anything that implements [`InboxType`], by default this is
-implemented for an [`inbox`] and a [`halter`]. Every inbox-type has once associated type,
-[`InboxType::Config`], which is the configuration that the inbox is spawned with. An
-inbox-type must also implement [`ActorType`], which means that the [`Address<A>`] and
-[`Child<A>`] will be typed with `A` equal to the inbox-type the actor was spawned with.
-
-# Capacity
-The standard configuration for inboxes that receive messages is a [`Capacity`]. This
-type specifies whether the inbox is bounded or unbounded. If it is bounded then a size
-is specified, and if it is unbounded then a [`BackPressure`] must be given.
-
-# Back pressure
-If the inbox is unbounded, it has a [`BackPressure`] which defines how a message-overflow
-should be handled. By default the backpressure is [`expenential`](BackPressure::exponential)
-with the following parameters:
-- `starts_at: 5` - The backpressure mechanism should start if the inbox contains 5 or more
-messages.
-- `timeout: 25ns` - The timeout at which the backpressure mechanism starts is 25ns.
-- `factor: 1.3` - For every message in the inbox, the timeout is multiplied by 1.3.
-
-The backpressure can also be set to [`linear`](BackPressure::linear) or
-[`disabled`](BackPressure::disabled).
-
-| __<--__ [`spawning`] | [`supervision`] __-->__ |
-|---|---|
- */
-
 #[allow(unused)]
 use crate::all::*;
 
 mod actor_id;
 mod actor_type;
-mod capacity;
 mod channel;
-mod errors;
 mod dyn_actor;
-pub use {actor_id::*, actor_type::*, capacity::*, channel::*, errors::*, dyn_actor::*};
+mod errors;
+mod halter;
+mod inbox;
+mod multi_halter;
+pub use {
+    actor_id::*, actor_type::*, channel::*, dyn_actor::*, errors::*, halter::*,
+    inbox::*, multi_halter::*,
+};
 
 pub mod dyn_types;
-pub mod halter;
-pub mod inbox;
-pub mod multi_halter;

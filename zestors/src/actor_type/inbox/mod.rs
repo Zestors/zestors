@@ -1,8 +1,4 @@
-use super::{ActorInbox, MultiProcessInbox};
-use crate::{
-    all::*,
-    handler::{Event, HandlerState},
-};
+use crate::all::*;
 use event_listener::EventListener;
 use futures::{stream::FusedStream, Future, FutureExt, Stream, StreamExt};
 use std::{
@@ -15,7 +11,7 @@ use std::{
 mod channel;
 pub use channel::*;
 
-/// The standard [`ActorInbox`] implemented as an mpmc-channel. Any messages that the [`Protocol`]
+/// The standard [`InboxType`] implemented as an mpmc-channel. Any messages that the [`Protocol`]
 /// `P` accepts can be sent to this actor. This inbox also allows for multiple processes to be spawned
 /// onto a single actor.
 ///
@@ -54,7 +50,7 @@ impl<P: Protocol> Inbox<P> {
     }
 }
 
-impl<P: Protocol + Send> ActorInbox for Inbox<P> {
+impl<P: Protocol + Send> InboxType for Inbox<P> {
     type Config = Capacity;
 
     fn init_single_inbox(
@@ -103,9 +99,9 @@ where
         self.poll_next_unpin(cx).map(|res| match res {
             Some(res) => match res {
                 Ok(protocol) => HandlerItem::Protocol(protocol),
-                Err(_halted) => HandlerItem::Event(Event::Halt),
+                Err(_halted) => HandlerItem::Halted,
             },
-            None => HandlerItem::Event(Event::Dead),
+            None => HandlerItem::Dead,
         })
     }
 }

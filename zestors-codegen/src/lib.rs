@@ -126,9 +126,9 @@ pub fn derive_envelope(item: TokenStream1) -> TokenStream1 {
 ///     }
 /// }
 /// ```
-#[proc_macro_derive(HandleExit, attributes(handler))]
-pub fn derive_handle_exit(item: TokenStream1) -> TokenStream1 {
-    handler::derive_handle_exit(item.into())
+#[proc_macro_derive(Handler, attributes(state))]
+pub fn derive_handler(item: TokenStream1) -> TokenStream1 {
+    handler::derive_handler(item.into())
         .unwrap_or_else(|e| e.into_compile_error())
         .into()
 }

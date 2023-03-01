@@ -567,8 +567,6 @@ impl<'a, P: Protocol> Future for SendProtocolFut<'a, P> {
 mod test {
     use super::*;
     use crate as zestors;
-    use crate::inbox::BackPressure;
-    use crate::inbox::{RecvError, TryRecvError};
     use std::future::ready;
     use std::{sync::Arc, time::Duration};
     use tokio::time::Instant;

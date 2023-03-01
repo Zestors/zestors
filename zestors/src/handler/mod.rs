@@ -1,6 +1,13 @@
 /*!
-Minimal example:
-```no_run
+# Overview
+
+
+
+| __<--__ [`spawning`](crate::spawning) | [`supervision`](crate::supervision) __-->__ |
+|---|---|
+
+# Example
+```
 
 // First we create two messages.
 // The `SayHello` message..
@@ -75,8 +82,7 @@ impl HandleMessage<OtherMessage> for MyHandler {
 */
 
 mod action;
-mod traits;
+mod handler_ext;
 mod state;
-pub use self::traits::*;
-pub use action::*;
-pub use state::*;
+mod handler;
+pub use {action::*, handler_ext::*, state::*, handler::*};

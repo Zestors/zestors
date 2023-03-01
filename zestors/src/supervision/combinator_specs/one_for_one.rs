@@ -283,7 +283,7 @@ impl OneForOneSupervisee {
 impl Supervisable for OneForOneSupervisee {
     type Spec = OneForOneSpec;
 
-    fn shutdown_time(self: Pin<&Self>) -> ShutdownDuration {
+    fn shutdown_time(self: Pin<&Self>) -> Duration {
         Duration::MAX.into()
     }
 

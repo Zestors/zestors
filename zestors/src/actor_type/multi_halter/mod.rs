@@ -53,7 +53,7 @@ impl MultiProcessInbox for MultiHalter {
     }
 }
 
-impl ActorInbox for MultiHalter {
+impl InboxType for MultiHalter {
     type Config = ();
 
     fn init_single_inbox(

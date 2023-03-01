@@ -1,5 +1,5 @@
 use zestors::{
-    actor_ref::{ActorRefExt, Address},
+    actor_reference::{ActorRefExt, Address},
     DynActor,
 };
 use zestors_codegen::{Envelope, Message};

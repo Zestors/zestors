@@ -14,12 +14,12 @@ pub fn from_spawn_fn<I, D, SFut, E, EFut>(
     spawn_fn: impl (FnOnce(I, D) -> SFut) + Clone + Send + 'static,
     exit_fn: impl (FnOnce(Result<E, ExitError>) -> EFut) + Send + Clone + 'static,
     data: D,
-    shutdown_time: ShutdownDuration,
+    shutdown_time: Duration,
     inbox_config: I::Config,
 ) -> impl Specifies<Ref = Address<I>> + 'static
 where
     E: Send + 'static,
-    I: ActorInbox,
+    I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFut: Future<Output = E> + Send + 'static,
@@ -32,7 +32,7 @@ where
 pub(crate) struct SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
-    I: ActorInbox,
+    I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
@@ -47,7 +47,7 @@ where
 impl<SFun, SFut, EFun, EFut, D, E, I> SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
-    I: ActorInbox,
+    I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
@@ -60,7 +60,7 @@ where
         exit_fn: EFun,
         data: D,
         config: I::Config,
-        abort_timeout: ShutdownDuration,
+        abort_timeout: Duration,
     ) -> Self {
         Self {
             inner: Inner {
@@ -78,7 +78,7 @@ where
 impl<SFun, SFut, EFun, EFut, D, E, I> Specifies for SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
-    I: ActorInbox,
+    I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
@@ -116,7 +116,7 @@ where
 pub(crate) struct SpawnSupervisee<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
-    I: ActorInbox,
+    I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
@@ -134,7 +134,7 @@ impl<SFun, SFut, EFun, EFut, D, E, I> Supervisable
     for SpawnSupervisee<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
-    I: ActorInbox,
+    I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
@@ -144,7 +144,7 @@ where
 {
     type Spec = SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>;
 
-    fn shutdown_time(self: Pin<&Self>) -> ShutdownDuration {
+    fn shutdown_time(self: Pin<&Self>) -> Duration {
         match self.child.link() {
             Link::Detached => panic!(),
             Link::Attached(duration) => duration.clone(),
@@ -208,7 +208,7 @@ mod test {
             },
             10,
             Default::default(),
-            ShutdownDuration::Dynamic,
+            get_default_shutdown_time(),
         );
     }
 
@@ -226,7 +226,7 @@ mod test {
             },
             10,
             Default::default(),
-            ShutdownDuration::default(),
+            get_default_shutdown_time(),
         )
     }
 }
@@ -234,7 +234,7 @@ mod test {
 struct Inner<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
-    I: ActorInbox,
+    I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
@@ -245,14 +245,14 @@ where
     spawn_fn: SFun,
     exit_fn: EFun,
     config: I::Config,
-    abort_timeout: ShutdownDuration,
+    abort_timeout: Duration,
     phantom: PhantomData<(SFut, EFut)>,
 }
 
 impl<SFun, SFut, EFun, EFut, D, E, I> Clone for Inner<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
-    I: ActorInbox,
+    I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,

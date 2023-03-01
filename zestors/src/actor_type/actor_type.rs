@@ -4,7 +4,7 @@ use std::{any::TypeId, marker::PhantomData, sync::Arc};
 
 /// The [`ActorType`] defines what kind of inbox the actor uses. An actor-type can
 /// either be statically or dynamically typed:
-/// - __Static__: A static actor-type is defined as the [`ActorInbox`].
+/// - __Static__: A static actor-type is defined as the [`InboxType`].
 /// - __Dynamic__: A dynamic actor-type is defined as a [`DynActor<dyn _>`], usually written
 /// as [`DynActor!(Msg1, Msg2, ..]`)(DynActor!).
 ///
@@ -21,8 +21,8 @@ pub trait DynActorType: ActorType<Channel = dyn Channel> {
     fn msg_ids() -> Box<[TypeId]>;
 }
 
-/// All actors are spawned with an [`ActorInbox`] which defines the [`ActorType`] of that actor.
-pub trait ActorInbox: ActorType + ActorRef<ActorType = Self> + Send + 'static {
+/// All actors are spawned with an [`InboxType`] which defines the [`ActorType`] of that actor.
+pub trait InboxType: ActorType + ActorRef<ActorType = Self> + Send + 'static {
     /// The inbox's configuration.
     type Config: Send;
 
@@ -34,8 +34,8 @@ pub trait ActorInbox: ActorType + ActorRef<ActorType = Self> + Send + 'static {
     ) -> (Arc<Self::Channel>, Self);
 }
 
-/// An [`ActorInbox`] that allows for spawning multiple processes onto an actor.
-pub trait MultiProcessInbox: ActorInbox {
+/// An [`InboxType`] that allows for spawning multiple processes onto an actor.
+pub trait MultiProcessInbox: InboxType {
     /// Sets up the channel, preparing for x processes to be spawned.
     fn init_multi_inbox(
         config: Self::Config,
@@ -54,8 +54,7 @@ pub trait MultiProcessInbox: ActorInbox {
 /// - `DynActor<dyn AcceptsNone>` -> Accepts no messages.
 /// - `DynActor<dyn AcceptsTwo<u32, u64>` -> Accepts two messages: `u32` and `u64`.
 ///
-/// Any [`ActorType`] which accepts these messages implements [`TransformInto`], and can
-/// thus be transformed into a dynamic actor-type.
+/// See [`DynActor!`] for writing this types in a simpler way.
 #[derive(Debug)]
 pub struct DynActor<T: ?Sized>(PhantomData<*const T>);
 

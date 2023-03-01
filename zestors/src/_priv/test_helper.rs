@@ -6,7 +6,7 @@ macro_rules! basic_actor {
         crate::_priv::test_helper::basic_actor!(())
     };
     ($ty:ty) => {
-        |mut inbox: crate::Inbox<$ty>| async move {
+        |mut inbox: crate::all::Inbox<$ty>| async move {
             loop {
                 match inbox.recv().await {
                     Ok(_) => (),
@@ -23,7 +23,7 @@ macro_rules! pooled_basic_actor {
         crate::_priv::test_helper::pooled_basic_actor!(())
     };
     ($ty:ty) => {
-        |_, mut inbox: crate::Inbox<$ty>| async move {
+        |_, mut inbox: crate::all::Inbox<$ty>| async move {
             loop {
                 match inbox.recv().await {
                     Ok(_) => (),

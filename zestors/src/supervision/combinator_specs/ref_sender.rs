@@ -3,7 +3,7 @@ use futures::Future;
 use pin_project::pin_project;
 use std::{
     pin::Pin,
-    task::{Context, Poll},
+    task::{Context, Poll}, time::Duration,
 };
 use tokio::sync::mpsc;
 
@@ -94,7 +94,7 @@ impl<Sp: Specifies> Future for RefSenderSpecFut<Sp> {
 impl<S: Specifies> Supervisable for RefSenderSupervisee<S> {
     type Spec = RefSenderSpec<S>;
 
-    fn shutdown_time(self: Pin<&Self>) -> ShutdownDuration {
+    fn shutdown_time(self: Pin<&Self>) -> Duration {
         self.project_ref().supervisee.shutdown_time()
     }
 
