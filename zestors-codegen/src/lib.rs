@@ -10,12 +10,12 @@ extern crate quote;
 /// struct MyMessage;
 ///
 /// #[derive(Message)]
-/// #[request(..)]
+/// #[request(T)]
 /// struct MyRequest;
 /// 
 /// // (Same as the one above)
 /// #[derive(Message)]
-/// #[msg(Rx<..>)]
+/// #[msg(Rx<T>)]
 /// struct MyRequest;
 /// ```
 /// 
@@ -37,16 +37,16 @@ pub fn derive_message(item: TokenStream1) -> TokenStream1 {
 /// ```ignore
 /// #[protocol]
 /// enum MyProtocol {
-///     MessageOne(OneOffMsg),
-///     MessageTwo(MessageWithRequest)
+///     MessageOne(Msg),
+///     MessageTwo(Request)
 /// }
 /// ```
 ///
 /// Creates the following enum:
 /// ```ignore
 /// enum MyProtocol {
-///     MessageOne(OneOffMsg),
-///     MessageTwo((MessageWithRequest, Tx<..>))
+///     MessageOne(Msg),
+///     MessageTwo((Request, Tx<T>))
 /// }
 /// ```
 ///
@@ -79,7 +79,10 @@ pub fn protocol(attr: TokenStream1, item: TokenStream1) -> TokenStream1 {
 /// 
 /// #[derive(Message, Envelope)]
 /// #[envelope(CustomTraitName, custom_method_name)]
-/// struct MyMessage { .. }
+/// struct MyMessage {
+///     arg1: u32,
+///     arg2: u64
+/// }
 /// ```
 /// 
 /// Which generates the a trait similar to the following:

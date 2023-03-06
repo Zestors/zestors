@@ -38,6 +38,8 @@ with [`Transformable::try_transform_into`] and [`Transformable::transform_unchec
 
 A [`DynActor`](struct@DynActor) can be downcast into the original [`InboxType`] with [`Transformable::downcast`].
 
+All addresses that can be transformed implement [`IntoAddress`] and all children [`IntoChild`].
+
 | __<--__ [`actor_reference`](crate::actor_reference) | [`spawning`](crate::spawning) __-->__ |
 |---|---|
 
