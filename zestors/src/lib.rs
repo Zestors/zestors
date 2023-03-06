@@ -89,7 +89,9 @@ pub mod handler;
 pub mod messaging;
 pub mod runtime;
 pub mod spawning;
-mod supervision;
+pub mod supervision;
+
+extern crate self as zestors;
 
 pub mod prelude {
     pub use crate::actor_reference::{ActorRefExt, Address, Child, ChildPool, Transformable};

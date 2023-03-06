@@ -34,15 +34,15 @@ fn impl_accepts(item: &ItemEnum, variants: &Vec<ProtocolMsg>) -> Result<TokenStr
             let variant_ty = &variant.msg_ty;
             let variant_ident = &variant.enum_ident;
             quote! {
-                impl #impl_generics zestors::messaging::FromPayload<#variant_ty> for #ident #ty_generics #where_clause {
+                impl #impl_generics ::zestors::messaging::FromPayload<#variant_ty> for #ident #ty_generics #where_clause {
                     fn from_payload(
-                        msg: <#variant_ty as zestors::messaging::Message>::Payload
+                        msg: <#variant_ty as ::zestors::messaging::Message>::Payload
                     ) -> Self {
                         Self::#variant_ident(msg)
                     }
 
                     fn try_into_payload(self) -> Result<
-                        <#variant_ty as zestors::messaging::Message>::Payload,
+                        <#variant_ty as ::zestors::messaging::Message>::Payload,
                         Self
                     > {
                         match self {
@@ -98,16 +98,16 @@ fn impl_protocol(item: &ItemEnum, variants: &Vec<ProtocolMsg>) -> Result<TokenSt
             let variant_ty = &variant.msg_ty;
             quote! {
                 Self::#variant_ident(msg) => {
-                    zestors::messaging::BoxPayload::new::<#variant_ty>(msg)
+                    ::zestors::messaging::BoxPayload::new::<#variant_ty>(msg)
                 }
             }
         })
         .collect::<Vec<_>>();
 
     Ok(quote! {
-        impl #impl_generics zestors::messaging::Protocol for #ident #ty_generics #where_clause {
+        impl #impl_generics ::zestors::messaging::Protocol for #ident #ty_generics #where_clause {
 
-            fn try_from_boxed_payload(boxed: zestors::messaging::BoxPayload) -> Result<Self, zestors::messaging::BoxPayload> {
+            fn try_from_boxed_payload(boxed: ::zestors::messaging::BoxPayload) -> Result<Self, ::zestors::messaging::BoxPayload> {
                 #(#downcasts)*
                 Err(boxed)
             }
@@ -117,7 +117,7 @@ fn impl_protocol(item: &ItemEnum, variants: &Vec<ProtocolMsg>) -> Result<TokenSt
                 false
             }
 
-            fn into_boxed_payload(self) -> zestors::messaging::BoxPayload {
+            fn into_boxed_payload(self) -> ::zestors::messaging::BoxPayload {
                 match self {
                     #(#matches)*
                 }
@@ -132,7 +132,7 @@ fn impl_handled_by(item: &ItemEnum, variants: &Vec<ProtocolMsg>) -> Result<Token
             .into_iter()
             .map(|variant| {
                 let msg_ty = &variant.msg_ty;
-                let ty: Type = parse_quote! { zestors::handler::HandleMessage<#msg_ty> };
+                let ty: Type = parse_quote! { ::zestors::handler::HandleMessage<#msg_ty> };
                 ty
             })
             .collect();
@@ -148,7 +148,7 @@ fn impl_handled_by(item: &ItemEnum, variants: &Vec<ProtocolMsg>) -> Result<Token
             .unwrap()
             .predicates
             .push(parse_quote! {
-                H: zestors::handler::Handler + #handle_msg_traits
+                H: ::zestors::handler::Handler + #handle_msg_traits
             });
         new_generics
     };
@@ -160,7 +160,7 @@ fn impl_handled_by(item: &ItemEnum, variants: &Vec<ProtocolMsg>) -> Result<Token
             let variant_ty = &variant.msg_ty;
             quote! {
                 Self::#variant_ident(payload) => {
-                    zestors::handler::HandleMessage::<#variant_ty>::handle_msg(
+                    ::zestors::handler::HandleMessage::<#variant_ty>::handle_msg(
                         handler, state, payload
                     ).await
                 }
@@ -172,13 +172,13 @@ fn impl_handled_by(item: &ItemEnum, variants: &Vec<ProtocolMsg>) -> Result<Token
     let (_, ty_generics, _) = item.generics.split_for_impl();
     let ident = &item.ident;
     Ok(quote! {
-        #[zestors::export::async_trait]
-        impl #impl_generics zestors::handler::HandledBy<H> for #ident #ty_generics #where_clause {
+        #[::zestors::export::async_trait]
+        impl #impl_generics ::zestors::handler::HandledBy<H> for #ident #ty_generics #where_clause {
             async fn handle_with(
                 self,
                 handler: &mut H,
                 state: &mut H::State,
-            ) -> Result<zestors::handler::Flow<H>, H::Exception> {
+            ) -> Result<::zestors::handler::Flow<H>, H::Exception> {
                 match self {
                     #(#matches)*
                 }
@@ -203,7 +203,7 @@ fn modify_protocol_enum(item: &mut ItemEnum) -> Result<Vec<ProtocolMsg>, Error> 
                         ident: None,
                         colon_token: None,
                         ty: parse_quote! {
-                            <#ty as zestors::messaging::Message>::Payload
+                            <#ty as ::zestors::messaging::Message>::Payload
                         },
                     });
 

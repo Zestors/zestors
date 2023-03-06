@@ -4,7 +4,7 @@ use super::*;
 use std::any::TypeId;
 
 /// A [`Protocol`] defines exactly which [messages](Message) an actor [`Accepts`]. Normally this is derived with
-/// the [`protocol!`] macro.
+/// the [`macro@protocol`] macro.
 ///
 /// [`Protocol`] is automatically implemented for `()`, which accepts only `()`.
 pub trait Protocol: Send + 'static {

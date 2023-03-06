@@ -42,14 +42,14 @@ pub fn derive_message(item: TokenStream) -> Result<TokenStream, Error> {
     let msg_type = get_msg_type(&attrs)?;
 
     Ok(quote! {
-        impl #impl_generics zestors::messaging::Message for #ident #ty_generics #where_clause {
-            type Returned = <#msg_type as zestors::messaging::MessageDerive<Self>>::Returned;
-            type Payload = <#msg_type as zestors::messaging::MessageDerive<Self>>::Payload;
+        impl #impl_generics ::zestors::messaging::Message for #ident #ty_generics #where_clause {
+            type Returned = <#msg_type as ::zestors::messaging::MessageDerive<Self>>::Returned;
+            type Payload = <#msg_type as ::zestors::messaging::MessageDerive<Self>>::Payload;
             fn create(self) -> (Self::Payload, Self::Returned) {
-                <#msg_type as zestors::messaging::MessageDerive<Self>>::create(self)
+                <#msg_type as ::zestors::messaging::MessageDerive<Self>>::create(self)
             }
             fn cancel(payload: Self::Payload, returned: Self::Returned) -> Self {
-                <#msg_type as zestors::messaging::MessageDerive<Self>>::cancel(payload, returned)
+                <#msg_type as ::zestors::messaging::MessageDerive<Self>>::cancel(payload, returned)
             }
         }
     })
@@ -71,7 +71,7 @@ pub fn get_msg_type(attrs: &Vec<Attribute>) -> Result<TokenStream, Error> {
             ))?
         }
         let ty = attr.parse_args::<Type>()?;
-        msg_type = Some(quote! { zestors::messaging::Rx<#ty> })
+        msg_type = Some(quote! { ::zestors::messaging::Rx<#ty> })
     };
 
     Ok(msg_type.unwrap_or(quote! { () }))

@@ -15,7 +15,7 @@ use std::sync::Arc;
 /// - `Returned = Rx<R>`
 ///
 /// # Derive
-/// [`Message`] can be derived with the [`Message!`] macro.
+/// [`Message`] can be derived with the [`derive@Message`] macro.
 pub trait Message: Sized {
     ///  The payload of the message that is sent to the actor.
     type Payload: Send + 'static;
@@ -30,7 +30,7 @@ pub trait Message: Sized {
     fn cancel(sent: Self::Payload, returned: Self::Returned) -> Self;
 }
 
-/// A version of the [`Message`] trait generic over `M`, used as the `[msg(..)]` attribute for the [`Message!`] derive
+/// A version of the [`Message`] trait generic over `M`, used as the `[msg(..)]` attribute for the [`derive@Message`] derive
 /// macro.
 /// 
 /// This is implemented for `()`, [`Rx<_>`] and [`Tx<_>`]

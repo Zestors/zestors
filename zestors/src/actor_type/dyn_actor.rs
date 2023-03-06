@@ -1,7 +1,7 @@
 #[allow(unused)]
 use crate::all::*;
 
-/// Macro for writing a [`DynActor<dyn _>`]:
+/// Macro for writing a [`struct@DynActor<dyn _>`]:
 ///
 /// - `DynActor!()` = `DynActor<dyn AcceptsNone>`
 /// - `DynActor!(u32, u64)` = `DynActor<dyn AcceptsTwo<u32, u64>`

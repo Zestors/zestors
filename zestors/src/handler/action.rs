@@ -1,4 +1,3 @@
-use crate as zestors;
 use crate::all::*;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
@@ -191,9 +190,7 @@ pub use action;
 #[cfg(test)]
 mod test {
     use zestors_codegen::Handler;
-
     use super::*;
-    use crate as zestors;
 
     #[derive(Handler)]
     #[state(Inbox<Action<MyHandler>>)]

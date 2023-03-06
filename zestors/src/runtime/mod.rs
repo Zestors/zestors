@@ -9,6 +9,8 @@ As supervision and distribution get implemented this module will fill further.
 | __<--__ [`handler`](crate::handler) | [`supervision`](crate::supervision) __-->__ |
 |---|---|
 */
+#[allow(unused)]
+use crate::all::*;
 
 use std::{
     sync::atomic::{AtomicU32, AtomicU64, Ordering},

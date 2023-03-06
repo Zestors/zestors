@@ -21,7 +21,7 @@ pub trait ActorRef: Sized {
 /// This is the main trait for interacting with an actor, and is automatically implemented for any type that
 /// implements [`ActorRef`].
 pub trait ActorRefExt: ActorRef {
-    /// Create an [`Envelope`] with the given message for this actor that can be sent later.
+    /// Create an [`struct@Envelope`] with the given message for this actor that can be sent later.
     fn envelope<M>(&self, msg: M) -> Envelope<'_, Self::ActorType, M>
     where
         M: Message,
@@ -88,7 +88,7 @@ pub trait ActorRefExt: ActorRef {
         Self::channel_ref(self).actor_id()
     }
 
-    /// Attempt to send a message to this actor. (see [messaging] for details)
+    /// Attempt to send a message to this actor. 
     ///
     /// If the inbox is full or if a [`BackPressure`]-timeout is returned this method will fail
     /// with [`TrySendError::Full`].
@@ -100,7 +100,7 @@ pub trait ActorRefExt: ActorRef {
         <Self::ActorType as Accepts<M>>::try_send(Self::channel_ref(self), msg)
     }
 
-    /// Attempt to send a message to this actor. (see [messaging] for details)
+    /// Attempt to send a message to this actor. 
     ///
     /// This method ignores any [`BackPressure`], but if the inbox is full this method will fail
     /// with [`TrySendError::Full`].
@@ -112,7 +112,7 @@ pub trait ActorRefExt: ActorRef {
         <Self::ActorType as Accepts<M>>::force_send(Self::channel_ref(self), msg)
     }
 
-    /// Attempt to send a message to this actor. (see [messaging] for details)
+    /// Attempt to send a message to this actor.
     ///
     /// Same as [`Self::send`] but blocks the thread.
     fn send_blocking<M>(&self, msg: M) -> Result<M::Returned, SendError<M>>
@@ -123,7 +123,7 @@ pub trait ActorRefExt: ActorRef {
         <Self::ActorType as Accepts<M>>::send_blocking(Self::channel_ref(self), msg)
     }
 
-    /// Attempt to send a message to this actor. (see [messaging] for details)
+    /// Attempt to send a message to this actor.
     ///
     /// This method will wait until there is space in the channel or until the
     /// [`BackPressure`]-timeout is over.
@@ -136,7 +136,6 @@ pub trait ActorRefExt: ActorRef {
     }
 
     /// [`try_send`](`Self::try_send`) a message to this actor and wait for the reply.
-    /// (see [messaging] for details)
     fn try_request<M, F, E, R>(&self, msg: M) -> BoxFuture<'_, Result<R, TryRequestError<M, E>>>
     where
         M: Message<Returned = F> + Send + 'static,
@@ -147,7 +146,6 @@ pub trait ActorRefExt: ActorRef {
     }
 
     /// [`force_send`](`Self::force_send`) a message to this actor and wait for the reply.
-    /// (see [messaging] for details)
     fn force_request<M, F, E, R>(&self, msg: M) -> BoxFuture<'_, Result<R, TryRequestError<M, E>>>
     where
         M: Message<Returned = F> + Send + 'static,
@@ -158,7 +156,6 @@ pub trait ActorRefExt: ActorRef {
     }
 
     /// [`send`](`Self::send`) a message to this actor and wait for the reply.
-    /// (see [messaging] for details)
     fn request<M, F, E, R>(&self, msg: M) -> BoxFuture<'_, Result<R, RequestError<M, E>>>
     where
         M: Message<Returned = F> + Send + 'static,
@@ -169,7 +166,7 @@ pub trait ActorRefExt: ActorRef {
     }
 
     /// Same as [`try_send`](`Self::try_send`), but checks at runtime that the message
-    /// is actually accepted by the actor. (see [messaging] for details)
+    /// is actually accepted by the actor.
     fn try_send_checked<M>(&self, msg: M) -> Result<M::Returned, TrySendCheckedError<M>>
     where
         M: Message + Send + 'static,
@@ -180,7 +177,7 @@ pub trait ActorRefExt: ActorRef {
     }
 
     /// Same as [`force_send`](`Self::force_send`), but checks at runtime that the message
-    /// is actually accepted by the actor. (see [messaging] for details)
+    /// is actually accepted by the actor. 
     fn force_send_checked<M>(&self, msg: M) -> Result<M::Returned, TrySendCheckedError<M>>
     where
         M: Message + Send + 'static,
@@ -191,7 +188,7 @@ pub trait ActorRefExt: ActorRef {
     }
 
     /// Same as [`send_blocking`](`Self::send_blocking`), but checks at runtime that the message
-    /// is actually accepted by the actor. (see [messaging] for details)
+    /// is actually accepted by the actor. 
     fn send_blocking_checked<M>(&self, msg: M) -> Result<M::Returned, SendCheckedError<M>>
     where
         M: Message + Send + 'static,
@@ -202,7 +199,7 @@ pub trait ActorRefExt: ActorRef {
     }
 
     /// Same as [`send`](`Self::send`), but checks at runtime that the message
-    /// is actually accepted by the actor. (see [messaging] for details)
+    /// is actually accepted by the actor.
     fn send_checked<M>(&self, msg: M) -> BoxFuture<'_, Result<M::Returned, SendCheckedError<M>>>
     where
         M::Returned: Send,

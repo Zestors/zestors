@@ -2,8 +2,7 @@ use crate::all::*;
 use async_trait::async_trait;
 
 /// The [`Handler`] trait makes it easy to write actors in a declarative manner. See [`HandlerExt`] for
-/// methods to call on a handler. If asynchronous initialization is required, [`HandleStart`] can be
-/// implemented as well.
+/// methods to call on a handler.
 ///
 /// (See [`handler`](crate::handler) for an overview).
 #[async_trait]

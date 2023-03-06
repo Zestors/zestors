@@ -17,37 +17,37 @@ pub fn derive_handler(item: TokenStream) -> Result<TokenStream, Error> {
     let state = state.parse_args::<Type>()?;
 
     Ok(quote! {
-        #[zestors::export::async_trait]
-        impl #impl_generics zestors::handler::Handler for #ident #ty_generics #where_clause
+        #[::zestors::export::async_trait]
+        impl #impl_generics ::zestors::handler::Handler for #ident #ty_generics #where_clause
         {
             type State = #state;
-            type Exception = zestors::export::Report;
+            type Exception = ::zestors::export::Report;
             type Stop = ();
-            type Exit = Result<Self, zestors::export::Report>;
+            type Exit = Result<Self, ::zestors::export::Report>;
 
             async fn handle_exit(
                 self,
                 state: &mut Self::State,
                 reason: Result<Self::Stop, Self::Exception>,
-            ) -> zestors::handler::ExitFlow<Self> {
+            ) -> ::zestors::handler::ExitFlow<Self> {
                 match reason {
-                    Ok(()) => zestors::handler::ExitFlow::Exit(Ok(self)),
-                    Err(exception) => zestors::handler::ExitFlow::Exit(Err(exception))
+                    Ok(()) => ::zestors::handler::ExitFlow::Exit(Ok(self)),
+                    Err(exception) => ::zestors::handler::ExitFlow::Exit(Err(exception))
                 }
             }
 
             async fn handle_event(
                 &mut self,
                 state: &mut Self::State,
-                event: zestors::handler::Event
-            ) -> zestors::handler::HandlerResult<Self> {
+                event: ::zestors::handler::Event
+            ) -> ::zestors::handler::HandlerResult<Self> {
                 match event {
-                    zestors::handler::Event::Halted => {
+                    ::zestors::handler::Event::Halted => {
                         state.close();
-                        Ok(zestors::handler::Flow::Continue)
+                        Ok(::zestors::handler::Flow::Continue)
                     }
-                    zestors::handler::Event::ClosedAndEmpty => Ok(zestors::handler::Flow::Stop(())),
-                    zestors::handler::Event::Dead => Ok(zestors::handler::Flow::Stop(())),
+                    ::zestors::handler::Event::ClosedAndEmpty => Ok(::zestors::handler::Flow::Stop(())),
+                    ::zestors::handler::Event::Dead => Ok(::zestors::handler::Flow::Stop(())),
                 }
             }
         }

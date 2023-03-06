@@ -54,7 +54,7 @@ pub fn derive_envelope(item: TokenStream) -> Result<TokenStream, Error> {
     );
     let method_doc = format!(
         "
-        Creates an [`Envelope`](zestors::messaging::Envelope) for the 
+        Creates an [`Envelope`](::zestors::messaging::Envelope) for the 
         message[`{}`].
         ",
         item.ident
@@ -65,16 +65,16 @@ pub fn derive_envelope(item: TokenStream) -> Result<TokenStream, Error> {
 
     Ok(quote! {
         #[doc = #trait_doc]
-        #vis trait #trait_name: zestors::actor_reference::ActorRef
+        #vis trait #trait_name: ::zestors::actor_reference::ActorRef
         where
-            Self::ActorType: zestors::messaging::Accepts<#ident>
+            Self::ActorType: ::zestors::messaging::Accepts<#ident>
         {
             #[doc = #method_doc]
             fn #method_name(
                 &self,
                 #field_params
-            ) -> zestors::messaging::Envelope<'_, Self::ActorType, #ident> {
-                <Self as zestors::actor_reference::ActorRefExt>::envelope(self, #ident {
+            ) -> ::zestors::messaging::Envelope<'_, Self::ActorType, #ident> {
+                <Self as ::zestors::actor_reference::ActorRefExt>::envelope(self, #ident {
                     #field_idents
                 })
             }
@@ -82,8 +82,8 @@ pub fn derive_envelope(item: TokenStream) -> Result<TokenStream, Error> {
 
         impl<T> #trait_name for T
         where
-            T: zestors::actor_reference::ActorRef,
-            T::ActorType: zestors::messaging::Accepts<#ident>
+            T: ::zestors::actor_reference::ActorRef,
+            T::ActorType: ::zestors::messaging::Accepts<#ident>
         { }
     })
 }

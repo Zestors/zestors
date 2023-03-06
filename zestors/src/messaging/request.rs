@@ -21,7 +21,7 @@ pub fn new_request<T>() -> (Tx<T>, Rx<T>) {
 
 /// The transmitter part of a request, created with [`new_request`].
 /// 
-/// This implements [`MessageDerive<M>`] to be used with the [`Message!`] derive macro.
+/// This implements [`MessageDerive<M>`] to be used with the [`derive@Message`] derive macro.
 #[derive(Debug)]
 pub struct Tx<M>(pub(super) oneshot::Sender<M>);
 
@@ -62,7 +62,7 @@ impl<M, R> MessageDerive<M> for Tx<R> {
 
 /// The receiver part of a request, created with [`new_request`].
 /// 
-/// This implements [`MessageDerive<M>`] to be used with the [`Message!`] derive macro.
+/// This implements [`MessageDerive<M>`] to be used with the [`derive@Message`] derive macro.
 #[derive(Debug)]
 pub struct Rx<M>(pub(super) oneshot::Receiver<M>);
 

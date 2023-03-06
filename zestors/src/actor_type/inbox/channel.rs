@@ -566,7 +566,6 @@ impl<'a, P: Protocol> Future for SendProtocolFut<'a, P> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate as zestors;
     use std::future::ready;
     use std::{sync::Arc, time::Duration};
     use tokio::time::Instant;

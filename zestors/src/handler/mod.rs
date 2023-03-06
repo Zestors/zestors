@@ -7,7 +7,7 @@ This module implements a way to write actors of this kind with the [`Handler`] t
 # Handler
 The [`Handler`] trait specifies properties of the actor like it's [`InboxType`] and [`Handler::Exit`]. 
 If a handler wishes to handle message `M` it must define this in it's [`Protocol`] and implement 
-[`HandleMessage<M>`]. The [`Handler`]-trait can be derived with the [`crate::Handler!`]-macro.
+[`HandleMessage<M>`]. The [`Handler`]-trait can be derived with the [`Handler`](derive@crate::Handler)-macro.
 
 # HandlerState
 Every handler has to specify a [`HandlerState`]. This state can generate [`HandlerItem`]s that the
@@ -24,7 +24,7 @@ accepts the message [`Action<Self>`], then actions (closures) can be sent and ha
 automatically on the actor. An upside of this is that it is now possible to send messages with
 generics, but a downside is that the actor's protocol is now tightly coupled to the state. 
 
-| __<--__ [`spawning`](crate::spawning) | [`supervision`](crate::supervision) __-->__ |
+| __<--__ [`spawning`](crate::spawning) | [`runtime`](crate::runtime) __-->__ |
 |---|---|
 
 # Example

@@ -1,4 +1,4 @@
-use crate as zestors;
+extern crate self as zestors;
 use crate::protocol;
 
 macro_rules! basic_actor {
@@ -20,10 +20,10 @@ pub(crate) use basic_actor;
 
 macro_rules! pooled_basic_actor {
     () => {
-        $crate::_test::pooled_basic_actor!(())
+        crate::_test::pooled_basic_actor!(())
     };
     ($ty:ty) => {
-        |_, mut inbox: $crate::all::Inbox<$ty>| async move {
+        |_, mut inbox: crate::all::Inbox<$ty>| async move {
             loop {
                 match inbox.recv().await {
                     Ok(_) => (),

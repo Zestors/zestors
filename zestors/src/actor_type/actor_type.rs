@@ -5,7 +5,7 @@ use std::{any::TypeId, marker::PhantomData, sync::Arc};
 /// The [`ActorType`] defines what kind of inbox the actor uses. An actor-type can
 /// either be statically or dynamically typed:
 /// - __Static__: A static actor-type is defined as the [`InboxType`].
-/// - __Dynamic__: A dynamic actor-type is defined as a [`DynActor<dyn _>`], usually written
+/// - __Dynamic__: A dynamic actor-type is defined as a [`struct@DynActor<dyn _>`], usually written
 /// as [`DynActor!(Msg1, Msg2, ..]`)(DynActor!).
 ///
 /// The actor-type is used as the generic parameter `A` in for example a [`Child<_, A, _>`] and
