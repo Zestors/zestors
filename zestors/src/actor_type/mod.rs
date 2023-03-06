@@ -46,7 +46,12 @@ All addresses that can be transformed implement [`IntoAddress`] and all children
 # Example
 ```
 use futures::stream::StreamExt;
-use zestors::{actor_reference::ExitError, messaging::RecvError, prelude::*};
+use zestors::{
+    actor_reference::{ExitError, IntoAddress},
+    messaging::RecvError,
+    prelude::*,
+    DynActor,
+};
 
 // Let's start by creating a simple event-loop for our actor.
 async fn my_actor(mut inbox: Inbox<()>) -> &'static str {
@@ -119,7 +124,24 @@ async fn main() {
         })
         .await;
     assert_eq!(address.await, ());
+
+    // As a final example, we can use different bounds on a send-function:
+    let (child, address) = spawn(my_actor);
+    send_using_into(address.clone()).await;
+    send_using_accepts(&address).await;
+    child.await.unwrap();
 }
+
+// Here we use `IntoAddress` ..
+async fn send_using_into(address: impl IntoAddress<DynActor!(())>) {
+    address.into_address().send(()).await.unwrap();
+}
+
+// .. and here `Accepts` as the bound.
+async fn send_using_accepts(address: &Address<impl Accepts<()>>) {
+    address.send(()).await.unwrap();
+}
+
 ```
 */
 
