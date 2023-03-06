@@ -163,6 +163,13 @@ async fn main() {
         .request()
         .await
         .unwrap();
+
+    // As a final example, we can use the Accepts-bound on a function:
+    send_using_accepts(&address, my_msg.clone()).await;
+}
+
+async fn send_using_accepts(address: &Address<impl Accepts<MyMessage>>, msg: MyMessage) {
+    address.send(msg).await.unwrap();
 }
 ```
 */

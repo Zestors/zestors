@@ -191,17 +191,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "getrandom"
-version = "0.2.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c05aeb6a22b8f62540c194aac980f2115af067bfe15a0734d7277a768d396b31"
-dependencies = [
- "cfg-if",
- "libc",
- "wasi",
-]
-
-[[package]]
 name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -530,15 +519,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ceab39d59e4c9499d4e5a8ee0e2735b891bb7308ac83dfb4e80cad195c9f6f3"
 
 [[package]]
-name = "uuid"
-version = "1.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "422ee0de9031b5b948b97a8fc04e3aa35230001a722ddd27943e0be31564ce4c"
-dependencies = [
- "getrandom",
-]
-
-[[package]]
 name = "wasi"
 version = "0.11.0+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -629,7 +609,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bincode",
- "bytes",
  "concurrent-queue",
  "event-listener",
  "eyre",
@@ -640,13 +619,12 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tokio-util",
- "uuid",
  "zestors-codegen",
 ]
 
 [[package]]
 name = "zestors-codegen"
-version = "0.0.3"
+version = "0.1.0"
 dependencies = [
  "heck",
  "proc-macro2",
