@@ -13,10 +13,10 @@ authors = ["jvdwrf"]
 readme = "README.md"
 
 [dependencies]
-syn = { version = "1.0.99", features = ["full"] }
-quote = "1.0.21"
-proc-macro2 = "1.0.43"
-heck = "0.4.1"
+syn = { version = "1", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+heck = "0.4"
 
 [lib]
 proc-macro = true
