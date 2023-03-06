@@ -13,6 +13,10 @@ new concepts and then gives an example on how to use it.
 - [`runtime`] - Runtime configuration.
 - [`supervision`] - (Not yet implemented)
 - [`distribution`] - (Not yet implemented)
+
+# Minimal example
+
+
 */
 
 pub mod actor_reference;
