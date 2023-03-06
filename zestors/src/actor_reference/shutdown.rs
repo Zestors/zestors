@@ -139,7 +139,7 @@ impl From<tokio::task::JoinError> for ExitError {
 
 #[cfg(test)]
 mod test {
-    use crate::_priv::test_helper::{basic_actor, pooled_basic_actor};
+    use crate::_test::{basic_actor, pooled_basic_actor};
     use crate::all::*;
     use futures::stream::StreamExt;
     use std::{future::pending, time::Duration};

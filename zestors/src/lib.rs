@@ -48,7 +48,8 @@ mod all {
     pub use crate::spawning::*;
     pub use crate::supervision::*;
 }
-pub(crate) mod _priv;
+#[cfg(test)]
+pub(crate) mod _test;
 
 pub mod export {
     pub use async_trait::async_trait;

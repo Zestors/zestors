@@ -473,7 +473,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::_priv::test_helper::basic_actor;
+    use crate::_test::basic_actor;
     use crate::all::*;
     use std::{future::pending, time::Duration};
     use tokio::sync::oneshot;
@@ -574,7 +574,7 @@ mod test {
 
 #[cfg(test)]
 mod test_pooled {
-    use crate::_priv::test_helper::{basic_actor, pooled_basic_actor, U32Protocol};
+    use crate::_test::{basic_actor, pooled_basic_actor, U32Protocol};
     use crate::all::*;
     use futures::future::pending;
     use std::sync::atomic::{AtomicU8, Ordering};
