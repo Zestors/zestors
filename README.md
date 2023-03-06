@@ -1,8 +1,11 @@
 <div align="center"><p>
+  
 [![Crates.io version shield](https://img.shields.io/crates/v/zestors.svg)](https://crates.io/crates/zestors)
 [![Docs](https://docs.rs/zestors/badge.svg)](https://crates.io/crates/zestors)
 [![Crates.io license shield](https://img.shields.io/crates/l/zestors.svg)](https://crates.io/crates/zestors)
-</p></div>
+
+ </p></div>
+
 
 # Zestors
 A fast and flexible actor-framework for building fault-tolerant Rust applications.
