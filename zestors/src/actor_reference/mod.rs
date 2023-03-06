@@ -51,9 +51,7 @@ using [`Child::into_pool`].
 
 # Example
 ```
-# tokio_test::block_on(main());
 use zestors::{prelude::*, messaging::RecvError, actor_reference::ExitError};
-use std::time::Duration;
 use futures::stream::StreamExt;
 
 // Let's start by creating a simple event-loop for our actor.
@@ -74,6 +72,7 @@ async fn my_actor(mut inbox: Inbox<()>) -> &'static str {
 
 // We will now spawn the actor a bunch of times, but do different things with it to
 // show of different functionalities.
+#[tokio::main]
 async fn main() {
     // Halting an actor:
     let (child, address) = spawn(my_actor);
@@ -94,13 +93,13 @@ async fn main() {
     assert_eq!(address.await, ());
 
     // Closing the inbox:
-    let (mut child, address) = spawn(my_actor);
+    let (child, address) = spawn(my_actor);
     child.close();
     assert!(matches!(child.await, Ok("Closed and empty")));
     assert_eq!(address.await, ());
 
     // Making it panic by sending a message:
-    let (mut child, address) = spawn(my_actor);
+    let (child, address) = spawn(my_actor);
     child.send(()).await.unwrap();
     assert!(matches!(child.await, Err(ExitError::Panic(_))));
     assert_eq!(address.await, ());
@@ -111,7 +110,7 @@ async fn main() {
     assert_eq!(address.await, ());
 
     // Halting a child-pool:
-    let (mut child_pool, address) = spawn_many(0..10, |_, inbox| async move {
+    let (child_pool, address) = spawn_many(0..10, |_, inbox| async move {
         my_actor(inbox).await
     });
     address.halt();

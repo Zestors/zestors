@@ -1,10 +1,10 @@
 pub(super) use super::*;
 
 mod ref_sender;
-mod dynamic;
-mod map_ref;
+mod box_spec;
+mod on_start_spec;
 mod one_for_one;
-pub use map_ref::*;
+pub use on_start_spec::*;
 pub use one_for_one::*;
 pub use ref_sender::*;
-pub use dynamic::*;
+pub use box_spec::*;

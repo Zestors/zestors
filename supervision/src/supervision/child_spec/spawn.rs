@@ -16,14 +16,14 @@ pub fn from_spawn_fn<I, D, SFut, E, EFut>(
     data: D,
     shutdown_time: Duration,
     inbox_config: I::Config,
-) -> impl Specifies<Ref = Address<I>> + 'static
+) -> impl Specification<Ref = Address<I>> + 'static
 where
     E: Send + 'static,
     I: InboxType,
     I::Config: Send + Clone,
     D: Send + 'static,
     SFut: Future<Output = E> + Send + 'static,
-    EFut: Future<Output = SuperviseResult<D>> + Send + 'static,
+    EFut: Future<Output = SupervisionResult<D>> + Send + 'static,
 {
     SpawnSpec::new(spawn_fn, exit_fn, data, inbox_config, shutdown_time)
 }
@@ -38,7 +38,7 @@ where
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
     SFut: Future<Output = E> + Send + 'static,
     EFun: FnOnce(Result<E, ExitError>) -> EFut + Send + Clone,
-    EFut: Future<Output = SuperviseResult<D>> + Send,
+    EFut: Future<Output = SupervisionResult<D>> + Send,
 {
     inner: Inner<SFun, SFut, EFun, EFut, D, E, I>,
     data: D,
@@ -53,7 +53,7 @@ where
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
     SFut: Future<Output = E> + Send + 'static,
     EFun: FnOnce(Result<E, ExitError>) -> EFut + Send + Clone,
-    EFut: Future<Output = SuperviseResult<D>> + Send,
+    EFut: Future<Output = SupervisionResult<D>> + Send,
 {
     pub fn new(
         spawn_fn: SFun,
@@ -75,7 +75,8 @@ where
     }
 }
 
-impl<SFun, SFut, EFun, EFut, D, E, I> Specifies for SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>
+#[async_trait]
+impl<SFun, SFut, EFun, EFut, D, E, I> Specification for SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
     I: InboxType,
@@ -84,13 +85,12 @@ where
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
     SFut: Future<Output = E> + Send + 'static,
     EFun: FnOnce(Result<E, ExitError>) -> EFut + Send + Clone + 'static,
-    EFut: Future<Output = SuperviseResult<D>> + Send + 'static,
+    EFut: Future<Output = SupervisionResult<D>> + Send + 'static,
 {
     type Ref = Address<I>;
     type Supervisee = SpawnSupervisee<SFun, SFut, EFun, EFut, D, E, I>;
-    type Fut = Ready<StartResult<Self>>;
 
-    fn start(self) -> Self::Fut {
+    async fn start_supervised(self) -> StartResult<Self> {
         let inner = self.inner.clone();
         let (child, address) = spawn_with(
             Link::Attached(inner.abort_timeout),
@@ -100,15 +100,14 @@ where
                 spawn_fut.await
             },
         );
-        let res = Ok((
+        Ok((
             SpawnSupervisee {
                 inner: Some(self.inner),
                 child,
                 exit_fut: None,
             },
             address,
-        ));
-        future::ready(res)
+        ))
     }
 }
 
@@ -122,7 +121,7 @@ where
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
     SFut: Future<Output = E> + Send + 'static,
     EFun: FnOnce(Result<E, ExitError>) -> EFut + Send + Clone,
-    EFut: Future<Output = SuperviseResult<D>> + Send,
+    EFut: Future<Output = SupervisionResult<D>> + Send,
 {
     inner: Option<Inner<SFun, SFut, EFun, EFut, D, E, I>>,
     child: Child<E, I>,
@@ -130,7 +129,7 @@ where
     exit_fut: Option<EFut>,
 }
 
-impl<SFun, SFut, EFun, EFut, D, E, I> Supervisable
+impl<SFun, SFut, EFun, EFut, D, E, I> Supervisee
     for SpawnSupervisee<SFun, SFut, EFun, EFut, D, E, I>
 where
     E: Send + 'static,
@@ -140,7 +139,7 @@ where
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
     SFut: Future<Output = E> + Send + 'static,
     EFun: FnOnce(Result<E, ExitError>) -> EFut + Send + Clone + 'static,
-    EFut: Future<Output = SuperviseResult<D>> + Send + 'static,
+    EFut: Future<Output = SupervisionResult<D>> + Send + 'static,
 {
     type Spec = SpawnSpec<SFun, SFut, EFun, EFut, D, E, I>;
 
@@ -162,7 +161,7 @@ where
     fn poll_supervise(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
-    ) -> Poll<SuperviseResult<Self::Spec>> {
+    ) -> Poll<SupervisionResult<Self::Spec>> {
         let mut this = self.as_mut().project();
 
         loop {
@@ -212,7 +211,7 @@ mod test {
         );
     }
 
-    fn spec() -> impl Specifies<Ref = Address<Halter>> {
+    fn spec() -> impl Specification<Ref = Address<Halter>> {
         SpawnSpec::new(
             |_inbox: Halter, _data: u32| async move { () },
             |exit| async move {
@@ -240,7 +239,7 @@ where
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
     SFut: Future<Output = E> + Send + 'static,
     EFun: FnOnce(Result<E, ExitError>) -> EFut + Send + Clone,
-    EFut: Future<Output = SuperviseResult<D>> + Send,
+    EFut: Future<Output = SupervisionResult<D>> + Send,
 {
     spawn_fn: SFun,
     exit_fn: EFun,
@@ -258,7 +257,7 @@ where
     SFun: FnOnce(I, D) -> SFut + Send + Clone + 'static,
     SFut: Future<Output = E> + Send + 'static,
     EFun: FnOnce(Result<E, ExitError>) -> EFut + Send + Clone,
-    EFut: Future<Output = SuperviseResult<D>> + Send,
+    EFut: Future<Output = SupervisionResult<D>> + Send,
 {
     fn clone(&self) -> Self {
         Self {

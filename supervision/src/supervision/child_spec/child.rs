@@ -1,4 +1,4 @@
-use crate::{all::*, supervision::BoxError};
+use crate::{all::*, supervision::FatalError};
 use async_trait::async_trait;
 
 
@@ -14,7 +14,7 @@ pub trait ChildSpecification1: 'static + Sized + Send {
         with: Self::With,
     ) -> Result<(Child<Self::Exit, Self::ActorType>, Self::Ref), StartError<Self>>;
 
-    async fn exit(exit: Result<Self::Exit, ExitError>) -> Result<Option<Self::With>, BoxError>;
+    async fn exit(exit: Result<Self::Exit, ExitError>) -> Result<Option<Self::With>, FatalError>;
 }
 
 pub struct MyActor {}
@@ -32,7 +32,7 @@ impl ChildSpecification1 for MyActor {
         Ok(spawn(|_inbox| async move { todo!() }))
     }
 
-    async fn exit(_exit: Result<Self::Exit, ExitError>) -> Result<Option<Self::With>, BoxError> {
+    async fn exit(_exit: Result<Self::Exit, ExitError>) -> Result<Option<Self::With>, FatalError> {
         Ok(Some(10))
     }
 }

@@ -24,7 +24,7 @@ pub trait DynActorType: ActorType<Channel = dyn Channel> {
 /// All actors are spawned with an [`InboxType`] which defines the [`ActorType`] of that actor.
 pub trait InboxType: ActorType + ActorRef<ActorType = Self> + Send + 'static {
     /// The inbox's configuration.
-    type Config: Send;
+    type Config: Default + Send;
 
     /// Sets up the channel with the given address-count and actor-id.
     fn init_single_inbox(
@@ -56,10 +56,8 @@ pub trait MultiProcessInbox: InboxType {
 ///
 /// See [`DynActor!`] for writing this types in a simpler way.
 #[derive(Debug)]
-pub struct DynActor<T: ?Sized>(PhantomData<*const T>);
+pub struct DynActor<T: ?Sized>(PhantomData<fn() -> T>);
 
-unsafe impl<T: ?Sized> Send for DynActor<T> {}
-unsafe impl<T: ?Sized> Sync for DynActor<T> {}
 
 impl<T: ?Sized> ActorType for DynActor<T> {
     type Channel = dyn Channel;

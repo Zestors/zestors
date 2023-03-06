@@ -10,8 +10,9 @@ new concepts and then gives an example on how to use it.
 - [`actor_type`] - Specifying the type of an actor statically and dynamically.
 - [`spawning`] - Spawning of actors.
 - [`handler`] - A simpler way to write your actors.
-- [`supervision`] - Supervision of actors.
-- [`distribution`] - todo
+- [`runtime`] - Runtime configuration.
+- [`supervision`] - (Not yet implemented)
+- [`distribution`] - (Not yet implemented)
 */
 
 pub mod actor_reference;
@@ -19,14 +20,19 @@ pub mod actor_type;
 pub mod distribution;
 pub mod handler;
 pub mod messaging;
+pub mod runtime;
 pub mod spawning;
-pub mod supervision;
+mod supervision;
 
 pub mod prelude {
     pub use crate::actor_reference::{ActorRefExt, Address, Child, ChildPool, Transformable};
     pub use crate::actor_type::{ActorId, Halter, Inbox, MultiHalter};
-    pub use crate::handler::{Action, ExitFlow, Flow, Handler, HandlerExt};
+    pub use crate::handler::{
+        action, Action, ExitFlow, Flow, HandleMessage, Handler, HandlerExt, HandlerResult,
+        RestartReason, Event, Scheduler
+    };
     pub use crate::messaging::{Accepts, Envelope, Message, Rx, Tx};
+    pub use crate::runtime::{get_default_shutdown_time, set_default_shutdown_time};
     pub use crate::spawning::{
         spawn, spawn_many, spawn_many_with, spawn_with, BackPressure, Capacity, Link,
     };
@@ -38,6 +44,7 @@ mod all {
     pub use crate::distribution::*;
     pub use crate::handler::*;
     pub use crate::messaging::*;
+    pub use crate::runtime::*;
     pub use crate::spawning::*;
     pub use crate::supervision::*;
 }

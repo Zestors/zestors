@@ -43,66 +43,80 @@ A [`DynActor`](struct@DynActor) can be downcast into the original [`InboxType`] 
 
 # Example
 ```
-# tokio_test::block_on(main());
-use zestors::{prelude::*, protocol, DynActor};
+use futures::stream::StreamExt;
+use zestors::{actor_reference::ExitError, messaging::RecvError, prelude::*};
 
-// Simple protocol which accepts `u32` and `u64`
-#[protocol]
-enum MyProtocol {
-    A(u32),
-    B(u64),
+// Let's start by creating a simple event-loop for our actor.
+async fn my_actor(mut inbox: Inbox<()>) -> &'static str {
+    // This actor receives a single event only.
+    match inbox.recv().await {
+        Err(RecvError::ClosedAndEmpty) => "Closed and empty",
+        Err(RecvError::Halted) => "Halt properly handled",
+        Ok(_msg) => {
+            panic!(r"\('o')/ This actor panics upon receiving a message!")
+        }
+    }
 }
 
+// We will now spawn the actor a bunch of times, but do different things with it to
+// show of different functionalities.
+#[tokio::main]
 async fn main() {
-    // Let's spawn a process that will live forever
-    let (child, address) = spawn(|_inbox: Inbox<MyProtocol>| {
-        futures::future::pending::<()>();
-    });
+    // Halting an actor:
+    let (child, address) = spawn(my_actor);
+    child.halt();
+    assert!(matches!(child.await, Ok("Halt properly handled")));
+    assert_eq!(address.await, ());
 
-    // As we can see, the address and child are typed by `Inbox<MyProtocol>`.
-    let child: Child<_, Inbox<MyProtocol>> = child;
-    let address: Address<Inbox<MyProtocol>> = address;
+    // Shutting down an actor:
+    let (mut child, address) = spawn(my_actor);
+    child.shutdown();
+    assert!(matches!(child.await, Ok("Halt properly handled")));
+    assert_eq!(address.await, ());
 
-    // Let's cast the address to a few different types:
-    let _: Address = address.clone().transform_into();
-    let _: Address<DynActor!(u32)> = address.clone().transform_into();
-    let _: Address<DynActor!(u32, u64)> = address.clone().transform_into();
-    // But this won't compile! The actor does not accept strings
-    // let _: Address<DynActor!(String)> = address.clone().transform_into();
+    // Aborting an actor:
+    let (mut child, address) = spawn(my_actor);
+    child.abort();
+    assert!(matches!(child.await, Err(ExitError::Abort)));
+    assert_eq!(address.await, ());
 
-    // We can also transform a child:
-    let dyn_child: Child<_, DynActor!(u32)> = child.transform_into();
-    // And then downcast it to the original child:
-    let child: Child<_, Inbox<MyProtocol>> = dyn_child.downcast().unwrap();
+    // Closing the inbox:
+    let (child, address) = spawn(my_actor);
+    child.close();
+    assert!(matches!(child.await, Ok("Closed and empty")));
+    assert_eq!(address.await, ());
 
-    // We can also keep transforming an address (or child) even if it is already dynamic.
-    address
-        .clone()
-        .transform_into::<DynActor!(u64, u32)>()
-        .transform_into::<DynActor!(u32)>()
-        .transform_into::<DynActor!()>()
-        .downcast::<Inbox<MyProtocol>>()
-        .unwrap();
+    // Making it panic by sending a message:
+    let (child, address) = spawn(my_actor);
+    child.send(()).await.unwrap();
+    assert!(matches!(child.await, Err(ExitError::Panic(_))));
+    assert_eq!(address.await, ());
 
-    // This is a transformation fails at runtime:
-    address
-        .clone()
-        .transform_into::<DynActor!()>()
-        .try_transform_into::<DynActor!(u32, String)>()
-        .unwrap_err();
+    // Dropping the child:
+    let (child, address) = spawn(my_actor);
+    drop(child);
+    assert_eq!(address.await, ());
 
-    // But if we use the unchecked transformation it doesn't complain
-    let incorrect_address = address
-        .clone()
-        .transform_into::<DynActor!()>()
-        .transform_unchecked_into::<DynActor!(u32, String)>();
+    // Halting a child-pool:
+    let (child_pool, address) = spawn_many(0..10, |_, inbox| async move { my_actor(inbox).await });
+    address.halt();
+    child_pool
+        .for_each(|process_exit| async move {
+            assert!(matches!(process_exit, Ok("Halt properly handled")));
+        })
+        .await;
+    assert_eq!(address.await, ());
 
-    // If we sent it this message, it would panic
-    // -> incorrect_address.send("error".to_string()).await;
-    // Using the checked send results in an error instead
-    incorrect_address.send_checked("error".to_string()).await.unwrap_err();
-    // Though we can still send it correct messages
-    incorrect_address.send_checked(10u32).await.unwrap();
+    // Shutting down a child-pool
+    let (mut child_pool, address) =
+        spawn_many(0..10, |_, inbox| async move { my_actor(inbox).await });
+    child_pool
+        .shutdown()
+        .for_each(|process_exit| async move {
+            assert!(matches!(process_exit, Ok("Halt properly handled")));
+        })
+        .await;
+    assert_eq!(address.await, ());
 }
 ```
 */

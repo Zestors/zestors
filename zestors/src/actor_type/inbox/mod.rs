@@ -95,13 +95,13 @@ where
         inbox
     }
 
-    fn poll_next_action(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<HandlerItem<H>> {
+    fn poll_next_item(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<HandlerItem<P, H>> {
         self.poll_next_unpin(cx).map(|res| match res {
             Some(res) => match res {
                 Ok(protocol) => HandlerItem::Protocol(protocol),
-                Err(_halted) => HandlerItem::Halted,
+                Err(_halted) => HandlerItem::Event(Event::Halted),
             },
-            None => HandlerItem::Dead,
+            None => HandlerItem::Event(Event::Dead),
         })
     }
 }

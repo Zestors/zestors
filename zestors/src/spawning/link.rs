@@ -1,7 +1,4 @@
-use std::{
-    sync::atomic::{AtomicU32, AtomicU64, Ordering},
-    time::Duration,
-};
+use std::time::Duration;
 
 #[allow(unused)]
 use crate::all::*;
@@ -57,6 +54,13 @@ impl Link {
     pub fn is_attached(&self) -> bool {
         matches!(self, Link::Attached(_))
     }
+
+    pub fn into_duration_or_default(self) -> Duration {
+        match self {
+            Link::Detached => get_default_shutdown_time(),
+            Link::Attached(duration) => duration,
+        }
+    }
 }
 
 impl Default for Link {
@@ -68,42 +72,5 @@ impl Default for Link {
 impl From<Duration> for Link {
     fn from(value: Duration) -> Self {
         Self::Attached(value.into())
-    }
-}
-
-//------------------------------------------------------------------------------------------------
-//  Shutdown-time
-//------------------------------------------------------------------------------------------------
-
-static DEFAULT_SHUTDOWN_TIME_NANOS: AtomicU32 = AtomicU32::new(0);
-static DEFAULT_SHUTDOWN_TIME_SECS: AtomicU64 = AtomicU64::new(1);
-
-/// Set the default shutdown-time limit.
-/// This only changes the time for processes that have not been spawned yet.
-pub fn set_default_shutdown_time(duration: Duration) {
-    DEFAULT_SHUTDOWN_TIME_NANOS.store(duration.subsec_nanos(), Ordering::Release);
-    DEFAULT_SHUTDOWN_TIME_SECS.store(duration.as_secs(), Ordering::Release);
-}
-
-/// Get the default shutdown-time limit.
-pub fn get_default_shutdown_time() -> Duration {
-    Duration::new(
-        DEFAULT_SHUTDOWN_TIME_SECS.load(Ordering::Acquire),
-        DEFAULT_SHUTDOWN_TIME_NANOS.load(Ordering::Acquire),
-    )
-}
-
-//------------------------------------------------------------------------------------------------
-//  Default abort timer
-//------------------------------------------------------------------------------------------------
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    #[test]
-    fn default_shutdown_time() {
-        assert_eq!(get_default_shutdown_time(), Duration::from_secs(1));
-        set_default_shutdown_time(Duration::from_secs(2));
-        assert_eq!(get_default_shutdown_time(), Duration::from_secs(2));
     }
 }

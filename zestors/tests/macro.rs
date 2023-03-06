@@ -4,6 +4,7 @@ use zestors::{
 };
 use zestors_codegen::{Envelope, Message};
 
+#[allow(unused)]
 #[derive(Message, Envelope, Debug)]
 #[request(u64)]
 #[envelope(SayHelloEnvelope, say_hello)]
@@ -12,6 +13,7 @@ pub struct SayHello {
     field_b: String,
 }
 
+#[allow(unused)]
 async fn test(address: Address<DynActor!(SayHello)>) {
     address
         .request(SayHello {

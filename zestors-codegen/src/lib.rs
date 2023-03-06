@@ -113,7 +113,7 @@ pub fn derive_envelope(item: TokenStream1) -> TokenStream1 {
 /// ```
 /// 
 /// Which generates the following implementation:
-/// ```
+/// ```ignore
 /// impl HandleExit for MyHandler {
 ///     type Exit = ExitReason<MyHandler::Exception>;
 /// 

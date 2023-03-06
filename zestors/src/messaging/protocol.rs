@@ -1,3 +1,5 @@
+use async_trait::async_trait;
+
 use super::*;
 use std::any::TypeId;
 
@@ -54,6 +56,20 @@ impl Protocol for () {
 
     fn accepts_msg(msg_id: &std::any::TypeId) -> bool {
         *msg_id == TypeId::of::<()>()
+    }
+}
+
+#[async_trait]
+impl<H: Handler> HandledBy<H> for ()
+where
+    H: HandleMessage<()>,
+{
+    async fn handle_with(
+        self,
+        handler: &mut H,
+        state: &mut <H as Handler>::State,
+    ) -> HandlerResult<H> {
+        handler.handle_msg(state, self).await
     }
 }
 

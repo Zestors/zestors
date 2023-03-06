@@ -25,19 +25,29 @@ pub fn derive_handler(item: TokenStream) -> Result<TokenStream, Error> {
             type Stop = ();
             type Exit = Result<Self, zestors::export::Report>;
 
-            async fn handle_exit(self,
+            async fn handle_exit(
+                self,
                 state: &mut Self::State,
-                event: zestors::handler::Event<Self>
+                reason: Result<Self::Stop, Self::Exception>,
             ) -> zestors::handler::ExitFlow<Self> {
+                match reason {
+                    Ok(()) => zestors::handler::ExitFlow::Exit(Ok(self)),
+                    Err(exception) => zestors::handler::ExitFlow::Exit(Err(exception))
+                }
+            }
+
+            async fn handle_event(
+                &mut self,
+                state: &mut Self::State,
+                event: zestors::handler::Event
+            ) -> zestors::handler::HandlerResult<Self> {
                 match event {
                     zestors::handler::Event::Halted => {
                         state.close();
-                        zestors::handler::ExitFlow::Continue(self)
+                        Ok(zestors::handler::Flow::Continue)
                     }
-                    zestors::handler::Event::ClosedAndEmpty => zestors::handler::ExitFlow::Exit(Ok(self)),
-                    zestors::handler::Event::Dead => zestors::handler::ExitFlow::Exit(Ok(self)),
-                    zestors::handler::Event::Exception(exception) => zestors::handler::ExitFlow::Exit(Err(exception)),
-                    zestors::handler::Event::Stop(()) => zestors::handler::ExitFlow::Exit(Ok(self)),
+                    zestors::handler::Event::ClosedAndEmpty => Ok(zestors::handler::Flow::Stop(())),
+                    zestors::handler::Event::Dead => Ok(zestors::handler::Flow::Stop(())),
                 }
             }
         }

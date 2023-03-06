@@ -4,6 +4,12 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use std::{any::TypeId, fmt::Debug};
 
+/// An [`Action<H>`] can be handled by a [`Handler`] using [`Action::handle_with`]. Actions
+/// can be created with the [`action!`] macro. Any `Handler` automatically implements
+/// [`HandleMessage<Action<H>>`](HandleMessage). Any `Action<H>` implements [`Protocol`] and
+/// [`Message`] automatically.
+///
+/// (See [`handler`](crate::handler) for an overview)
 #[derive(Message)]
 pub struct Action<H: Handler> {
     function: Box<
@@ -16,6 +22,9 @@ pub struct Action<H: Handler> {
 }
 
 impl<H: Handler> Action<H> {
+    /// Construct an action from a boxed [`FnOnce`].
+    ///
+    /// Normally an action is created with the [`action!`] macro.
     pub fn from_boxed_fn<F>(function: F) -> Self
     where
         F: for<'a> FnOnce(
@@ -30,6 +39,7 @@ impl<H: Handler> Action<H> {
         }
     }
 
+    /// Handle the [`Action<H>`] with [`Handler`] `H`.
     pub async fn handle_with(
         self,
         handler: &mut H,
@@ -62,6 +72,17 @@ impl<H: Handler> Protocol for Action<H> {
     }
 }
 
+#[async_trait]
+impl<H: Handler> HandledBy<H> for Action<H> {
+    async fn handle_with(
+        self,
+        handler: &mut H,
+        state: &mut <H as Handler>::State,
+    ) -> HandlerResult<H> {
+        Action::handle_with(self, handler, state).await
+    }
+}
+
 impl<H: Handler> FromPayload<Self> for Action<H> {
     fn from_payload(payload: Self) -> Self
     where
@@ -81,7 +102,6 @@ impl<H: Handler> FromPayload<Self> for Action<H> {
 impl<H> Debug for Action<H>
 where
     H: Handler,
-    <H::State as HandlerState<H>>::Protocol: Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Action").field("function", &"..").finish()
@@ -99,8 +119,46 @@ impl<H: Handler> HandleMessage<Action<H>> for H {
     }
 }
 
+/// A macro for creating [`Action`]s.
+///
+/// # Usage
+/// ```
+/// use zestors::{prelude::*, action, Handler};
+///
+/// // If we define a handler ..
+/// #[derive(Handler)]
+/// #[state(Inbox<Action<MyHandler>>)]
+/// struct MyHandler;
+///
+/// // .. we can create actions with:
+/// let _action = action!(|_handler: &mut MyHandler, _state| async move {
+///     Ok(Flow::Continue)
+/// });
+///
+/// // And if we define some handler functions ..
+/// impl MyHandler {
+///     pub async fn handler_fn_1(
+///         &mut self,
+///         _state: &mut Inbox<Action<MyHandler>>,
+///     ) -> HandlerResult<Self> {
+///         Ok(Flow::Continue)
+///     }
+///
+///     pub async fn handler_fn_2(
+///         &mut self,
+///         _state: &mut Inbox<Action<MyHandler>>,
+///         _param1: u32,
+///         _param2: String,
+///     ) -> HandlerResult<Self> {
+///         Ok(Flow::Continue)
+///     }
+/// }
+///
+/// // .. we can create actions with:
+/// let _action = action!(MyHandler::handler_fn_1);
+/// let _action = action!(MyHandler::handler_fn_2, 10, String::from("hi"));
+/// ```
 #[macro_export]
-/// A macro for easily creating actions from functions or closures.
 macro_rules! action {
     (
         |$halter_ident:ident $(:$halter_ty:ty)?, $state_ident:ident $(:$state_ty:ty)?|
@@ -132,44 +190,66 @@ pub use action;
 
 #[cfg(test)]
 mod test {
+    use zestors_codegen::Handler;
+
     use super::*;
+    use crate as zestors;
 
-    pub async fn my_message<'a, H: Handler>(
-        _handler: &'a mut H,
-        _state: &'a mut H::State,
-        _msg: u32,
-        _msg2: &'static str,
-    ) -> Result<Flow<H>, H::Exception> {
-        Ok(Flow::Continue)
+    #[derive(Handler)]
+    #[state(Inbox<Action<MyHandler>>)]
+    struct MyHandler {
+        inner: u32,
     }
 
-    pub async fn my_message2<H: Handler>(
-        _handler: &mut H,
-        _state: &mut H::State,
-    ) -> Result<Flow<H>, H::Exception> {
-        todo!()
+    impl MyHandler {
+        pub async fn handler_fn_1(
+            &mut self,
+            _state: &mut Inbox<Action<MyHandler>>,
+        ) -> HandlerResult<Self> {
+            println!("Exectuted handler_fn_1!");
+            Ok(Flow::Continue)
+        }
+
+        pub async fn handler_fn_2(
+            &mut self,
+            _state: &mut Inbox<Action<MyHandler>>,
+            param1: u32,
+            param2: String,
+        ) -> HandlerResult<Self> {
+            self.inner += param1;
+            println!("handler_fn_2: {param2}");
+            Ok(Flow::Continue)
+        }
     }
 
-    pub async fn test<H: Handler>(address: Address<Inbox<Action<H>>>) {
-        let val = String::from("hi");
+    #[tokio::test]
+    async fn compile_test() {
+        let (mut child, address) = MyHandler { inner: 0 }.spawn();
 
-        let address = address.transform_into::<DynActor!(Action<H>)>();
-
-        let _ = address
-            .send(action!(|_handler: &mut H, state| async move {
-                let _y = "hi";
-                let _val = val;
-                state.close();
+        let outside_value = String::from("hi");
+        address
+            .send(action!(|handler: &mut MyHandler, _state| async move {
+                println!("We can access the handler's state: {}", handler.inner);
+                println!("And also from outside the closure: {}", outside_value);
                 Ok(Flow::Continue)
             }))
-            .await;
+            .await
+            .unwrap();
 
-        let _ = address.try_send(action!(|_handler: &mut H, _state| async {
-            let _y = "hi";
-            todo!()
-        }));
+        address
+            .send(action!(MyHandler::handler_fn_1))
+            .await
+            .unwrap();
 
-        let _ = address.force_send(action!(my_message::<H>, 10, "hi"));
-        let _ = address.force_send(action!(my_message2::<H>));
+        address
+            .send(action!(
+                MyHandler::handler_fn_2,
+                10,
+                String::from("param_2")
+            ))
+            .await
+            .unwrap();
+
+        child.shutdown().await.unwrap().unwrap();
     }
 }

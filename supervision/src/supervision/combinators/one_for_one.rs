@@ -1,7 +1,9 @@
 use super::*;
-use futures::{Future, FutureExt};
+use async_trait::async_trait;
+use futures::{future::BoxFuture, Future, FutureExt};
 use pin_project::pin_project;
 use std::{
+    fmt::Debug,
     mem::swap,
     pin::Pin,
     task::{Context, Poll},
@@ -29,27 +31,25 @@ impl OneForOneSpec {
         }
     }
 
-    pub fn with_spec<S: Specifies>(mut self, spec: S) -> Self
+    pub fn with_spec<S: Specification>(mut self, spec: S) -> Self
     where
         S: Send + 'static,
-        S::Fut: Send,
         S::Supervisee: Send,
     {
         self.add_spec(spec);
         self
     }
 
-    pub fn add_spec<S: Specifies>(&mut self, spec: S)
+    pub fn add_spec<S: Specification>(&mut self, spec: S)
     where
         S: Send + 'static,
-        S::Fut: Send,
         S::Supervisee: Send,
     {
         self.items
             .push(OneForOneItem::Spec(spec.on_start(|_| ()).into_dyn()))
     }
 
-    pub fn pop_spec(&mut self) -> Option<DynSpec> {
+    pub fn pop_spec(&mut self) -> Option<BoxSpec> {
         loop {
             match self.items.pop() {
                 Some(OneForOneItem::Spec(spec)) => break Some(spec),
@@ -60,17 +60,22 @@ impl OneForOneSpec {
     }
 }
 
-impl Specifies for OneForOneSpec {
+#[async_trait]
+impl Specification for OneForOneSpec {
     type Ref = ();
     type Supervisee = OneForOneSupervisee;
-    type Fut = OneForOneStartFut;
 
-    fn start(mut self) -> Self::Fut {
+    async fn start_supervised(mut self) -> StartResult<Self> {
         for item in self.items.iter_mut() {
             item.start().expect("Is a spec");
         }
 
-        OneForOneStartFut::new(self)
+        OneForOneStartFut {
+            spec: Some(self),
+            start_failure: false,
+            shutdown_timer: None,
+        }
+        .await
     }
 }
 
@@ -79,8 +84,8 @@ impl Specifies for OneForOneSpec {
 //------------------------------------------------------------------------------------------------
 
 #[pin_project]
-pub struct OneForOneStartFut {
-    inner: Option<OneForOneSpec>,
+struct OneForOneStartFut {
+    spec: Option<OneForOneSpec>,
     shutdown_timer: Option<Pin<Box<Sleep>>>,
     start_failure: bool,
 }
@@ -91,29 +96,8 @@ struct OneForOneError(&'static str, OneForOneSpec);
 
 #[allow(unused_assignments)]
 impl OneForOneStartFut {
-    fn new(inner: OneForOneSpec) -> Self {
-        OneForOneStartFut {
-            inner: Some(inner),
-            start_failure: false,
-            shutdown_timer: None,
-        }
-    }
-
-    fn time_limit_reached(maybe_timeout: &mut Option<Pin<Box<Sleep>>>, cx: &mut Context) -> bool {
-        match maybe_timeout {
-            Some(timeout) => match timeout.poll_unpin(cx) {
-                Poll::Ready(()) => {
-                    *maybe_timeout = None;
-                    true
-                }
-                Poll::Pending => false,
-            },
-            None => true,
-        }
-    }
-
     fn take_start_now(&mut self) -> StartResult<OneForOneSpec> {
-        let inner = self.inner.take().unwrap();
+        let inner = self.spec.take().unwrap();
 
         let mut ok = true;
         let mut irrecoverable = false;
@@ -138,9 +122,9 @@ impl OneForOneStartFut {
         if ok {
             Ok((OneForOneSupervisee::new(inner), ()))
         } else if irrecoverable {
-            Err(StartError::Irrecoverable(Box::new(OneForOneError(
-                "Error: ", inner,
-            ))))
+            Err(StartError::Fatal(Box::new(
+                OneForOneError("Error: ", inner),
+            )))
         } else if completed {
             Err(StartError::Completed)
         } else {
@@ -150,7 +134,7 @@ impl OneForOneStartFut {
                 .filter(|item| matches!(item, OneForOneItem::Spec(_)))
                 .collect::<Vec<_>>();
 
-            Err(StartError::Failed(OneForOneSpec {
+            Err(StartError::StartFailed(OneForOneSpec {
                 items,
                 limiter: inner.limiter,
             }))
@@ -164,7 +148,7 @@ impl Future for OneForOneStartFut {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
-        let inner = this.inner.as_mut().unwrap();
+        let inner = this.spec.as_mut().unwrap();
 
         'outer: loop {
             if !this.start_failure {
@@ -177,15 +161,17 @@ impl Future for OneForOneStartFut {
                                 Ok((supervisee, _)) => {
                                     *item = OneForOneItem::Supervisee(supervisee, None);
                                 }
-                                Err(StartError::Completed) => *item = OneForOneItem::Completed,
-                                Err(StartError::Failed(spec)) => {
+                                Err(StartError::Completed) => {
+                                    *item = OneForOneItem::Completed
+                                }
+                                Err(StartError::StartFailed(spec)) => {
                                     *item = OneForOneItem::Spec(spec);
                                     if !inner.limiter.within_limit() {
                                         this.start_failure = true;
                                         break 'inner;
                                     }
                                 }
-                                Err(StartError::Irrecoverable(e)) => {
+                                Err(StartError::Fatal(e)) => {
                                     *item = OneForOneItem::Irrecoverable(e);
                                     if !inner.limiter.within_limit() {
                                         this.start_failure = true;
@@ -203,7 +189,7 @@ impl Future for OneForOneStartFut {
                     // Reset the timeout because we are now going to shut everything down.
                     this.shutdown_timer = Some(Box::pin(sleep(todo!())));
                 } else if all_ready {
-                    let supervisee = OneForOneSupervisee::new(this.inner.take().unwrap());
+                    let supervisee = OneForOneSupervisee::new(this.spec.take().unwrap());
                     break 'outer Poll::Ready(Ok((supervisee, ())));
                 } else {
                     break 'outer Poll::Pending;
@@ -220,11 +206,13 @@ impl Future for OneForOneStartFut {
                                         *item = OneForOneItem::Supervisee(supervisee, None);
                                         all_ready = false;
                                     }
-                                    Err(StartError::Completed) => *item = OneForOneItem::Completed,
-                                    Err(StartError::Failed(spec)) => {
+                                    Err(StartError::Completed) => {
+                                        *item = OneForOneItem::Completed
+                                    }
+                                    Err(StartError::StartFailed(spec)) => {
                                         *item = OneForOneItem::Spec(spec);
                                     }
-                                    Err(StartError::Irrecoverable(e)) => {
+                                    Err(StartError::Fatal(e)) => {
                                         *item = OneForOneItem::Irrecoverable(e);
                                     }
                                 }
@@ -280,7 +268,7 @@ impl OneForOneSupervisee {
     }
 }
 
-impl Supervisable for OneForOneSupervisee {
+impl Supervisee for OneForOneSupervisee {
     type Spec = OneForOneSpec;
 
     fn shutdown_time(self: Pin<&Self>) -> Duration {
@@ -307,7 +295,10 @@ impl Supervisable for OneForOneSupervisee {
         }
     }
 
-    fn poll_supervise(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<SuperviseResult<Self::Spec>> {
+    fn poll_supervise(
+        self: Pin<&mut Self>,
+        _cx: &mut Context,
+    ) -> Poll<SupervisionResult<Self::Spec>> {
         todo!()
     }
 }
@@ -316,13 +307,26 @@ impl Supervisable for OneForOneSupervisee {
 //  Item
 //------------------------------------------------------------------------------------------------
 
-#[derive(Debug)]
 enum OneForOneItem {
-    Spec(DynSpec),
-    StartFut(DynStartFut),
-    Supervisee(DynSupervisee, Option<Instant>),
-    Irrecoverable(BoxError),
+    Spec(BoxSpec),
+    StartFut(BoxFuture<'static, StartResult<BoxSpec>>),
+    Supervisee(BoxSupervisee, Option<Instant>),
+    Irrecoverable(FatalError),
     Completed,
+}
+
+impl Debug for OneForOneItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Spec(arg0) => f.debug_tuple("Spec").field(arg0).finish(),
+            Self::StartFut(arg0) => f.debug_tuple("StartFut").field(&"..").finish(),
+            Self::Supervisee(arg0, arg1) => {
+                f.debug_tuple("Supervisee").field(arg0).field(arg1).finish()
+            }
+            Self::Irrecoverable(arg0) => f.debug_tuple("Irrecoverable").field(arg0).finish(),
+            Self::Completed => write!(f, "Completed"),
+        }
+    }
 }
 
 impl OneForOneItem {
@@ -336,7 +340,7 @@ impl OneForOneItem {
             spec
         };
 
-        *self = OneForOneItem::StartFut(spec.start());
+        *self = OneForOneItem::StartFut(spec.start_supervised());
         Ok(())
     }
 }

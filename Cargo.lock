@@ -102,13 +102,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "future-map"
-version = "0.1.0"
-dependencies = [
- "futures",
-]
-
-[[package]]
 name = "futures"
 version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,44 +1,40 @@
 use super::*;
-use futures::Future;
+use async_trait::async_trait;
+use futures::{future::BoxFuture, Future};
 use pin_project::pin_project;
 use std::{
     fmt::Debug,
     pin::Pin,
-    task::{Context, Poll}, time::Duration,
+    task::{Context, Poll},
+    time::Duration,
 };
 
 #[derive(Debug)]
-pub struct DynSpec<Ref = ()>(Pin<Box<dyn DynSpecification<Ref>>>);
+pub struct BoxSpec<Ref = ()>(Pin<Box<dyn DynSpecification<Ref>>>);
 
-impl<Ref: 'static> DynSpec<Ref> {
-    pub fn new<S: Specifies<Ref = Ref> + 'static>(spec: S) -> Self {
+impl<Ref: 'static> BoxSpec<Ref> {
+    pub fn new<S: Specification<Ref = Ref> + 'static>(spec: S) -> Self {
         Self(Box::pin(MultiSpec::Spec(spec)))
     }
 }
 
-impl<Ref: Send + 'static> Specifies for DynSpec<Ref> {
+#[async_trait]
+impl<Ref: Send + 'static> Specification for BoxSpec<Ref> {
     type Ref = Ref;
-    type Supervisee = DynSupervisee<Ref>;
-    type Fut = DynStartFut<Ref>;
+    type Supervisee = BoxSupervisee<Ref>;
 
-    fn start(mut self) -> Self::Fut {
+    async fn start_supervised(mut self) -> StartResult<Self> {
         self.0.as_mut()._start();
-        DynStartFut(Some(self.0))
+        BoxStartFut(Some(self.0)).await
     }
 }
 
 /// A type-erased and boxed [`Specification::StartFut`].
 #[derive(Debug)]
-pub struct DynStartFut<Ref = ()>(Option<Pin<Box<dyn DynSpecification<Ref>>>>);
+struct BoxStartFut<Ref = ()>(Option<Pin<Box<dyn DynSpecification<Ref>>>>);
 
-impl<Ref: Send + 'static> DynStartFut<Ref> {
-    pub fn new<S: Specifies<Ref = Ref> + 'static>(fut: S::Fut) -> Self {
-        Self(Some(Box::pin(MultiSpec::<S>::StartFut(fut))))
-    }
-}
-
-impl<Ref: Send + 'static> Future for DynStartFut<Ref> {
-    type Output = StartResult<DynSpec<Ref>>;
+impl<Ref: Send + 'static> Future for BoxStartFut<Ref> {
+    type Output = StartResult<BoxSpec<Ref>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.0
@@ -47,30 +43,30 @@ impl<Ref: Send + 'static> Future for DynStartFut<Ref> {
             .as_mut()
             ._poll_start_fut(cx)
             .map(|res| match res {
-                DynSupervisedStart::Failure => {
-                    Err(StartError::Failed(DynSpec(self.0.take().unwrap())))
-                }
+                DynSupervisedStart::Failure => Err(StartError::StartFailed(BoxSpec(
+                    self.0.take().unwrap(),
+                ))),
                 DynSupervisedStart::Success(reference) => {
-                    Ok((DynSupervisee(self.0.take()), reference))
+                    Ok((BoxSupervisee(self.0.take()), reference))
                 }
                 DynSupervisedStart::Finished => Err(StartError::Completed),
-                DynSupervisedStart::Unhandled(e) => Err(StartError::Irrecoverable(e)),
+                DynSupervisedStart::Unhandled(e) => Err(StartError::Fatal(e)),
             })
     }
 }
 
 /// A type-erased and boxed [`Supervisee`].
 #[derive(Debug)]
-pub struct DynSupervisee<Ref = ()>(Option<Pin<Box<dyn DynSpecification<Ref>>>>);
+pub struct BoxSupervisee<Ref = ()>(Option<Pin<Box<dyn DynSpecification<Ref>>>>);
 
-impl<Ref: 'static> DynSupervisee<Ref> {
-    pub fn new<S: Specifies<Ref = Ref> + 'static>(supervisee: S::Supervisee) -> Self {
+impl<Ref: 'static> BoxSupervisee<Ref> {
+    pub fn new<S: Specification<Ref = Ref> + 'static>(supervisee: S::Supervisee) -> Self {
         Self(Some(Box::pin(MultiSpec::<S>::Supervised(supervisee))))
     }
 }
 
-impl<Ref: Send + 'static> Supervisable for DynSupervisee<Ref> {
-    type Spec = DynSpec<Ref>;
+impl<Ref: Send + 'static> Supervisee for BoxSupervisee<Ref> {
+    type Spec = BoxSpec<Ref>;
 
     fn shutdown_time(self: Pin<&Self>) -> Duration {
         self.0.as_ref().unwrap().as_ref()._abort_timeout()
@@ -87,7 +83,7 @@ impl<Ref: Send + 'static> Supervisable for DynSupervisee<Ref> {
     fn poll_supervise(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
-    ) -> Poll<SuperviseResult<Self::Spec>> {
+    ) -> Poll<SupervisionResult<Self::Spec>> {
         self.0
             .as_mut()
             .unwrap()
@@ -95,7 +91,7 @@ impl<Ref: Send + 'static> Supervisable for DynSupervisee<Ref> {
             ._poll_supervise_fut(cx)
             .map(|res| match res {
                 DynSupervisedExit::Finished => Ok(None),
-                DynSupervisedExit::Exit => Ok(Some(DynSpec(self.0.take().unwrap()))),
+                DynSupervisedExit::Exit => Ok(Some(BoxSpec(self.0.take().unwrap()))),
                 DynSupervisedExit::Unhandled(e) => Err(e),
             })
     }
@@ -119,16 +115,16 @@ trait DynSpecification<Ref>: Send + Debug + 'static {
 // todo: it should be possible to provide an implementation that does not require Unpin for
 // the Fut and Supervisee.
 #[pin_project(project = DynMultiSpecProj, project_ref = DynMultiSpecProjRef)]
-enum MultiSpec<S: Specifies> {
+enum MultiSpec<S: Specification> {
     Spec(S),
-    StartFut(#[pin] S::Fut),
+    StartFut(#[pin] BoxFuture<'static, StartResult<S>>),
     Supervised(#[pin] S::Supervisee),
     Unhandled,
     Finished,
     SpecTaken,
 }
 
-impl<S: Specifies> Debug for MultiSpec<S> {
+impl<S: Specification> Debug for MultiSpec<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Spec(_arg0) => f.debug_tuple("Spec").finish(),
@@ -141,7 +137,7 @@ impl<S: Specifies> Debug for MultiSpec<S> {
     }
 }
 
-impl<S: Specifies> MultiSpec<S> {
+impl<S: Specification> MultiSpec<S> {
     fn take_spec_unwrap(self: &mut Pin<&mut Self>) -> S {
         let mut taken = Self::SpecTaken;
         std::mem::swap(unsafe { self.as_mut().get_unchecked_mut() }, &mut taken);
@@ -154,23 +150,23 @@ enum DynSupervisedStart<Ref> {
     Failure,
     Success(Ref),
     Finished,
-    Unhandled(BoxError),
+    Unhandled(FatalError),
 }
 
 enum DynSupervisedExit {
     Finished,
     Exit,
-    Unhandled(BoxError),
+    Unhandled(FatalError),
 }
 
 impl<S> DynSpecification<S::Ref> for MultiSpec<S>
 where
-    S: Specifies + 'static,
+    S: Specification + 'static,
     S::Ref: 'static,
 {
     fn _start(mut self: Pin<&mut Self>) {
         let spec = self.take_spec_unwrap();
-        self.set(Self::StartFut(spec.start()));
+        self.set(Self::StartFut(spec.start_supervised()));
     }
 
     fn _poll_start_fut(
@@ -185,7 +181,7 @@ where
                 self.set(Self::Finished);
                 DynSupervisedStart::Finished
             }
-            Err(StartError::Failed(spec)) => {
+            Err(StartError::StartFailed(spec)) => {
                 self.set(Self::Spec(spec));
                 DynSupervisedStart::Failure
             }
@@ -193,7 +189,7 @@ where
                 self.set(Self::Supervised(supervisee));
                 DynSupervisedStart::Success(reference)
             }
-            Err(StartError::Irrecoverable(e)) => {
+            Err(StartError::Fatal(e)) => {
                 self.set(Self::Unhandled);
                 DynSupervisedStart::Unhandled(e)
             }

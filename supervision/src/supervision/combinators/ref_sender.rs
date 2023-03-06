@@ -1,5 +1,6 @@
 use super::*;
-use futures::Future;
+use async_trait::async_trait;
+use futures::{Future, future::BoxFuture};
 use pin_project::pin_project;
 use std::{
     pin::Pin,
@@ -12,27 +13,27 @@ use tokio::sync::mpsc;
 //------------------------------------------------------------------------------------------------
 
 #[pin_project]
-pub struct RefSenderSpec<S: Specifies> {
+pub struct RefSenderSpec<S: Specification> {
     #[pin]
     spec: S,
     sender: Option<mpsc::UnboundedSender<S::Ref>>,
 }
 
 #[pin_project]
-pub struct RefSenderSpecFut<S: Specifies> {
+pub struct RefSenderSpecFut<S: Specification> {
     #[pin]
-    fut: S::Fut,
+    fut: BoxFuture<'static, StartResult<S>>,
     sender: Option<mpsc::UnboundedSender<S::Ref>>,
 }
 
 #[pin_project]
-pub struct RefSenderSupervisee<S: Specifies> {
+pub struct RefSenderSupervisee<S: Specification> {
     #[pin]
     supervisee: S::Supervisee,
     sender: Option<mpsc::UnboundedSender<S::Ref>>,
 }
 
-impl<Sp: Specifies> RefSenderSpec<Sp> {
+impl<Sp: Specification> RefSenderSpec<Sp> {
     pub fn new(spec: Sp) -> (Self, mpsc::UnboundedReceiver<Sp::Ref>) {
         let (sender, receiver) = mpsc::unbounded_channel();
         (Self::new_with_channel(spec, sender), receiver)
@@ -46,21 +47,21 @@ impl<Sp: Specifies> RefSenderSpec<Sp> {
     }
 }
 
-impl<Sp: Specifies> Specifies for RefSenderSpec<Sp> {
+#[async_trait]
+impl<S: Specification> Specification for RefSenderSpec<S> {
     type Ref = ();
-    type Supervisee = RefSenderSupervisee<Sp>;
+    type Supervisee = RefSenderSupervisee<S>;
 
-    fn start(self) -> Self::Fut {
+    async fn start_supervised(self) -> StartResult<Self> {
         RefSenderSpecFut {
-            fut: self.spec.start(),
+            fut: self.spec.start_supervised(),
             sender: self.sender,
-        }
+        }.await
     }
 
-    type Fut = RefSenderSpecFut<Sp>;
 }
 
-impl<Sp: Specifies> Future for RefSenderSpecFut<Sp> {
+impl<Sp: Specification> Future for RefSenderSpecFut<Sp> {
     type Output = StartResult<RefSenderSpec<Sp>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -77,12 +78,12 @@ impl<Sp: Specifies> Future for RefSenderSpecFut<Sp> {
                     (),
                 ))
             }
-            Err(StartError::Failed(spec)) => Err(StartError::Failed(RefSenderSpec {
+            Err(StartError::StartFailed(spec)) => Err(StartError::StartFailed(RefSenderSpec {
                 spec,
                 sender: Some(proj.sender.take().unwrap()),
             })),
             Err(StartError::Completed) => Err(StartError::Completed),
-            Err(StartError::Irrecoverable(e)) => Err(StartError::Irrecoverable(e)),
+            Err(StartError::Fatal(e)) => Err(StartError::Fatal(e)),
         })
     }
 }
@@ -91,7 +92,7 @@ impl<Sp: Specifies> Future for RefSenderSpecFut<Sp> {
 //  Supervisee
 //------------------------------------------------------------------------------------------------
 
-impl<S: Specifies> Supervisable for RefSenderSupervisee<S> {
+impl<S: Specification> Supervisee for RefSenderSupervisee<S> {
     type Spec = RefSenderSpec<S>;
 
     fn shutdown_time(self: Pin<&Self>) -> Duration {
@@ -106,7 +107,7 @@ impl<S: Specifies> Supervisable for RefSenderSupervisee<S> {
         self.project().supervisee.abort()
     }
 
-    fn poll_supervise(self: Pin<&mut Self>, cx: &mut Context) -> Poll<SuperviseResult<Self::Spec>> {
+    fn poll_supervise(self: Pin<&mut Self>, cx: &mut Context) -> Poll<SupervisionResult<Self::Spec>> {
         let proj = self.project();
         proj.supervisee.poll_supervise(cx).map(|res| {
             res.map(|spec| {

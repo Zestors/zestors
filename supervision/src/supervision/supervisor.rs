@@ -1,6 +1,6 @@
 use crate as zestors;
 use crate::all::*;
-use futures::{Future, FutureExt, StreamExt};
+use futures::{Future, FutureExt, StreamExt, future::BoxFuture};
 use pin_project::pin_project;
 use std::{
     mem::swap,
@@ -9,26 +9,28 @@ use std::{
 };
 use tokio::time::{sleep, Sleep};
 
+
+
 //------------------------------------------------------------------------------------------------
 //  SupervisorFut
 //------------------------------------------------------------------------------------------------
 
 #[pin_project]
-pub struct SupervisorFut<S: Specifies> {
+pub struct SupervisorFut<S: Specification> {
     to_shutdown: bool,
     #[pin]
     state: SupervisorFutState<S>,
 }
 
 #[pin_project]
-enum SupervisorFutState<S: Specifies> {
+enum SupervisorFutState<S: Specification> {
     NotStarted(S),
-    Starting(Pin<Box<S::Fut>>),
+    Starting(BoxFuture<'static, StartResult<S>>),
     Supervising(Pin<Box<S::Supervisee>>, Option<(Pin<Box<Sleep>>, bool)>),
     Exited,
 }
 
-impl<S: Specifies> SupervisorFut<S> {
+impl<S: Specification> SupervisorFut<S> {
     pub fn new(spec: S) -> Self {
         Self {
             to_shutdown: false,
@@ -44,18 +46,17 @@ impl<S: Specifies> SupervisorFut<S> {
         self.to_shutdown
     }
 
-    pub fn spawn_supervisor(self) -> (Child<SuperviseResult<S>>, SupervisorRef)
+    pub fn spawn_supervisor(self) -> (Child<SupervisionResult<S>>, SupervisorRef)
     where
         S: Sized + Send + 'static,
         S::Supervisee: Send,
-        S::Fut: Send,
     {
         SupervisorProcess::spawn_supervisor(self)
     }
 }
 
-impl<S: Specifies> Future for SupervisorFut<S> {
-    type Output = SuperviseResult<S>;
+impl<S: Specification> Future for SupervisorFut<S> {
+    type Output = SupervisionResult<S>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
@@ -72,7 +73,7 @@ impl<S: Specifies> Future for SupervisorFut<S> {
                         spec
                     };
 
-                    this.state = SupervisorFutState::Starting(Box::pin(spec.start()))
+                    this.state = SupervisorFutState::Starting(Box::pin(spec.start_supervised()))
                 }
                 SupervisorFutState::Starting(fut) => {
                     if let Poll::Ready(res) = fut.as_mut().poll(cx) {
@@ -85,11 +86,11 @@ impl<S: Specifies> Future for SupervisorFut<S> {
                                 this.state =
                                     SupervisorFutState::Supervising(Box::pin(supervisee), None);
                             }
-                            Err(StartError::Failed(child_spec)) => {
+                            Err(StartError::StartFailed(child_spec)) => {
                                 this.state = SupervisorFutState::Exited;
                                 break Poll::Ready(Ok(Some(child_spec)));
                             }
-                            Err(StartError::Irrecoverable(e)) => {
+                            Err(StartError::Fatal(e)) => {
                                 this.state = SupervisorFutState::Exited;
                                 break Poll::Ready(Err(e));
                             }
@@ -132,11 +133,11 @@ impl<S: Specifies> Future for SupervisorFut<S> {
 //------------------------------------------------------------------------------------------------
 
 #[pin_project]
-pub(super) struct SupervisorProcess<Sp: Specifies> {
+pub(super) struct SupervisorProcess<S: Specification> {
     #[pin]
     inbox: Inbox<SupervisorProtocol>,
     #[pin]
-    supervision_fut: SupervisorFut<Sp>,
+    supervision_fut: SupervisorFut<S>,
 }
 
 pub struct SupervisorRef {
@@ -148,13 +149,12 @@ enum SupervisorProtocol {}
 
 impl<S> SupervisorProcess<S>
 where
-    S: Specifies + Send + 'static,
+    S: Specification + Send + 'static,
     S::Supervisee: Send,
-    S::Fut: Send,
 {
     pub fn spawn_supervisor(
         supervision_fut: SupervisorFut<S>,
-    ) -> (Child<SuperviseResult<S>>, SupervisorRef) {
+    ) -> (Child<SupervisionResult<S>>, SupervisorRef) {
         let (child, address) = spawn(|inbox: Inbox<SupervisorProtocol>| SupervisorProcess {
             inbox,
             supervision_fut,
@@ -163,8 +163,8 @@ where
     }
 }
 
-impl<S: Specifies> Future for SupervisorProcess<S> {
-    type Output = SuperviseResult<S>;
+impl<S: Specification> Future for SupervisorProcess<S> {
+    type Output = SupervisionResult<S>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut proj = self.as_mut().project();

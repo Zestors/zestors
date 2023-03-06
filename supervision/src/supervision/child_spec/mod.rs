@@ -26,7 +26,7 @@ pub(super) use super::*;
 use std::time::Duration;
 mod child;
 mod spawn;
-mod start;
+mod child_start_spec;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 
@@ -45,7 +45,7 @@ pub trait RootSpecification: 'static + Sized + Send {
     async fn on_exit(
         &mut self,
         exit: Result<Self::ProcessExit, ExitError>,
-    ) -> Result<Option<Self::With>, BoxError>;
+    ) -> Result<Option<Self::With>, FatalError>;
 
     fn start_timeout(&self) -> Duration {
         Duration::from_secs(1)
