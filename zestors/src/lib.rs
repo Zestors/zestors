@@ -1,86 +1,22 @@
-/*!
-A fast and flexible actor-framework for building fault-tolerant Rust applications.
-
-# Documentation
-All items are self-documented, but for a new user it is recommended to go skim through the docs in
-the following order. Every module gives an overview of what is contained inside, introduces some
-new concepts and then gives an example on how to use it.
-- [`messaging`] - Defining a protocol in order to send messages.
-- [`actor_reference`] - Interacting with an actor through it's child or address.
-- [`actor_type`] - Specifying the type of an actor statically and dynamically.
-- [`spawning`] - Spawning of actors.
-- [`handler`] - A simpler way to write your actors.
-- [`runtime`] - Runtime configuration.
-- [`supervision`] - (Not yet implemented)
-- [`distribution`] - (Not yet implemented)
-
-# Minimal example
-```
-#[macro_use]
-extern crate zestors;
-use zestors::{messaging::RecvError, prelude::*};
-
-// Let's define a single request ..
-#[derive(Message, Envelope, Debug)]
-#[request(u32)]
-struct MyRequest {
-    param: String,
-}
-
-// .. and create a protocol that accepts this request.
-#[protocol]
-enum MyProtocol {
-    MyRequest(MyRequest),
-    String(String),
-}
-
-#[tokio::main]
-async fn main() {
-    // Now we can spawn a simple actor ..
-    let (child, address) = spawn(|mut inbox: Inbox<MyProtocol>| async move {
-        loop {
-            match inbox.recv().await {
-                Ok(msg) => match msg {
-                    MyProtocol::MyRequest((request, tx)) => {
-                        println!("Received request: {:?}", request.param);
-                        tx.send(100).unwrap();
-                    }
-                    MyProtocol::String(string) => {
-                        println!("Received message: {:?}", string);
-                    }
-                },
-                Err(e) => match e {
-                    RecvError::Halted => break "Halted",
-                    RecvError::ClosedAndEmpty => break "Closed",
-                },
-            }
-        }
-    });
-
-    // .. and send it some messages!
-    address.send("Hi".to_string()).await.unwrap();
-
-    let response = address
-        .request(MyRequest {
-            param: "Hi".to_string(),
-        })
-        .await
-        .unwrap();
-    assert_eq!(response, 100);
-
-    let response = address
-        .my_request("Hi".to_string())
-        .request()
-        .await
-        .unwrap();
-    assert_eq!(response, 100);
-
-    child.halt();
-    assert_eq!(child.await.unwrap(), "Halted");
-}
-```
-
-*/
+//! A fast and flexible actor-framework for building fault-tolerant Rust applications.
+//!
+//! # Documentation
+//! All items are self-documented, but for a new user it is recommended to go skim through the docs in
+//! the following order. Every module gives an overview of what is contained inside, introduces some
+//! new concepts and then gives an example on how to use it.
+//! - [`messaging`] - Defining a protocol in order to send messages.
+//! - [`actor_reference`] - Interacting with an actor through it's child or address.
+//! - [`actor_type`] - Specifying the type of an actor statically and dynamically.
+//! - [`spawning`] - Spawning of actors.
+//! - [`handler`] - A simpler way to write your actors.
+//! - [`runtime`] - Runtime configuration.
+//! - [`supervision`] - (Not yet implemented)
+//! - [`distribution`] - (Not yet implemented)
+//!
+//! # Minimal example
+//! ```
+#![doc = include_str!("../examples/minimal.rs")]
+//! ```
 
 pub mod actor_reference;
 pub mod actor_type;
@@ -97,8 +33,8 @@ pub mod prelude {
     pub use crate::actor_reference::{ActorRefExt, Address, Child, ChildPool, Transformable};
     pub use crate::actor_type::{ActorId, Halter, Inbox, MultiHalter};
     pub use crate::handler::{
-        action, Action, ExitFlow, Flow, HandleMessage, Handler, HandlerExt, HandlerResult,
-        RestartReason, Event, Scheduler
+        action, Action, Event, ExitFlow, Flow, HandleMessage, Handler, HandlerExt, HandlerResult,
+        RestartReason, Scheduler,
     };
     pub use crate::messaging::{Accepts, Envelope, Message, Rx, Tx};
     pub use crate::runtime::{get_default_shutdown_time, set_default_shutdown_time};
