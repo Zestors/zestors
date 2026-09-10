@@ -73,7 +73,7 @@ fn derive_interface(input: TokenStream, base: &str) -> TokenStream {
                 });
 
                 into_matches.push(quote! {
-                    Self::#variant_name(envelope) => #msg_path::DynEnvelope::new::<#inner_type>(envelope),
+                    Self::#variant_name(envelope) => #msg_path::AnyEnvelope::new::<#inner_type>(envelope),
                 });
 
                 from_impls.push(quote! {
@@ -102,7 +102,7 @@ fn derive_interface(input: TokenStream, base: &str) -> TokenStream {
 
     let expanded = quote! {
         impl #msg_path::Interface for #enum_name {
-            fn try_from_dyn_envelope(envelope: #msg_path::DynEnvelope) -> Result<Self, #msg_path::DynEnvelope> {
+            fn try_from_dyn_envelope(envelope: #msg_path::AnyEnvelope) -> Result<Self, #msg_path::AnyEnvelope> {
                 #(#try_from_matches)*
                 Err(envelope)
             }
@@ -114,7 +114,7 @@ fn derive_interface(input: TokenStream, base: &str) -> TokenStream {
             //     Err(self)
             // }
 
-            fn into_dyn_envelope(self) -> #msg_path::DynEnvelope {
+            fn into_dyn_envelope(self) -> #msg_path::AnyEnvelope {
                 match self {
                     #(#into_matches)*
                 }

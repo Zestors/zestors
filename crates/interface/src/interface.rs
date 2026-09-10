@@ -14,21 +14,21 @@ pub trait Interface:
     type Set: AsTypeSet + Members;
 
     /// Attempt to convert a boxed envelope into this interface by downcasting.
-    fn try_from_dyn_envelope(envelope: DynEnvelope) -> Result<Self, DynEnvelope>;
+    fn try_from_dyn_envelope(envelope: AnyEnvelope) -> Result<Self, AnyEnvelope>;
 
     /// Convert the inner envelope of this interface into a boxed envelope.
-    fn into_dyn_envelope(self) -> DynEnvelope;
+    fn into_dyn_envelope(self) -> AnyEnvelope;
 }
 
 impl Interface for () {
     type Set = ();
 
-    fn try_from_dyn_envelope(envelope: DynEnvelope) -> Result<Self, DynEnvelope> {
+    fn try_from_dyn_envelope(envelope: AnyEnvelope) -> Result<Self, AnyEnvelope> {
         envelope.downcast::<()>().map(|env| env.msg)
     }
 
-    fn into_dyn_envelope(self) -> DynEnvelope {
-        DynEnvelope::new::<()>(Envelope::new(self, ()))
+    fn into_dyn_envelope(self) -> AnyEnvelope {
+        AnyEnvelope::new::<()>(Envelope::new(self, ()))
     }
 }
 
@@ -49,11 +49,11 @@ impl TryInto<Envelope<()>> for () {
 impl Interface for Infallible {
     type Set = ();
 
-    fn try_from_dyn_envelope(envelope: DynEnvelope) -> Result<Self, DynEnvelope> {
+    fn try_from_dyn_envelope(envelope: AnyEnvelope) -> Result<Self, AnyEnvelope> {
         Err(envelope)
     }
 
-    fn into_dyn_envelope(self) -> DynEnvelope {
+    fn into_dyn_envelope(self) -> AnyEnvelope {
         unreachable!()
     }
 }

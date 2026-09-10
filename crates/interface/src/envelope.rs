@@ -26,10 +26,10 @@ impl<M: Message> Envelope<M> {
 
 /// Hold the [`Envelope`] of a message in boxed form.
 #[derive(Debug)]
-pub struct DynEnvelope(Box<dyn Any + Send>);
+pub struct AnyEnvelope(Box<dyn Any + Send>);
 
-impl DynEnvelope {
-    /// Create a new `DynEnvelope` from an [`Envelope`].
+impl AnyEnvelope {
+    /// Create a new `AnyEnvelope` from an [`Envelope`].
     pub fn new<M: Message>(envelope: Envelope<M>) -> Self {
         Self(Box::new(envelope))
     }

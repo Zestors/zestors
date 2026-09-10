@@ -107,7 +107,7 @@ impl<C: Context> Channel<C> {
     }
 
     #[expect(unused)]
-    pub(super) fn pop_dyn(&self) -> Result<DynEnvelope, PopError> {
+    pub(super) fn pop_dyn(&self) -> Result<AnyEnvelope, PopError> {
         self.data().msg_queue.pop_dyn()
     }
 
