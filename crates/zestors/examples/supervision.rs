@@ -6,9 +6,9 @@ use zestors::{
         BasicScheduler, Handle, Handler, HandlerExit, HandlerState, actor_fn, blueprint_fn, task_fn,
     },
     api_server::ApiServer,
-    channel::errors::Cancelled,
     prelude::*,
-    signals::RestartMode,
+    runtime::RestartMode,
+    runtime::errors::Cancelled,
     supervision::{InMemorySupervisorSource, Supervisor, SupervisorBlueprint},
 };
 use zestors_supervision::{BlueprintSupervisionExt as _, Node};

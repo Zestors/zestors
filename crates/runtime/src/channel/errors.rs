@@ -2,7 +2,7 @@ use super::*;
 use rootcause::compat::ReportAsError;
 use std::fmt::Display;
 use thiserror::Error;
-use zestors_interface::oneshot::RxError;
+use zestors_interface::ResponseError;
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, Hash)]
 pub enum TrySendError<T> {
@@ -91,8 +91,8 @@ impl<M> From<SendError<M>> for RequestError<M> {
     }
 }
 
-impl<M> From<RxError> for RequestError<M> {
-    fn from(_err: RxError) -> Self {
+impl<M> From<ResponseError> for RequestError<M> {
+    fn from(_err: ResponseError) -> Self {
         Self::NoResponse
     }
 }
@@ -118,8 +118,8 @@ impl<M> From<SendCheckedError<M>> for RequestCheckedError<M> {
     }
 }
 
-impl<M> From<RxError> for RequestCheckedError<M> {
-    fn from(_err: RxError) -> Self {
+impl<M> From<ResponseError> for RequestCheckedError<M> {
+    fn from(_err: ResponseError) -> Self {
         Self::NoResponse
     }
 }

@@ -3,7 +3,7 @@ use crate::signals;
 use jiff::{SignedDuration, Timestamp, Zoned, tz::TimeZone};
 use std::{any::TypeId, future::Future};
 use tokio::time::Instant;
-use zestors_interface::oneshot::{Rx, new_request};
+use zestors_interface::{Request, Response};
 
 /// A trait that provides access to the [`ActorHandle`] of an actor.
 ///
@@ -60,7 +60,7 @@ pub trait ActorOpsExt: ActorOps + sealed::Sealed {
     fn request_dyn<M: Message>(
         &self,
         msg: M,
-    ) -> impl Future<Output = Result<M::Outcome, RequestCheckedError<M>>> + Send {
+    ) -> impl Future<Output = Result<M::Output, RequestCheckedError<M>>> + Send {
         let handle = self.handle();
         async { Ok(handle.send_dyn(msg).await?.wait().await?) }
     }
@@ -185,8 +185,8 @@ pub trait ActorOpsExt: ActorOps + sealed::Sealed {
         self.data().signal(interface)
     }
 
-    fn ping(&self) -> Rx<()> {
-        let (tx, rx) = new_request();
+    fn ping(&self) -> Response<()> {
+        let (tx, rx) = Request::new();
 
         self.handle()
             .data()

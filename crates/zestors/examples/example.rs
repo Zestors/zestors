@@ -5,10 +5,10 @@ use zestors::{
         BasicScheduler, Handle, HandledBy, Handler, HandlerCallback, HandlerMessage, HandlerState,
     },
     prelude::*,
-    spawn,
     supervision::{GetChildren, GetHealth, Health},
 };
 use zestors_actor::ActorExt;
+use zestors_runtime::spawn;
 #[tokio::main]
 async fn main() {
     let child = spawn(async move |mut stream: Inbox<MyInterface>| {

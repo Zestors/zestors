@@ -1,8 +1,7 @@
 use futures::{StreamExt as _, future::BoxFuture, stream::FuturesUnordered};
 use rootcause::Report;
 use zestors_codegen::Message;
-use zestors_interface::{Mode, prelude::*};
-use zestors_runtime::prelude::*;
+use zestors_interface::{Resolver, prelude::*};
 
 use crate::{Handle, Handler, HandlerState};
 
@@ -133,7 +132,7 @@ impl<M: Message, H: Handle<M>> DynErasedMessage<H> for M {
         actor: &'a mut H,
     ) -> BoxFuture<'a, Result<(), Report>> {
         Box::pin(async move {
-            let (resolver, receipt) = <M::Mode as Mode<M::Outcome>>::new();
+            let (resolver, receipt) = <M::Resolver as Resolver>::new();
             std::mem::drop(receipt);
             actor.handle(state, Envelope::new(*self, resolver)).await?;
             Ok(())
@@ -197,7 +196,7 @@ where
         state: HandlerState<'_, H>,
         actor: &mut H,
     ) -> impl Future<Output = Result<(), Report>> + Send {
-        let (resolver, receipt) = <M::Mode as Mode<M::Outcome>>::new();
+        let (resolver, receipt) = <M::Resolver as Resolver>::new();
         std::mem::drop(receipt);
         let envelope = Envelope::new(self, resolver);
         actor.handle(state, envelope)

@@ -8,7 +8,7 @@ use std::convert::Infallible;
 ///
 /// It defines conversion methods to and from a boxed envelope, which is used for dynamic dispatch of messages.
 pub trait Interface:
-    Message<Mode = FireAndForget, Outcome = ()> + TryInto<Envelope<Self>> + From<Envelope<Self>>
+    Message<Receipt = ()> + TryInto<Envelope<Self>> + From<Envelope<Self>>
 {
     /// The [set](TypeSet) of messages that this interface can handle.
     type Set: AsTypeSet + Members;

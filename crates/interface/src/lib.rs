@@ -5,21 +5,19 @@
 pub mod prelude {
     pub use crate::{
         Envelope, Message,
-        oneshot::{Rx, Tx},
+        oneshot::{Request, Response},
     };
 }
 
 mod interface;
-
-use std::marker::PhantomData;
 
 pub use interface::*;
 
 mod message;
 pub use message::*;
 
-pub mod oneshot;
-pub(crate) use oneshot::*;
+mod oneshot;
+pub use oneshot::*;
 
 mod envelope;
 pub use envelope::*;

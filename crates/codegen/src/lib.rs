@@ -125,8 +125,9 @@ fn derive_interface(input: TokenStream, base: &str) -> TokenStream {
 
 
         impl #msg_path::Message for #enum_name {
-            type Outcome = ();
-            type Mode = #msg_path::FireAndForget;
+            type Output = ();
+            type Resolver = ();
+            type Receipt = ();
         }
 
 
@@ -221,7 +222,7 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
 ///
 /// #[derive(Message)]
 /// #[msg(reply = u32)]
-/// struct MessageWithOutcome;
+/// struct MessageWithOutput;
 /// ```
 #[proc_macro_derive(Message, attributes(msg))]
 pub fn derive_message(input: TokenStream) -> TokenStream {
@@ -250,16 +251,18 @@ fn _derive_message(input: TokenStream, base: &str) -> TokenStream {
         quote!(
             impl #impl_generics #base_path::Message for #name #ty_generics #where_clause
             {
-                type Mode = #base_path::Request;
-                type Outcome = #reply_type;
+                type Output = #reply_type;
+                type Receipt = #base_path::Response<#reply_type>;
+                type Resolver = #base_path::Request<#reply_type>;
             }
         )
     } else {
         quote!(
             impl #impl_generics #base_path::Message for #name #ty_generics #where_clause
             {
-                type Mode = #base_path::FireAndForget;
-                type Outcome = ();
+                type Output = ();
+                type Resolver = ();
+                type Receipt = ();
             }
         )
     };

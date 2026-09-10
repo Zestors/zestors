@@ -19,7 +19,7 @@ impl<M: Message> Envelope<M> {
     }
 
     pub fn new_pair(msg: M) -> (Self, MessageReceipt<M>) {
-        let (resolver, receipt) = <M::Mode as Mode<M::Outcome>>::new();
+        let (resolver, receipt) = <M::Resolver as Resolver>::new();
         (Self::new(msg, resolver), receipt)
     }
 }
