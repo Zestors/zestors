@@ -454,7 +454,7 @@ impl<I: Interface> Channel<I> {
                 }
             }
             SignalInterface::Ping(envelope) => {
-                let _ = envelope.handle.send(());
+                let _ = envelope.handle.reply(());
                 None
             }
         }

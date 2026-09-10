@@ -78,10 +78,10 @@ impl Actor for ApiServer {
 
                 Event::Message(msg) => match msg {
                     ApiServerInterface::Children(env) => {
-                        env.handle.send(vec![]).ok();
+                        env.handle.reply(vec![]).ok();
                     }
                     ApiServerInterface::Health(env) => {
-                        env.handle.send(Health::healthy()).ok();
+                        env.handle.reply(Health::healthy()).ok();
                     }
                 },
             }

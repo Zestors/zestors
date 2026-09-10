@@ -123,10 +123,10 @@ impl BaseSupervisor {
         match msg {
             SupervisorInterface::Children(Envelope { msg: _, handle }) => {
                 let descriptions = self.supervisees.child_descriptions();
-                handle.send(descriptions).ok();
+                handle.reply(descriptions).ok();
             }
             SupervisorInterface::Health(Envelope { msg: _, handle }) => {
-                handle.send(HealthStatus::Healthy.into_health()).ok();
+                handle.reply(HealthStatus::Healthy.into_health()).ok();
             }
         }
     }

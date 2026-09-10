@@ -10,7 +10,7 @@ pub struct Request<T>(oneshot::Sender<T>);
 
 impl<T> Request<T> {
     /// Send a message.
-    pub fn send(self, msg: T) -> Result<(), ReplyError<T>> {
+    pub fn reply(self, msg: T) -> Result<(), ReplyError<T>> {
         self.0.send(msg).map_err(|msg| ReplyError(msg))
     }
 

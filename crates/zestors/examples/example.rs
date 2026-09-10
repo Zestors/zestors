@@ -30,10 +30,10 @@ async fn main() {
                         println!("Received message: {:?}", envelope);
                     }
                     MyInterface::Health(Envelope { handle, .. }) => {
-                        handle.send(Health::healthy()).ok();
+                        handle.reply(Health::healthy()).ok();
                     }
                     MyInterface::Children(Envelope { handle, .. }) => {
-                        handle.send(vec![]).ok();
+                        handle.reply(vec![]).ok();
                     }
                     MyInterface::Rpc(envelope) => {
                         println!("Received any message. Not handleable, dropping...");
@@ -144,7 +144,7 @@ impl Handle<GetHealth> for MyActor {
         _state: HandlerState<'_, Self>,
         Envelope { msg: _, handle }: Envelope<GetHealth>,
     ) -> Result<(), Report> {
-        handle.send(Health::healthy().with_debug_repr(&self)).ok();
+        handle.reply(Health::healthy().with_debug_repr(&self)).ok();
 
         self.scheduler.schedule_msg(async move {
             tokio::time::sleep(Duration::from_secs(1)).await;
@@ -166,7 +166,7 @@ impl Handle<GetChildren> for MyActor {
         _: HandlerState<'_, Self>,
         Envelope { msg: _, handle }: Envelope<GetChildren>,
     ) -> Result<(), Report> {
-        handle.send(vec![]).ok();
+        handle.reply(vec![]).ok();
         Ok(())
     }
 }
