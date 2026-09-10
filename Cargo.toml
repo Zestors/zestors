@@ -4,17 +4,17 @@ members = [
   "crates/codegen",
   "crates/zestors",
   "crates/inspector",
-  "crates/zestors-runtime",
+  "crates/runtime",
   "crates/api-server",
-  # "crates/zestors-core",
   "crates/supervision",
-  "crates/actor", "crates/messaging",
+  "crates/actor",
+  "crates/messaging",
 ]
 
 [workspace.dependencies]
 zestors-codegen = { path = "crates/codegen" }
 zestors = { path = "crates/zestors" }
-zestors-runtime = { path = "crates/zestors-runtime" }
+zestors-runtime = { path = "crates/runtime" }
 zestors-inspector = { path = "crates/inspector" }
 zestors-api-server = { path = "crates/api-server" }
 zestors-supervision = { path = "crates/supervision" }
