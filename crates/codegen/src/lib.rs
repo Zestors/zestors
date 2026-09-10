@@ -121,7 +121,7 @@ fn derive_interface(input: TokenStream, base: &str) -> TokenStream {
                 }
             }
 
-            type Set = #msg_path::Set<(#(#inner_types,)*)>;
+            type Set = #msg_path::Dyn<(#(#inner_types,)*)>;
         }
 
 

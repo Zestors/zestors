@@ -21,8 +21,8 @@ mod sends;
 pub use sends::*;
 use type_sets::AsTypeSet;
 
-pub struct Set<T>(PhantomData<fn() -> T>);
+pub struct Dyn<T>(PhantomData<fn() -> T>);
 
-impl<T: AsTypeSet> type_sets::AsTypeSet for Set<T> {
+impl<T: AsTypeSet> type_sets::AsTypeSet for Dyn<T> {
     type Set = T::Set;
 }

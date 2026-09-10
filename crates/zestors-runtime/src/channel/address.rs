@@ -2,7 +2,7 @@ use crate::_prelude::*;
 use std::{fmt::Debug, hash::Hash};
 
 #[repr(transparent)]
-pub struct Address<C: Context = Set<()>> {
+pub struct Address<C: Context = Dyn<()>> {
     pub(super) channel: Channel<C>,
 }
 
@@ -29,12 +29,12 @@ impl<C: Context> ActorOps for Address<C> {
 impl<C: Context> IntoDyn for Address<C> {
     type Ref<R: Context> = Address<R>;
 
-    fn into_dyn_unchecked<S>(self) -> Address<S>
+    fn into_context_unchecked<R>(self) -> Self::Ref<R>
     where
-        S: Context,
+        R: Context,
     {
         Address {
-            channel: unsafe { std::mem::transmute::<Channel<C>, Channel<S>>(self.channel) },
+            channel: unsafe { std::mem::transmute::<Channel<Self::Ctx>, Channel<R>>(self.channel) },
         }
     }
 }
@@ -80,7 +80,7 @@ mod tests {
     #[tokio::test]
     async fn test_address_downcast_ref() {
         let child = crate::spawn(|_: Inbox<MyInterface>| async move { Ok(()) });
-        let address = child.address().clone().into_dyn::<Set<()>>();
+        let address = child.address().clone().into_dyn::<()>();
 
         address
             .downcast::<MyInterface>()

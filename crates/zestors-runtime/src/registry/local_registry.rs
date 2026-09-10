@@ -50,7 +50,7 @@ impl Registry {
         let map = self.processes.pin();
 
         if map
-            .try_insert(address.pid().clone(), address.clone().into_dyn::<Set<()>>())
+            .try_insert(address.pid().clone(), address.clone().into_dyn())
             .is_err()
         {
             Err(RegistryAddError { address })
@@ -92,13 +92,13 @@ impl Registry {
     /// Returns an error if
     /// - the process is not found
     /// - the set of types does not match the registered address's type set
-    pub fn get_dyn<C: Context + Members>(
-        &self,
-        pid: &Pid,
-    ) -> Result<Address<C>, TypedRegistryError> {
+    pub fn get_dyn<S>(&self, pid: &Pid) -> Result<Address<Dyn<S>>, TypedRegistryError>
+    where
+        Dyn<S>: Context + Members,
+    {
         self.get(pid)
             .ok_or_else(|| TypedRegistryError::NotFound(pid.clone()))?
-            .into_dyn_checked::<C>()
+            .into_dyn_checked::<S>()
             .map_err(|_| TypedRegistryError::TypeMismatch(pid.clone()))
     }
 
@@ -112,7 +112,7 @@ impl Registry {
 /// Error returned when registering a [`Pid`] that already exists in the [`Registry`].
 #[derive(thiserror::Error)]
 #[error("Failed to add entry for pid {}", .address.pid())]
-pub struct RegistryAddError<T: Context = Set<()>> {
+pub struct RegistryAddError<T: Context = Dyn<()>> {
     address: Address<T>,
 }
 

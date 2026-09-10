@@ -13,7 +13,7 @@ use zestors_runtime::{
         ActorOps, ActorStatus, Channel, Child, ExitingChild, Pid,
         errors::{JoinError, StartOnError},
     },
-    messaging::Set,
+    messaging::Dyn,
     signals::RestartMode,
 };
 
@@ -144,7 +144,7 @@ impl Stream for Supervisee {
 }
 
 impl ActorOps for Supervisee {
-    type Ctx = Set<()>;
+    type Ctx = Dyn<()>;
 
     fn handle(&self) -> &Channel<Self::Ctx> {
         self.spec.handle()

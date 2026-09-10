@@ -37,8 +37,11 @@ impl Pid {
         Registry::local().get_typed::<I>(self)
     }
 
-    pub fn dyn_address<C: Context + Members>(&self) -> Result<Address<C>, TypedRegistryError> {
-        Registry::local().get_dyn::<C>(self)
+    pub fn dyn_address<S>(&self) -> Result<Address<Dyn<S>>, TypedRegistryError>
+    where
+        Dyn<S>: Context + Members,
+    {
+        Registry::local().get_dyn::<S>(self)
     }
 }
 

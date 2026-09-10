@@ -12,7 +12,7 @@ use type_sets::AsTypeSet;
 /// [`Child`] and [`Inbox`] both contain a [`StrongAddress`]. Addresses can
 /// be upgraded to a `StrongAddress`.
 #[repr(transparent)]
-pub struct StrongAddress<C: Context = Set<()>> {
+pub struct StrongAddress<C: Context = Dyn<()>> {
     channel: Channel<C>,
 }
 
@@ -66,7 +66,7 @@ impl<T: Context> Clone for StrongAddress<T> {
 impl<C: Context> IntoDyn for StrongAddress<C> {
     type Ref<T: Context> = StrongAddress<T>;
 
-    fn into_dyn_unchecked<S>(self) -> StrongAddress<S>
+    fn into_context_unchecked<S>(self) -> Self::Ref<S>
     where
         S: Context,
     {

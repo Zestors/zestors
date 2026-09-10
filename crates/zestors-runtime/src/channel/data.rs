@@ -28,7 +28,7 @@ use type_sets::{AsTypeSet, Contains};
 /// This means, that in order restart an actor, the [`Channel`] handle must be kept
 /// alive.
 #[repr(transparent)]
-pub struct Channel<C: Context = Set<()>> {
+pub struct Channel<C: Context = Dyn<()>> {
     inner: Arc<ChannelData<dyn Queue>>,
     _ctx: PhantomData<fn() -> C>,
 }
@@ -529,7 +529,7 @@ impl<C: Context> Channel<C> {
     }
 }
 
-impl<M, T> _Sends<M> for Channel<Set<T>>
+impl<M, T> _Sends<M> for Channel<Dyn<T>>
 where
     M: Message,
     T: AsTypeSet + Contains<M> + 'static,

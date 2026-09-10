@@ -4,22 +4,29 @@ use type_sets::{Members, Subset};
 pub trait IntoDyn: ActorOps + Sized {
     type Ref<T: Context>;
 
-    fn into_dyn_unchecked<S>(self) -> Self::Ref<S>
+    fn into_context_unchecked<C>(self) -> Self::Ref<C>
     where
-        S: Context;
+        C: Context;
 
-    fn into_dyn<S>(self) -> Self::Ref<S>
+    fn into_dyn_unchecked<S>(self) -> Self::Ref<Dyn<S>>
     where
-        S: Context + Subset<<Self::Ctx as Context>::Set>,
+        Dyn<S>: Context,
+    {
+        self.into_context_unchecked()
+    }
+
+    fn into_dyn<S>(self) -> Self::Ref<Dyn<S>>
+    where
+        Dyn<S>: Context + Subset<<Self::Ctx as Context>::Set>,
     {
         self.into_dyn_unchecked()
     }
 
-    fn into_dyn_checked<S>(self) -> Result<Self::Ref<S>, Self>
+    fn into_dyn_checked<S>(self) -> Result<Self::Ref<Dyn<S>>, Self>
     where
-        S: Context + Members,
+        Dyn<S>: Context + Members,
     {
-        if self.is_superset_of(S::members()) {
+        if self.is_superset_of(Dyn::<S>::members()) {
             Ok(self.into_dyn_unchecked())
         } else {
             Err(self)
@@ -31,7 +38,8 @@ pub trait IntoDyn: ActorOps + Sized {
         I: Interface,
     {
         if self.is_interface::<I>() {
-            Ok(self.into_dyn_unchecked())
+            // Ok(self.into_dyn_unchecked())
+            todo!()
         } else {
             Err(self)
         }

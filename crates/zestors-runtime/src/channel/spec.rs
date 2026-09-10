@@ -10,6 +10,6 @@ impl<I: Interface> Context for I {
     type Set = I::Set;
 }
 
-impl<S: AsTypeSet + 'static> Context for Set<S> {
+impl<S: AsTypeSet + 'static> Context for Dyn<S> {
     type Set = S;
 }
