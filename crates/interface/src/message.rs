@@ -1,31 +1,54 @@
-use crate::ResponseError;
 use crate::prelude::*;
+use crate::{ReceiptError, message::sealed::Sealed};
 use std::{convert::Infallible, fmt::Debug};
 
+/// Defines whether a message is a fire-and-forget or request-style message.
+///
+/// When the message is sent, an [`Envelope`] is constructed that contains both the
+/// message itself, as well as the associated [`Resolver`]. The sender immeadeately
+/// receives the [`Receipt`] of sending the message.
+///
+/// Receipts and resolvers come in two types:
+/// - `fire-and-forget`: Both the resolver and the request are of type `()`. No reply
+/// is expected.
+/// - `request`: The resolver is a [`Request<T>`], and the receipt is a
+/// [`Response<T>`]. Once a reply is sent, the response resolves to `T`.
+///
+/// This trait must be implemented for any message that is sent in zestors.
 pub trait Message: Send + 'static + Sized {
+    /// The receipt associated with this message, that is returned after sending.
     type Receipt: Receipt<Output = Self::Output, Resolver = Self::Resolver>;
 
+    /// The resolver used to resolve the receipt given to the sender.
     type Resolver: Resolver<Receipt = Self::Receipt>;
 
+    /// The output of the receipt after being resolved.
     type Output: Send + 'static;
 }
 
-pub trait Receipt: Debug + Send + Sized {
+/// The the value returned after sending a [`Message`].
+pub trait Receipt: Debug + Send + Sized + Sealed {
+    /// The output of the receipt after being resolved.
     type Output: Send + 'static;
+
+    /// The resolver used to resolve this receipt.
     type Resolver: Resolver;
 
     /// Waits for the message's outcome.
-    fn wait(self) -> impl Future<Output = Result<Self::Output, ResponseError>> + Send;
+    fn wait(self) -> impl Future<Output = Result<Self::Output, ReceiptError>> + Send;
 
     /// Waits for the message's outcome, blocking the current thread.
-    fn wait_blocking(self) -> Result<Self::Output, ResponseError> {
+    fn wait_blocking(self) -> Result<Self::Output, ReceiptError> {
         futures::executor::block_on(self.wait())
     }
 }
 
-pub trait Resolver: Debug + Send + Sized {
+/// The value passed along with a [`Message`], used to resolve a [`Receipt`]
+pub trait Resolver: Debug + Send + Sized + Sealed {
+    /// The receipt associated with this resolver.
     type Receipt: Receipt;
 
+    /// Construct a new resolver-receipt pair
     fn new() -> (Self, Self::Receipt);
 }
 
@@ -33,7 +56,7 @@ impl Receipt for () {
     type Output = ();
     type Resolver = ();
 
-    async fn wait(self) -> Result<(), ResponseError> {
+    async fn wait(self) -> Result<(), ReceiptError> {
         Ok(())
     }
 }
@@ -50,7 +73,7 @@ impl<T: Send + 'static> Receipt for Response<T> {
     type Output = T;
     type Resolver = Request<T>;
 
-    async fn wait(self) -> Result<Self::Output, ResponseError> {
+    async fn wait(self) -> Result<Self::Output, ReceiptError> {
         self.await
     }
 }
@@ -63,18 +86,13 @@ impl<T: Send + 'static> Resolver for Request<T> {
     }
 }
 
-/// The resolver associated with a [`Message`].
-pub type MessageResolver<M> = <M as Message>::Resolver;
+mod sealed {
+    pub trait Sealed {}
 
-/// The [`Receipt`] associated with a [`Message`].
-pub type MessageReceipt<M> = <M as Message>::Receipt;
-
-// mod sealed {
-//     pub trait Sealed {}
-
-//     impl Sealed for super::FireAndForget {}
-//     impl Sealed for super::Request {}
-// }
+    impl Sealed for () {}
+    impl<T> Sealed for super::Request<T> {}
+    impl<T> Sealed for super::Response<T> {}
+}
 
 //------------------------------------------------------------------------------------------------
 //  Message: Default implementations

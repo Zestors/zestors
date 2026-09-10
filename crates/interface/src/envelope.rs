@@ -1,30 +1,29 @@
 use super::*;
 use std::any::Any;
 
-/// A message together with the resolver used by the receiver to produce
-/// its outcome.
+/// Contains both the [`Message`] and the [`Resolver`].
 #[derive(Debug)]
 pub struct Envelope<M: Message> {
     /// The message
     pub msg: M,
 
     /// The resolver handle used by the receiver to resolve the message's outcome.
-    pub handle: MessageResolver<M>,
+    pub handle: M::Resolver,
 }
 
 impl<M: Message> Envelope<M> {
     /// Creates an envelope containing a message and its resolver.
-    pub fn new(msg: M, handle: MessageResolver<M>) -> Self {
+    pub fn new(msg: M, handle: M::Resolver) -> Self {
         Self { msg, handle }
     }
 
-    pub fn new_pair(msg: M) -> (Self, MessageReceipt<M>) {
+    pub fn new_pair(msg: M) -> (Self, M::Receipt) {
         let (resolver, receipt) = <M::Resolver as Resolver>::new();
         (Self::new(msg, resolver), receipt)
     }
 }
 
-/// Hold the [`Envelope`] of a message in boxed form.
+/// A type-erased [`Envelope`] used for dynamic sending.
 #[derive(Debug)]
 pub struct AnyEnvelope(Box<dyn Any + Send>);
 
@@ -34,7 +33,7 @@ impl AnyEnvelope {
         Self(Box::new(envelope))
     }
 
-    pub fn new_pair<M: Message>(msg: M) -> (Self, MessageReceipt<M>) {
+    pub fn new_pair<M: Message>(msg: M) -> (Self, M::Receipt) {
         let (envelope, receipt) = Envelope::new_pair(msg);
         (Self::new(envelope), receipt)
     }

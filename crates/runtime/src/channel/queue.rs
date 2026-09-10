@@ -42,7 +42,7 @@ impl dyn Queue {
     pub(super) fn try_push_msg<M: Message>(
         &self,
         msg: M,
-    ) -> Result<MessageReceipt<M>, NotAccepted<M>> {
+    ) -> Result<M::Receipt, NotAccepted<M>> {
         let (envelope, receipt) = AnyEnvelope::new_pair::<M>(msg);
 
         self.push_envelope_dyn(envelope)

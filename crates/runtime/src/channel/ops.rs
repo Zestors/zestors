@@ -25,7 +25,7 @@ pub trait ActorOpsExt: ActorOps + sealed::Sealed {
     fn send_dyn<M: Message>(
         &self,
         msg: M,
-    ) -> impl Future<Output = Result<MessageReceipt<M>, SendCheckedError<M>>> + Send {
+    ) -> impl Future<Output = Result<M::Receipt, SendCheckedError<M>>> + Send {
         let handle = self.handle();
 
         async {
@@ -35,10 +35,7 @@ pub trait ActorOpsExt: ActorOps + sealed::Sealed {
     }
 
     /// Same as [`Sends::try_send`], but checks whether the message type is accepted by the channel.
-    fn try_send_dyn<M: Message>(
-        &self,
-        msg: M,
-    ) -> Result<MessageReceipt<M>, TrySendCheckedError<M>> {
+    fn try_send_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, TrySendCheckedError<M>> {
         if self.reached_backpressure() {
             return Err(TrySendCheckedError::Full(msg));
         }
@@ -47,7 +44,7 @@ pub trait ActorOpsExt: ActorOps + sealed::Sealed {
     }
 
     /// Same as [`Sends::send_now`], but checks whether the message type is accepted by the channel.
-    fn send_now_dyn<M: Message>(&self, msg: M) -> Result<MessageReceipt<M>, SendCheckedError<M>> {
+    fn send_now_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, SendCheckedError<M>> {
         if !self.status().accepts_messages() {
             return Err(SendCheckedError::Closed(msg));
         }

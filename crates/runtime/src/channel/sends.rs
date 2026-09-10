@@ -23,7 +23,7 @@ pub trait Sends<M: Message>: Sync {
     ///
     /// Unlike [`Sends::try_send`], this method waits rather than returning
     /// immediately when backpressure is active.
-    fn send(&self, msg: M) -> impl Future<Output = Result<MessageReceipt<M>, SendError<M>>> + Send;
+    fn send(&self, msg: M) -> impl Future<Output = Result<M::Receipt, SendError<M>>> + Send;
 
     /// Attempts to send a message without waiting.
     ///
@@ -33,7 +33,7 @@ pub trait Sends<M: Message>: Sync {
     ///
     /// Unlike [`Sends::send`], this method never waits for backpressure to
     /// subside.
-    fn try_send(&self, msg: M) -> Result<MessageReceipt<M>, TrySendError<M>>;
+    fn try_send(&self, msg: M) -> Result<M::Receipt, TrySendError<M>>;
 
     /// Sends a message immediately if the channel is open.
     ///
@@ -42,7 +42,7 @@ pub trait Sends<M: Message>: Sync {
     ///
     /// Use [`Sends::force_send`] when the channel status should also be
     /// ignored.
-    fn send_now(&self, msg: M) -> Result<MessageReceipt<M>, SendError<M>>;
+    fn send_now(&self, msg: M) -> Result<M::Receipt, SendError<M>>;
 
     // /// Sends a message immediately, ignoring backpressure and channel status.
     // ///
@@ -51,7 +51,7 @@ pub trait Sends<M: Message>: Sync {
     // ///
     // /// If the underlying queue is at capacity, the message is dropped and the
     // /// implementation may log the overflow.
-    // fn force_send(&self, msg: M) -> MessageReceipt<M>;
+    // fn force_send(&self, msg: M) -> M::Receipt;
 
     /// Sends a message and waits for a reply.
     ///
@@ -68,9 +68,9 @@ pub trait Sends<M: Message>: Sync {
 /// [`ActorHandle`].
 pub(crate) trait _Sends<M: Message>: Sync {
     fn _send(&self, msg: M)
-    -> impl Future<Output = Result<MessageReceipt<M>, SendError<M>>> + Send;
-    fn _try_send(&self, msg: M) -> Result<MessageReceipt<M>, TrySendError<M>>;
-    fn _send_now(&self, msg: M) -> Result<MessageReceipt<M>, SendError<M>>;
+    -> impl Future<Output = Result<M::Receipt, SendError<M>>> + Send;
+    fn _try_send(&self, msg: M) -> Result<M::Receipt, TrySendError<M>>;
+    fn _send_now(&self, msg: M) -> Result<M::Receipt, SendError<M>>;
     fn _request(&self, msg: M) -> impl Future<Output = Result<M::Output, RequestError<M>>> + Send {
         async move { Ok(self._send(msg).await?.wait().await?) }
     }
@@ -82,15 +82,15 @@ where
     M: Message,
     Channel<H::Ctx>: _Sends<M>,
 {
-    async fn send(&self, msg: M) -> Result<MessageReceipt<M>, SendError<M>> {
+    async fn send(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
         self.handle()._send(msg).await
     }
 
-    fn try_send(&self, msg: M) -> Result<MessageReceipt<M>, TrySendError<M>> {
+    fn try_send(&self, msg: M) -> Result<M::Receipt, TrySendError<M>> {
         self.handle()._try_send(msg)
     }
 
-    fn send_now(&self, msg: M) -> Result<MessageReceipt<M>, SendError<M>> {
+    fn send_now(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
         self.handle()._send_now(msg)
     }
 }

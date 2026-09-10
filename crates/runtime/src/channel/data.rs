@@ -95,10 +95,7 @@ impl<C: Context> Channel<C> {
         &self.inner
     }
 
-    pub(super) fn try_push_msg<M: Message>(
-        &self,
-        msg: M,
-    ) -> Result<MessageReceipt<M>, NotAccepted<M>> {
+    pub(super) fn try_push_msg<M: Message>(&self, msg: M) -> Result<M::Receipt, NotAccepted<M>> {
         self.data().msg_queue.try_push_msg(msg)
     }
 
@@ -534,7 +531,7 @@ where
     M: Message,
     T: AsTypeSet + Contains<M> + 'static,
 {
-    async fn _send(&self, msg: M) -> Result<MessageReceipt<M>, SendError<M>> {
+    async fn _send(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
         match self.send_dyn(msg).await {
             Ok(output) => Ok(output),
             Err(SendCheckedError::Closed(msg)) => Err(SendError(msg)),
@@ -548,7 +545,7 @@ where
         }
     }
 
-    fn _try_send(&self, msg: M) -> Result<MessageReceipt<M>, TrySendError<M>> {
+    fn _try_send(&self, msg: M) -> Result<M::Receipt, TrySendError<M>> {
         match self.try_send_dyn(msg) {
             Ok(output) => Ok(output),
             Err(TrySendCheckedError::Closed(msg)) => Err(TrySendError::Closed(msg)),
@@ -563,7 +560,7 @@ where
         }
     }
 
-    fn _send_now(&self, msg: M) -> Result<MessageReceipt<M>, SendError<M>> {
+    fn _send_now(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
         match self.send_now_dyn(msg) {
             Ok(output) => Ok(output),
             Err(SendCheckedError::Closed(msg)) => Err(SendError(msg)),
@@ -583,12 +580,12 @@ where
     M: Message,
     I: Interface + TryInto<Envelope<M>> + From<Envelope<M>> + Send + 'static,
 {
-    async fn _send(&self, msg: M) -> Result<MessageReceipt<M>, SendError<M>> {
+    async fn _send(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
         self.delay_for_backpressure().await;
         self._send_now(msg)
     }
 
-    fn _try_send(&self, msg: M) -> Result<MessageReceipt<M>, TrySendError<M>> {
+    fn _try_send(&self, msg: M) -> Result<M::Receipt, TrySendError<M>> {
         if self.reached_backpressure() {
             return Err(TrySendError::Full(msg));
         }
@@ -596,7 +593,7 @@ where
         self._send_now(msg).map_err(Into::into)
     }
 
-    fn _send_now(&self, msg: M) -> Result<MessageReceipt<M>, SendError<M>> {
+    fn _send_now(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
         if !self.status().accepts_messages() {
             return Err(SendError(msg));
         }

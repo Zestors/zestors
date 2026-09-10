@@ -6,22 +6,18 @@ use std::{
 };
 use tokio::sync::oneshot;
 
+/// A request that expects a [`Response`] to be sent.
 pub struct Request<T>(oneshot::Sender<T>);
 
 impl<T> Request<T> {
     /// Send a message.
-    pub fn reply(self, msg: T) -> Result<(), ReplyError<T>> {
-        self.0.send(msg).map_err(|msg| ReplyError(msg))
+    pub fn reply(self, msg: T) -> Result<(), ResolveError<T>> {
+        self.0.send(msg).map_err(|msg| ResolveError(msg))
     }
 
     /// Whether the [`Rx`] has closed/dropped the oneshot-channel.
     pub fn is_closed(&self) -> bool {
         self.0.is_closed()
-    }
-
-    /// Wait for the [`Rx`] to close/drop the oneshot-channel.
-    pub async fn closed(&mut self) {
-        self.0.closed().await
     }
 
     pub fn new() -> (Request<T>, Response<T>) {
@@ -36,21 +32,22 @@ impl<M> Debug for Request<M> {
     }
 }
 
+/// A response that can be awaited to receive the reply.
 #[must_use = "Response should be awaited to receive the message"]
 pub struct Response<M>(oneshot::Receiver<M>);
 
 impl<M> Response<M> {
     /// Attempt to take the message out, if it exists.
-    pub fn try_recv(&mut self) -> Result<Option<M>, ResponseError> {
+    pub fn try_recv(&mut self) -> Result<Option<M>, ReceiptError> {
         match self.0.try_recv() {
             Ok(msg) => Ok(Some(msg)),
             Err(oneshot::error::TryRecvError::Empty) => Ok(None),
-            Err(oneshot::error::TryRecvError::Closed) => Err(ResponseError),
+            Err(oneshot::error::TryRecvError::Closed) => Err(ReceiptError),
         }
     }
 
     /// Block the thread while waiting for the message.
-    pub fn recv_blocking(self) -> Result<M, ResponseError> {
+    pub fn recv_blocking(self) -> Result<M, ReceiptError> {
         self.0.blocking_recv().map_err(|e| e.into())
     }
 
@@ -63,7 +60,7 @@ impl<M> Response<M> {
 impl<M> Unpin for Response<M> {}
 
 impl<M> Future for Response<M> {
-    type Output = Result<M, ResponseError>;
+    type Output = Result<M, ReceiptError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.0.poll_unpin(cx).map_err(|e| e.into())
@@ -76,22 +73,19 @@ impl<M> Debug for Response<M> {
     }
 }
 
-//------------------------------------------------------------------------------------------------
-//  Errors
-//------------------------------------------------------------------------------------------------
-
-/// Error returned when receiving a message using an [`Rx`].
+/// The actor failed to resolve the receipt correctly.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
 #[error("Failed to receive from Rx because it is closed.")]
-pub struct ResponseError;
+pub struct ReceiptError;
 
-impl From<oneshot::error::RecvError> for ResponseError {
+impl From<oneshot::error::RecvError> for ReceiptError {
     fn from(_: oneshot::error::RecvError) -> Self {
         Self
     }
 }
 
-/// Error returned when sending a message using a [`Tx`].
+/// Failed to resolve the [`Receipt`](crate::Receipt), because the
+/// receipt has been dropped.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
 #[error("Failed to send to Tx because it is closed.")]
-pub struct ReplyError<M>(pub M);
+pub struct ResolveError<M>(pub M);

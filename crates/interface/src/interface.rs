@@ -3,14 +3,11 @@ use type_sets::Members;
 use super::*;
 use std::convert::Infallible;
 
-/// An interface defines the set of messages that can be sent to a given actor.
-/// This is usually derived on an enum using the `#[derive(Interface)]` macro.
-///
-/// It defines conversion methods to and from a boxed envelope, which is used for dynamic dispatch of messages.
+/// Defines the set of messages that an actor accepts.
 pub trait Interface:
     Message<Receipt = ()> + TryInto<Envelope<Self>> + From<Envelope<Self>>
 {
-    /// The [set](TypeSet) of messages that this interface can handle.
+    /// The set of messages that this interface can handle. (a tuple)
     type Set: AsTypeSet + Members;
 
     /// Attempt to convert a boxed envelope into this interface by downcasting.
