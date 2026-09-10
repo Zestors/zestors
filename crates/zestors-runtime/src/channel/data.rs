@@ -1,6 +1,6 @@
 use super::*;
 use crate::{registry::Registry, signals::Event};
-use eyeball::SharedObservable;
+use eyeball::{ObservableWriteGuard, SharedObservable};
 use std::{
     any::TypeId,
     convert::Infallible,
@@ -106,12 +106,43 @@ impl<C: Context> Channel<C> {
         self.data().msg_notifier.notify_one();
     }
 
-    pub(super) fn set_status(&self, status: ActorStatus) {
-        self.data().status_observer.set(status);
+    #[expect(unused)]
+    pub(super) fn pop_dyn(&self) -> Result<DynEnvelope, PopError> {
+        self.data().msg_queue.pop_dyn()
     }
 
-    pub(super) fn register_spawn(&self) {
+    pub(super) fn update_status<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(ActorStatus) -> (Option<ActorStatus>, T),
+    {
+        let mut observer = self.data().status_observer.write();
+        let prev_status = *observer;
+
+        let (new_status, result) = f(prev_status.clone());
+
+        let Some(new_status) = new_status else {
+            return result;
+        };
+
+        ObservableWriteGuard::set(&mut observer, new_status);
+
+        result
+    }
+
+    pub(super) fn register_spawned(&self) -> Result<(), InvalidStatusUpdate> {
         tracing::debug!("Process spawned");
+
+        // Spawn is only valid if the actor is dead.
+        self.update_status(|status| match status {
+            ActorStatus::Exited(_) => (Some(ActorStatus::Initializing), Ok(())),
+            ActorStatus::Stopping
+            | ActorStatus::Initializing
+            | ActorStatus::Running
+            | ActorStatus::Suspended => (
+                None,
+                Err(InvalidStatusUpdate::new(status, ActorStatus::Initializing)),
+            ),
+        })?;
 
         let mut spawned_at = self.data().spawns.write().unwrap();
 
@@ -120,48 +151,115 @@ impl<C: Context> Channel<C> {
         }
 
         spawned_at.push(Instant::now());
-        self.set_status(ActorStatus::Initializing);
+
+        Ok(())
     }
 
-    #[expect(unused)]
-    pub(super) fn pop_dyn(&self) -> Result<DynEnvelope, PopError> {
-        self.data().msg_queue.pop_dyn()
-    }
+    pub(super) fn register_exited(&self, reason: Result<(), ExitError>) -> bool {
+        // Exit is always valid, but doesn't always do something.
+        let updated = self.update_status(|status| match status {
+            ActorStatus::Stopping | ActorStatus::Exited(_) => (None, false),
+            ActorStatus::Initializing | ActorStatus::Running | ActorStatus::Suspended => (
+                Some(ActorStatus::Exited(ExitStatus::from_result(reason.clone()))),
+                true,
+            ),
+        });
 
-    pub(super) fn register_exit(&self, reason: Result<(), ExitError>) {
-        match &reason {
-            Ok(()) => tracing::debug!("Process exited normally"),
-            Err(err) => tracing::warn!("Process exited with error: {:?}", err),
+        match updated {
+            true => {
+                match &reason {
+                    Ok(()) => tracing::debug!("Process exited normally"),
+                    Err(err) => tracing::warn!("Process exited with error: {:?}", err),
+                }
+
+                let mut exited_at = self.data().exits.write().unwrap();
+
+                if exited_at.len() > KEEP_N_EXITS {
+                    _ = exited_at.remove(0);
+                }
+
+                exited_at.push((Instant::now(), reason));
+
+                true
+            }
+            false => false,
         }
+    }
 
-        let mut exited_at = self.data().exits.write().unwrap();
+    pub(super) fn register_initialized(&self) -> Result<bool, InvalidStatusUpdate> {
+        let updated = self.update_status(|status| match status {
+            ActorStatus::Stopping | ActorStatus::Exited(_) => (
+                None,
+                Err(InvalidStatusUpdate::new(status, ActorStatus::Running)),
+            ),
+            ActorStatus::Initializing => (Some(ActorStatus::Running), Ok(true)),
+            ActorStatus::Running | ActorStatus::Suspended => (None, Ok(false)),
+        })?;
 
-        if exited_at.len() > KEEP_N_EXITS {
-            _ = exited_at.remove(0);
+        match updated {
+            true => {
+                tracing::debug!("Process initialized");
+                Ok(true)
+            }
+            false => Ok(false),
         }
-
-        exited_at.push((Instant::now(), reason));
-        self.set_status(ActorStatus::Exited(ExitStatus::from_result(reason)));
     }
 
-    pub(super) fn register_initialized(&self) {
-        tracing::debug!("Process initialized");
-        self.set_status(ActorStatus::Running);
+    pub(super) fn register_suspended(&self) -> Result<bool, InvalidStatusUpdate> {
+        let updated = self.update_status(|status| match status {
+            ActorStatus::Stopping | ActorStatus::Exited(_) | ActorStatus::Initializing => (
+                None,
+                Err(InvalidStatusUpdate::new(status, ActorStatus::Suspended)),
+            ),
+            ActorStatus::Suspended => (None, Ok(false)),
+            ActorStatus::Running => (Some(ActorStatus::Suspended), Ok(true)),
+        })?;
+
+        if updated {
+            tracing::debug!("Process suspended");
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
-    pub(super) fn register_suspend(&self) {
-        tracing::debug!("Process suspended");
-        self.set_status(ActorStatus::Suspended);
+    pub(super) fn register_resumed(&self) -> Result<bool, InvalidStatusUpdate> {
+        let updated = self.update_status(|status| match status {
+            ActorStatus::Stopping | ActorStatus::Exited(_) | ActorStatus::Initializing => (
+                None,
+                Err(InvalidStatusUpdate::new(status, ActorStatus::Running)),
+            ),
+            ActorStatus::Running => (None, Ok(false)),
+            ActorStatus::Suspended => (Some(ActorStatus::Running), Ok(true)),
+        })?;
+
+        if updated {
+            tracing::debug!("Process resumed");
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
-    pub(super) fn register_resume(&self) {
-        tracing::debug!("Process resumed");
-        self.set_status(ActorStatus::Running);
-    }
+    pub(super) fn register_stopping(&self) -> Result<bool, InvalidStatusUpdate> {
+        let updated = self.update_status(|status| match status {
+            ActorStatus::Exited(_) => (
+                None,
+                Err(InvalidStatusUpdate::new(status, ActorStatus::Stopping)),
+            ),
+            ActorStatus::Stopping => (None, Ok(false)),
+            ActorStatus::Initializing | ActorStatus::Running | ActorStatus::Suspended => {
+                (Some(ActorStatus::Stopping), Ok(true))
+            }
+        })?;
 
-    pub(super) fn register_shutdown(&self) {
-        tracing::debug!("Process shutting down");
-        self.set_status(ActorStatus::ShuttingDown);
+        match updated {
+            true => {
+                tracing::debug!("Process stopping");
+                Ok(true)
+            }
+            false => Ok(false),
+        }
     }
 
     pub(super) fn raw_queue(&self) -> Option<&ConcurrentQueue<C>>
@@ -210,7 +308,7 @@ impl<C: Context> Channel<C> {
     fn _signal(&self, signal: SignalInterface) -> bool {
         if matches!(
             self.status(),
-            ActorStatus::Exited(_) | ActorStatus::ShuttingDown
+            ActorStatus::Exited(_) | ActorStatus::Stopping
         ) {
             return false;
         }
@@ -334,15 +432,15 @@ impl<I: Interface> Channel<I> {
     fn handle_signal(&self, signal: SignalInterface) -> Option<Signal> {
         match signal {
             SignalInterface::Shutdown(_) => {
-                self.register_shutdown();
+                self.register_stopping().ok();
                 Some(Signal::Shutdown)
             }
             SignalInterface::Suspend(_) => {
-                if self.status() == ActorStatus::ShuttingDown {
+                if self.status() == ActorStatus::Stopping {
                     tracing::warn!("Actor is exiting, cannot suspend");
                     None
                 } else {
-                    self.register_suspend();
+                    self.register_suspended().ok();
                     Some(Signal::Suspend)
                 }
             }
@@ -351,7 +449,7 @@ impl<I: Interface> Channel<I> {
                     tracing::warn!("Actor is not suspended, cannot resume");
                     None
                 } else {
-                    self.register_resume();
+                    self.register_resumed().ok();
                     Some(Signal::Resume)
                 }
             }
@@ -365,7 +463,7 @@ impl<I: Interface> Channel<I> {
     pub(crate) async fn next(&self) -> Option<Event<I>> {
         match self.status() {
             ActorStatus::Suspended => self.recv_signal().await.map(Event::Signal),
-            ActorStatus::Exited(_) | ActorStatus::ShuttingDown if self.msgs_is_empty() => None,
+            ActorStatus::Exited(_) | ActorStatus::Stopping if self.msgs_is_empty() => None,
             _ => {
                 select! {
                     biased;
@@ -381,7 +479,7 @@ impl<I: Interface> Channel<I> {
     pub(crate) fn try_next(&self) -> Option<Event<I>> {
         match self.status() {
             ActorStatus::Suspended => self.pop_signal().map(Event::Signal),
-            ActorStatus::Exited(_) | ActorStatus::ShuttingDown if self.msgs_is_empty() => None,
+            ActorStatus::Exited(_) | ActorStatus::Stopping if self.msgs_is_empty() => None,
             _ => {
                 if let Some(signal) = self.pop_signal() {
                     Some(Event::Signal(signal))
@@ -556,7 +654,7 @@ impl ChannelData<dyn Queue> {
     pub fn signal(&self, signal: SignalInterface) -> bool {
         if matches!(
             self.status(),
-            ActorStatus::Exited(_) | ActorStatus::ShuttingDown
+            ActorStatus::Exited(_) | ActorStatus::Stopping
         ) {
             return false;
         }
@@ -627,5 +725,17 @@ impl ChannelData<dyn Queue> {
     pub fn exits(&self) -> Vec<(Instant, Result<(), ExitError>)> {
         let exits = self.exits.read().unwrap();
         exits.clone()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InvalidStatusUpdate {
+    pub from: ActorStatus,
+    pub to: ActorStatus,
+}
+
+impl InvalidStatusUpdate {
+    pub fn new(from: ActorStatus, to: ActorStatus) -> Self {
+        Self { from, to }
     }
 }

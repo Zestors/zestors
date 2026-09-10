@@ -1,10 +1,10 @@
 use rootcause::Report;
 use std::{net::SocketAddr, pin::pin, sync::Arc};
 use tokio::net::TcpListener;
-use zestors_core::{
-    prelude::*,
-    supervision::{GetChildren, GetHealth, Health},
-};
+use zestors_actor::{Actor, Blueprint};
+use zestors_codegen::Interface;
+use zestors_runtime::prelude::*;
+use zestors_supervision::{GetChildren, GetHealth, Health};
 
 mod router;
 
@@ -33,7 +33,7 @@ pub struct ApiServer {
 }
 
 #[derive(Interface)]
-#[interface(path = "zestors_core")]
+#[interface(path = "zestors_runtime")]
 pub enum ApiServerInterface {
     Children(Envelope<GetChildren>),
     Health(Envelope<GetHealth>),
@@ -109,3 +109,5 @@ impl ApiServer {
         Ok(())
     }
 }
+
+pub mod prelude {}

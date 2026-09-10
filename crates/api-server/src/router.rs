@@ -8,13 +8,12 @@ use futures::{StreamExt, stream};
 use indexmap::IndexMap;
 use rootcause::report;
 use std::time::Duration;
-use zestors_core::{
+use zestors_runtime::{
     channel::{ActorStatus, ChannelSnapshot, Context},
-    node::Node,
     prelude::*,
     registry::Registry,
-    supervision::{ChildConfig, ChildDescription, GetChildren, GetHealth, Health},
 };
+use zestors_supervision::{ChildConfig, ChildDescription, GetChildren, GetHealth, Health, Node};
 
 impl ApiServer {
     pub(super) fn create_router(&self) -> Router {
@@ -61,6 +60,7 @@ async fn get_tree(pid: Option<Pid>, include_debug: Option<bool>) -> ApiResult {
 
 /// Returns all processes in the tree, with their actor-status and child-configuration
 #[route(GET "/processes" with ApiServer)]
+#[axum::debug_handler]
 async fn get_processes() -> ApiResult<Json<IndexMap<Pid, (ChildConfig, ActorStatus, Vec<Pid>)>>> {
     let root_desc = Node::root_supervisor()
         .ok_or_else(|| report!("No root supervisor"))?

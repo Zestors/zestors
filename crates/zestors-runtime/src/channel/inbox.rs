@@ -11,7 +11,14 @@ use crate::_prelude::*;
 #[derive(Debug)]
 pub struct Inbox<T: Interface> {
     channel: StrongAddress<T>,
-    initializing: bool,
+    init: InitState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InitState {
+    Auto,
+    Manual,
+    Completed,
 }
 
 impl Inbox<Infallible> {
@@ -28,7 +35,7 @@ impl<T: Interface> Inbox<T> {
 
         let inbox = Self {
             channel,
-            initializing: true,
+            init: InitState::Auto,
         };
 
         Ok(inbox)
@@ -46,15 +53,47 @@ impl<T: Interface> Inbox<T> {
     /// phase. For receiving signals without setting the status to running, see [`Inbox::next_signal`].
     pub async fn next(&mut self) -> Option<Event<T>> {
         // If this is the first call to next(), set the status to Running
-        if self.initializing {
-            debug_assert!(self.status().is_initializing());
-            self.initializing = false;
-            self.handle().register_initialized();
-        }
+        self.register_initialized();
 
         self.handle().next().await
     }
 
+    fn init_completed(&self) -> bool {
+        self.init == InitState::Completed
+    }
+
+    pub fn set_manual_init(&mut self) -> bool {
+        if self.init_completed() {
+            return false;
+        }
+
+        self.init = InitState::Manual;
+        true
+    }
+
+    pub fn set_auto_init(&mut self) -> bool {
+        if self.init_completed() {
+            return false;
+        }
+
+        self.init = InitState::Auto;
+        true
+    }
+
+    pub fn register_initialized(&mut self) -> bool {
+        if self.init_completed() {
+            return false;
+        }
+
+        self.init = InitState::Completed;
+        self.handle().register_initialized().unwrap_or(false)
+    }
+
+    pub fn register_stopping(&mut self) -> bool {
+        self.handle().register_stopping().unwrap_or(false)
+    }
+
+    // TODO: Remove this method in a future version
     pub async fn next_with_init(&mut self, init: bool) -> Option<Event<T>> {
         match init {
             true => self.next().await,
@@ -63,7 +102,7 @@ impl<T: Interface> Inbox<T> {
     }
 
     pub fn try_next(&mut self) -> Option<Event<T>> {
-        self.set_initialized();
+        self.register_initialized();
         self.handle().try_next()
     }
 
@@ -73,18 +112,7 @@ impl<T: Interface> Inbox<T> {
     }
 
     pub fn is_shutting_down(&self) -> bool {
-        self.status() == ActorStatus::ShuttingDown
-    }
-
-    pub fn set_initialized(&mut self) -> bool {
-        if self.initializing {
-            debug_assert!(self.status().is_initializing());
-            self.initializing = false;
-            self.handle().register_initialized();
-            true
-        } else {
-            false
-        }
+        self.status() == ActorStatus::Stopping
     }
 
     async fn wait_resume(&mut self) {

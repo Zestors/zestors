@@ -207,3 +207,12 @@ impl<E, C: Context> Future for ExitingChild<E, C> {
         Poll::Pending
     }
 }
+
+impl<E, C: Context> Debug for ExitingChild<E, C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExitingChild")
+            .field("child", &self.child)
+            .field("abort_after", &self.abort_after)
+            .finish()
+    }
+}

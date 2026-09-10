@@ -1,11 +1,16 @@
 use crate::_prelude::*;
+use serde::{Deserialize, Serialize};
+use zestors_runtime::channel::{
+    ActorOps, Channel,
+    errors::{DuplicatePidError, StartOnError},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChildConfig {
     pub restart_mode: RestartMode,
     pub abort_timeout: Duration,
     pub init_timeout: Duration,
-    pub instantiation_timeout: Duration,
+    pub start_timeout: Duration,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -20,7 +25,7 @@ impl ChildConfig {
             restart_mode: blueprint.default_restart_mode(),
             abort_timeout: blueprint.default_abort_timeout(),
             init_timeout: blueprint.default_init_timeout(),
-            instantiation_timeout: blueprint.default_instantiation_timeout(),
+            start_timeout: blueprint.default_instantiation_timeout(),
         }
     }
 }
@@ -133,37 +138,24 @@ impl<T: Blueprint> From<ChildSpec<T>> for ChildSpec {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Interface, HandlerInterface)]
-    #[interface(path = "crate")]
-    pub enum MyInterface {
-        A(Envelope<u32>),
+pub trait BlueprintSupervisionExt: Blueprint + Sized {
+    fn into_spawn_fn(self) -> DynStarter
+    where
+        Self: Send + Sync + 'static,
+    {
+        DynStarter::new(self)
     }
 
-    #[derive(Debug, Clone)]
-    struct MyActor;
-
-    impl Handler for MyActor {
-        type Interface = MyInterface;
+    fn generate_config(&self) -> ChildConfig {
+        ChildConfig::new_for_blueprint(self)
     }
 
-    impl Handle<u32> for MyActor {
-        async fn handle(
-            &mut self,
-            _state: HandlerState<'_, Self>,
-            msg: Envelope<u32>,
-        ) -> Result<(), Report> {
-            println!("Received message: {:?}", msg);
-            Ok(())
-        }
+    fn with_pid(self, pid: impl Into<Pid>) -> Result<ChildSpec<Self>, DuplicatePidError> {
+        ChildSpec::create(pid, self)
     }
 
-    #[test]
-    fn test_childspec_doesnt_panic_on_address_retrieval() {
-        let spec = ChildSpec::create("test", MyActor).unwrap();
-        let _ = spec.address().clone();
+    fn with_rand_pid(self) -> ChildSpec<Self> {
+        ChildSpec::create_rand_pid(self)
     }
 }
+impl<T: Blueprint> BlueprintSupervisionExt for T {}

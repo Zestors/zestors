@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     _prelude::*,
-    supervision::supervisor::{Supervisee, SuperviseeEvent},
+    supervision_depr::supervisor::{Supervisee, SuperviseeEvent},
 };
 use futures::{FutureExt as _, Stream, future::join_all, ready, stream::StreamExt as _};
 use indexmap::{IndexMap, IndexSet};
@@ -350,7 +350,7 @@ impl Supervisor {
     ) {
         let affected_pids = self.affected_pids(pid);
 
-        self.shutdown(&affected_pids, inbox).await;
+        _ = self.shutdown(&affected_pids, inbox).await;
 
         let supervisees = self
             .supervisees

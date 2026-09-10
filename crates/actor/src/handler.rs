@@ -1,7 +1,12 @@
-use crate::{_prelude::*, handler::FullHandlerState};
+use crate::{Actor, FullHandlerState, HandledBy, HandlerState};
 use futures::future::ready;
-use rootcause::report;
-use std::{convert::Infallible, fmt::Debug};
+use rootcause::{Report, report};
+use std::{
+    convert::Infallible,
+    fmt::Debug,
+    ops::{Deref, DerefMut},
+};
+use zestors_runtime::{channel::errors::DuplicatePidError, prelude::*};
 
 /// A declarative and simple way to implement an [`Actor`], by providing a set of
 /// lifecycle hooks and message handlers. Any type that implements [`Handler`]
@@ -142,15 +147,6 @@ pub trait Handler: Debug + Sized + Send + 'static {
     }
 }
 
-impl<H: Handler> Actor for H {
-    type Interface = H::Interface;
-    type Exit = ();
-
-    async fn run(mut self, state: Inbox<Self::Interface>) -> Result<Self::Exit, Report> {
-        FullHandlerState::new(state).run(&mut self).await
-    }
-}
-
 /// Defines how a [`Handler`] handles a specific [`Message`].
 pub trait Handle<M: Message>: Handler {
     /// Handles a message of type `M`.
@@ -225,5 +221,14 @@ impl HandlerExit {
 impl From<HandlerExit> for Result<(), Report> {
     fn from(reason: HandlerExit) -> Self {
         reason.into_result()
+    }
+}
+
+impl<H: Handler> Actor for H {
+    type Interface = H::Interface;
+    type Exit = ();
+
+    async fn run(mut self, state: Inbox<Self::Interface>) -> Result<Self::Exit, Report> {
+        FullHandlerState::new(state).run(&mut self).await
     }
 }

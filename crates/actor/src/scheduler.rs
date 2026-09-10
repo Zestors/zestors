@@ -1,5 +1,9 @@
-use crate::_prelude::*;
 use futures::{StreamExt as _, future::BoxFuture, stream::FuturesUnordered};
+use rootcause::Report;
+use zestors_codegen::Message;
+use zestors_runtime::{messaging::Mode, prelude::*};
+
+use crate::{Handle, Handler, HandlerState};
 
 /// A basic scheduler that allows scheduling futures to be run concurrently with the actor's message
 /// processing. Add the scheduler to the actor's state, and call [`next`](Self::next) inside the
@@ -67,7 +71,7 @@ impl<H: Handler> BasicScheduler<H> {
 
 /// A type-erased [`Message`], known to be handled by the [`Handler`] `H`.
 #[derive(Message)]
-#[msg(path = "crate")]
+#[msg(path = "zestors_runtime")]
 pub struct HandlerMessage<H: Handler> {
     msg: Box<dyn DynErasedMessage<H>>,
 }
@@ -104,7 +108,7 @@ impl<H: Handler> Handle<HandlerMessage<H>> for H {
     }
 }
 
-impl<H: Handler> Debug for HandlerMessage<H> {
+impl<H: Handler> std::fmt::Debug for HandlerMessage<H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HandlerMessage")
             .field("msg", &"<dyn DynMessageHandledBy>")
@@ -142,7 +146,7 @@ impl<M: Message, H: Handle<M>> DynErasedMessage<H> for M {
 ///
 /// This type is also useful for scheduling callbacks in the [`next_event`](Handler::next_event) method of a [`Handler`].
 #[derive(Message)]
-#[msg(path = "crate")]
+#[msg(path = "zestors_runtime")]
 pub struct HandlerCallback<H: Handler> {
     f: Box<dyn FnOnce(&mut H, HandlerState<'_, H>) -> Result<(), Report> + Send + 'static>,
 }
@@ -165,7 +169,7 @@ impl<H: Handler> Handle<HandlerCallback<H>> for H {
     }
 }
 
-impl<H: Handler> Debug for HandlerCallback<H> {
+impl<H: Handler> std::fmt::Debug for HandlerCallback<H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CallbackMessage")
             .field("f", &"<dyn FnOnce>")

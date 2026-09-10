@@ -7,17 +7,20 @@ members = [
   "crates/inspector",
   "crates/zestors-runtime",
   "crates/api-server",
-  "crates/zestors-core",
+  # "crates/zestors-core",
+  "crates/supervision",
+  "crates/actor",
 ]
 
 [workspace.dependencies]
-zestors-codegen = { path = "crates/codegen", version = "0.0.2" }
-zestors = { path = "crates/zestors", version = "0.1.0" }
+zestors-codegen = { path = "crates/codegen" }
+zestors = { path = "crates/zestors" }
 type-sets = { path = "crates/type-sets" }
 zestors-runtime = { path = "crates/zestors-runtime" }
 zestors-inspector = { path = "crates/inspector" }
 zestors-api-server = { path = "crates/api-server" }
-zestors-core = { path = "crates/zestors-core" }
+zestors-supervision = { path = "crates/supervision" }
+zestors-actor = { path = "crates/actor" }
 
 
 tokio = { version = "1", features = ["full"] }
@@ -36,7 +39,7 @@ papaya = { version = "0.2", features = ["serde"] }
 arc-swap = { version = "1", features = ["serde"] }
 rand = { version = "0.10" }
 bs58 = { version = "0.5" }
-axum = "0.8"
+axum = { version = "0.8", features = ["macros"]}
 serde_json = "1"
 axum-autoroute = { version = "0.2", features = [] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
@@ -47,8 +50,8 @@ jiff = { version = "0.2", features = ["serde"] }
 anyhow = "1.0"
 serde_with = "3"
 reqwest = { version = "0.13" }
-axum-typed-routing = { version = "0.4" }
-
+axum-typed-routing = { version = "0.4.6" }
+streamunordered = "0.5"
 
 iced = { version = "0.14" }
 iced_test = { version = "0.14", features = [] }

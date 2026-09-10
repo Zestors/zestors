@@ -185,7 +185,7 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
 
                 handle_matches.push(quote! {
                     Self::#variant_name(envelope) => {
-                        <T as #base_path::handler::Handle<#inner_type>>::handle(actor, state, envelope).await
+                        <T as #base_path::actor::Handle<#inner_type>>::handle(actor, state, envelope).await
                     }
                 });
                 inner_types.push(inner_type);
@@ -195,11 +195,11 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
     }
 
     let expanded = quote! {
-        impl<T> #base_path::handler::HandlerInterface<T> for #enum_name
+        impl<T> #base_path::actor::HandlerInterface<T> for #enum_name
         where
-            T: #base_path::handler::Handler + #( #base_path::handler::Handle<#inner_types> + )*
+            T: #base_path::actor::Handler + #( #base_path::actor::Handle<#inner_types> + )*
         {
-            async fn handle_with(self, state: #base_path::handler::HandlerState<'_, T>, actor: &mut T) -> Result<(), Report> {
+            async fn handle_with(self, state: #base_path::actor::HandlerState<'_, T>, actor: &mut T) -> Result<(), Report> {
                 match self {
                     #(#handle_matches)*
                 }

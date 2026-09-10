@@ -84,7 +84,10 @@ impl<T: Context> StrongAddress<T> {
             let inbox = Inbox::try_new(self.clone())?;
             let address = inbox.address().clone();
             let mut bomb = AbortBomb::new(address);
-            bomb.address.handle().register_spawn();
+            bomb.address
+                .handle()
+                .register_spawned()
+                .expect("Transition must succeed, because inbox was just created");
             let spawn_future = AssertUnwindSafe(spawn_fn(inbox)).catch_unwind();
 
             async move {
@@ -93,11 +96,11 @@ impl<T: Context> StrongAddress<T> {
                 let mapped_result = match spawn_result {
                     Ok(result) => {
                         match &result {
-                            Ok(_) => bomb.address.handle().register_exit(Ok(())),
+                            Ok(_) => bomb.address.handle().register_exited(Ok(())),
                             Err(_) => bomb
                                 .address
                                 .handle()
-                                .register_exit(Err(ExitError::UnhandledError)),
+                                .register_exited(Err(ExitError::UnhandledError)),
                         };
 
                         result
@@ -106,7 +109,7 @@ impl<T: Context> StrongAddress<T> {
                     Err(boxed) => {
                         bomb.address
                             .handle()
-                            .register_exit(Err(ExitError::Panicked));
+                            .register_exited(Err(ExitError::Panicked));
                         std::panic::resume_unwind(boxed);
                     }
                 };
@@ -146,7 +149,9 @@ impl<T: Context> Drop for AbortBomb<T> {
             tracing::debug!("AbortBomb triggered");
 
             if !self.address.status().is_dead() {
-                self.address.handle().register_exit(Err(ExitError::Aborted));
+                self.address
+                    .handle()
+                    .register_exited(Err(ExitError::Aborted));
             }
         }
     }

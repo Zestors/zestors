@@ -131,7 +131,7 @@ impl<S: Start> Supervisee<S> {
         S: Clone + Send + Sync + 'static,
     {
         let spec = self.spec.clone();
-        let duration = spec.cfg().instantiation_timeout;
+        let duration = spec.cfg().start_timeout;
 
         Box::pin(async move {
             tokio::time::timeout(duration, spec.start())

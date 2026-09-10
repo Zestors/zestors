@@ -1,19 +1,17 @@
 use futures::future::pending;
 use rootcause::Report;
-use std::{sync::LazyLock, time::Duration};
+use std::time::Duration;
 use zestors::{
-    HandlerInterface,
+    actor::{
+        BasicScheduler, Handle, Handler, HandlerExit, HandlerState, actor_fn, blueprint_fn, task_fn,
+    },
     api_server::ApiServer,
     channel::errors::Cancelled,
-    handler::{BasicScheduler, Handle, Handler, HandlerExit, HandlerState},
-    node::Node,
     prelude::*,
     signals::RestartMode,
-    supervision::{
-        BlueprintExt, InMemorySupervisorSource, Supervisor, SupervisorBlueprint, actor_fn,
-        blueprint_fn, task_fn,
-    },
+    supervision::{InMemorySupervisorSource, Supervisor, SupervisorBlueprint},
 };
+use zestors_supervision::{BlueprintSupervisionExt as _, Node};
 
 #[derive(Interface, HandlerInterface)]
 enum MyInterface {

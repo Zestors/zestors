@@ -1,14 +1,14 @@
 use rootcause::Report;
 use std::time::Duration;
 use zestors::{
-    HandlerInterface,
-    handler::{
+    actor::{
         BasicScheduler, Handle, HandledBy, Handler, HandlerCallback, HandlerMessage, HandlerState,
     },
     prelude::*,
-    spawn, spawn_with,
-    supervision::{ActorExt as _, GetChildren, GetHealth, Health},
+    spawn,
+    supervision::{GetChildren, GetHealth, Health},
 };
+use zestors_actor::ActorExt;
 
 #[tokio::main]
 async fn main() {
