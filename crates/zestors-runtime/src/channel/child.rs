@@ -10,7 +10,7 @@ use std::{fmt::Debug, pin::Pin, task::Poll, time::Duration};
 ///   exit of the child process and retrieve its result.
 /// - The [`StrongAddress`] of the child process, which can be used to interact with the
 /// child process.
-pub struct Child<E = (), C: Context = Set!()> {
+pub struct Child<E = (), C: Context = Set<()>> {
     join: Option<tokio::task::JoinHandle<Result<E, Report>>>,
     address: StrongAddress<C>,
     attached: bool,
@@ -160,7 +160,7 @@ impl<T, R: Context> Debug for Child<T, R> {
     }
 }
 
-pub struct ExitingChild<E = (), C: Context = Set!()> {
+pub struct ExitingChild<E = (), C: Context = Set<()>> {
     child: Child<E, C>,
     abort_after: Pin<Box<tokio::time::Sleep>>,
 }

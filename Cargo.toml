@@ -2,7 +2,6 @@
 resolver = "3"
 members = [
   "crates/codegen",
-  "crates/type-sets",
   "crates/zestors",
   "crates/inspector",
   "crates/zestors-runtime",
@@ -15,7 +14,6 @@ members = [
 [workspace.dependencies]
 zestors-codegen = { path = "crates/codegen" }
 zestors = { path = "crates/zestors" }
-type-sets = { path = "crates/type-sets" }
 zestors-runtime = { path = "crates/zestors-runtime" }
 zestors-inspector = { path = "crates/inspector" }
 zestors-api-server = { path = "crates/api-server" }
@@ -23,6 +21,7 @@ zestors-supervision = { path = "crates/supervision" }
 zestors-actor = { path = "crates/actor" }
 
 
+type-sets = { version = "0.2.1" }
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 futures = "0.3"

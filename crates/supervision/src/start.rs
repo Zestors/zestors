@@ -4,6 +4,7 @@ use futures::future::BoxFuture;
 use zestors_actor::{Actor, ActorExt as _, Blueprint};
 use zestors_runtime::{
     channel::{AsDyn as _, Context, IntoDyn, errors::StartOnError},
+    messaging::Set,
     prelude::*,
 };
 
@@ -67,7 +68,7 @@ impl<R: Blueprint> _Spawnable for R {
 }
 
 impl Start for DynStarter {
-    type Ctx = Set!();
+    type Ctx = Set<()>;
     type Exit = ();
 
     async fn start_on(

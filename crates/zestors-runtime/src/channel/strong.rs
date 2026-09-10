@@ -2,7 +2,7 @@ use super::*;
 use crate::registry::Registry;
 use jiff::Zoned;
 use std::{fmt::Debug, hash::Hash};
-use type_sets::Set;
+use type_sets::AsTypeSet;
 
 /// A strong version of [`Address`], which allows the [`Channel`] to spawn
 /// a new task after the previous one has exited. Once all strong references to a
@@ -12,7 +12,7 @@ use type_sets::Set;
 /// [`Child`] and [`Inbox`] both contain a [`StrongAddress`]. Addresses can
 /// be upgraded to a `StrongAddress`.
 #[repr(transparent)]
-pub struct StrongAddress<C: Context = Set!()> {
+pub struct StrongAddress<C: Context = Set<()>> {
     channel: Channel<C>,
 }
 

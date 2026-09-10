@@ -2,7 +2,7 @@ use crate::_prelude::*;
 use std::{fmt::Debug, hash::Hash};
 
 #[repr(transparent)]
-pub struct Address<C: Context = Set!()> {
+pub struct Address<C: Context = Set<()>> {
     pub(super) channel: Channel<C>,
 }
 
@@ -74,12 +74,13 @@ mod tests {
     #[interface(path = "crate")]
     pub enum MyInterface {
         A(Envelope<u32>),
+        AB(Envelope<u64>),
     }
 
     #[tokio::test]
     async fn test_address_downcast_ref() {
         let child = crate::spawn(|_: Inbox<MyInterface>| async move { Ok(()) });
-        let address = child.address().clone().into_dyn::<Set![]>();
+        let address = child.address().clone().into_dyn::<Set<()>>();
 
         address
             .downcast::<MyInterface>()

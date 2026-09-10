@@ -1,6 +1,7 @@
+use type_sets::Members;
+
 use super::*;
 use std::any::{Any, TypeId};
-use type_sets::TypeSet;
 
 pub(crate) trait Queue: Any + Send + Sync + 'static {
     fn len(&self) -> usize;
@@ -33,7 +34,7 @@ impl<I: Interface> Queue for ConcurrentQueue<I> {
     }
 
     fn members(&self) -> &'static [TypeId] {
-        <I::Set as TypeSet>::members()
+        <I::Set as Members>::members()
     }
 }
 

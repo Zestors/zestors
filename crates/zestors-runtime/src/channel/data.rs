@@ -13,7 +13,7 @@ use std::{
     },
 };
 use tokio::{select, time::Instant};
-use type_sets::{Contains, Set, TypeSet};
+use type_sets::{AsTypeSet, Contains};
 
 /// The `ChannelData` contained in either:
 /// - [`Address`]: A weak reference to the channel data.
@@ -28,7 +28,7 @@ use type_sets::{Contains, Set, TypeSet};
 /// This means, that in order restart an actor, the [`Channel`] handle must be kept
 /// alive.
 #[repr(transparent)]
-pub struct Channel<C: Context = Set!()> {
+pub struct Channel<C: Context = Set<()>> {
     inner: Arc<ChannelData<dyn Queue>>,
     _ctx: PhantomData<fn() -> C>,
 }
@@ -532,7 +532,7 @@ impl<C: Context> Channel<C> {
 impl<M, T> _Sends<M> for Channel<Set<T>>
 where
     M: Message,
-    T: TypeSet + Contains<M> + 'static,
+    T: AsTypeSet + Contains<M> + 'static,
 {
     async fn _send(&self, msg: M) -> Result<MessageReceipt<M>, SendError<M>> {
         match self.send_dyn(msg).await {

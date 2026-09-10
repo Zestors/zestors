@@ -1,6 +1,7 @@
+use type_sets::{AsTypeSet, Members};
+
 use crate::_prelude::*;
 use std::sync::OnceLock;
-use type_sets::TypeSet;
 
 /// A thread-safe global registry mapping process identifiers ([`Pid`]) to their weak handles ([`Address`]).
 ///
@@ -49,7 +50,7 @@ impl Registry {
         let map = self.processes.pin();
 
         if map
-            .try_insert(address.pid().clone(), address.clone().into_dyn())
+            .try_insert(address.pid().clone(), address.clone().into_dyn::<Set<()>>())
             .is_err()
         {
             Err(RegistryAddError { address })
@@ -91,7 +92,7 @@ impl Registry {
     /// Returns an error if
     /// - the process is not found
     /// - the set of types does not match the registered address's type set
-    pub fn get_dyn<C: Context + TypeSet>(
+    pub fn get_dyn<C: Context + Members>(
         &self,
         pid: &Pid,
     ) -> Result<Address<C>, TypedRegistryError> {
@@ -111,7 +112,7 @@ impl Registry {
 /// Error returned when registering a [`Pid`] that already exists in the [`Registry`].
 #[derive(thiserror::Error)]
 #[error("Failed to add entry for pid {}", .address.pid())]
-pub struct RegistryAddError<T: Context = Set!()> {
+pub struct RegistryAddError<T: Context = Set<()>> {
     address: Address<T>,
 }
 

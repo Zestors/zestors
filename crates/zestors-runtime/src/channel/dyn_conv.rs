@@ -1,5 +1,5 @@
 use super::*;
-use type_sets::{SubsetOf, TypeSet};
+use type_sets::{Members, Subset};
 
 pub trait IntoDyn: ActorOps + Sized {
     type Ref<T: Context>;
@@ -10,14 +10,14 @@ pub trait IntoDyn: ActorOps + Sized {
 
     fn into_dyn<S>(self) -> Self::Ref<S>
     where
-        S: Context + SubsetOf<<Self::Ctx as Context>::Set>,
+        S: Context + Subset<<Self::Ctx as Context>::Set>,
     {
         self.into_dyn_unchecked()
     }
 
     fn into_dyn_checked<S>(self) -> Result<Self::Ref<S>, Self>
     where
-        S: TypeSet + Context,
+        S: Context + Members,
     {
         if self.is_superset_of(S::members()) {
             Ok(self.into_dyn_unchecked())
@@ -45,14 +45,14 @@ pub trait AsDyn: IntoDyn {
 
     fn as_dyn<S>(&self) -> &Self::Ref<S>
     where
-        S: Context + SubsetOf<<Self::Ctx as Context>::Set>,
+        S: Context + Subset<<Self::Ctx as Context>::Set>,
     {
         self.as_dyn_unchecked()
     }
 
     fn as_dyn_checked<S>(&self) -> Option<&Self::Ref<S>>
     where
-        S: TypeSet + Context,
+        S: Context + Members,
     {
         if self.is_superset_of(S::members()) {
             Some(self.as_dyn_unchecked())

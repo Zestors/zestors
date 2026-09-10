@@ -20,10 +20,10 @@ impl Node {
         ROOT_SUPERVISOR_PID.get()
     }
 
-    pub fn new(supervisor_spec: ChildSpec<SupervisorBlueprint>) -> Self {
+    pub fn new(spec: ChildSpec<SupervisorBlueprint>) -> Self {
         Self {
             restart_intensity: RestartIntensity::new(3, Duration::from_secs(120)),
-            supervisor_spec,
+            supervisor_spec: spec,
         }
     }
 

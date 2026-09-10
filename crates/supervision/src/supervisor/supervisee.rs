@@ -8,12 +8,12 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::time::{error::Elapsed, timeout};
-use type_sets::Set;
 use zestors_runtime::{
     channel::{
         ActorOps, ActorStatus, Channel, Child, ExitingChild, Pid,
         errors::{JoinError, StartOnError},
     },
+    messaging::Set,
     signals::RestartMode,
 };
 
@@ -144,7 +144,7 @@ impl Stream for Supervisee {
 }
 
 impl ActorOps for Supervisee {
-    type Ctx = Set!();
+    type Ctx = Set<()>;
 
     fn handle(&self) -> &Channel<Self::Ctx> {
         self.spec.handle()

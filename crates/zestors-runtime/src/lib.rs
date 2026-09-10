@@ -11,7 +11,6 @@ pub(crate) mod _prelude {
     pub(crate) use rootcause::Report;
     pub(crate) use serde::{Deserialize, Serialize};
     pub(crate) use std::{future::Future, time::Duration};
-    pub(crate) use type_sets::{Set, TypeSet};
     pub(crate) use zestors_codegen::{Interface, Message};
 }
 
@@ -20,7 +19,7 @@ pub mod prelude {
         channel::{
             ActorOpsExt as _, Address, Child, Inbox, IntoDyn as _, Pid, StrongAddress, spawn_with,
         },
-        messaging::{Envelope, Interface, Message, Sends as _, type_sets::Set},
+        messaging::{Envelope, Interface, Message, Sends as _},
         signals::{Event, Signal},
     };
 }

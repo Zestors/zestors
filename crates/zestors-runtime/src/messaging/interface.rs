@@ -1,6 +1,7 @@
+use type_sets::Members;
+
 use super::*;
 use std::convert::Infallible;
-use type_sets::{Set, TypeSet};
 
 /// An interface defines the set of messages that can be sent to a given actor.
 /// This is usually derived on an enum using the `#[derive(Interface)]` macro.
@@ -10,7 +11,7 @@ pub trait Interface:
     Message<Mode = FireAndForget, Outcome = ()> + TryInto<Envelope<Self>> + From<Envelope<Self>>
 {
     /// The [set](TypeSet) of messages that this interface can handle.
-    type Set: TypeSet;
+    type Set: AsTypeSet + Members;
 
     /// Attempt to convert a boxed envelope into this interface by downcasting.
     fn try_from_dyn_envelope(envelope: DynEnvelope) -> Result<Self, DynEnvelope>;
@@ -20,7 +21,7 @@ pub trait Interface:
 }
 
 impl Interface for () {
-    type Set = Set!();
+    type Set = Set<()>;
 
     fn try_from_dyn_envelope(envelope: DynEnvelope) -> Result<Self, DynEnvelope> {
         envelope.downcast::<()>().map(|env| env.msg)
@@ -46,7 +47,7 @@ impl TryInto<Envelope<()>> for () {
 }
 
 impl Interface for Infallible {
-    type Set = Set!();
+    type Set = Set<()>;
 
     fn try_from_dyn_envelope(envelope: DynEnvelope) -> Result<Self, DynEnvelope> {
         Err(envelope)
