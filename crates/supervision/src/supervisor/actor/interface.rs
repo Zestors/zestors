@@ -1,19 +1,19 @@
 use zestors_codegen::{Interface, Message};
-use zestors_messaging::Envelope;
-use zestors_runtime::channel::errors::DuplicatePidError;
+use zestors_interface::Envelope;
+use zestors_runtime::errors::DuplicatePidError;
 
 use super::*;
 
 #[derive(Message, Debug)]
-#[msg(path = "zestors_messaging", reply = "Result<(), DuplicatePidError>")]
+#[msg(path = "zestors_interface", reply = "Result<(), DuplicatePidError>")]
 pub struct RegisterChild(pub ChildSpec);
 
 #[derive(Message, Debug)]
-#[msg(path = "zestors_messaging", reply = "Option<ChildSpec>")]
+#[msg(path = "zestors_interface", reply = "Option<ChildSpec>")]
 pub struct DeregisterChild(pub Pid);
 
 #[derive(Interface, Debug)]
-#[interface(path = "zestors_messaging")]
+#[interface(path = "zestors_interface")]
 pub enum SupervisorInterface {
     Children(Envelope<GetChildren>),
     Health(Envelope<GetHealth>),

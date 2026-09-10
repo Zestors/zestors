@@ -2,7 +2,7 @@ use super::debug_card::render_health_card;
 use super::status_badge::render_actor_status_badge;
 use crate::{app::ProcessTree, theme::Theme, utils::format_duration};
 use egui::{CornerRadius, Frame, Margin, RichText, Stroke, Ui, collapsing_header::CollapsingState};
-use zestors::channel::Pid;
+use zestors::runtime::Pid;
 
 pub struct SupervisionNodeWidget<'a, F>
 where

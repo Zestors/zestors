@@ -1,5 +1,5 @@
 use std::{fmt::Debug, future::Future, time::Duration};
-use zestors_runtime::{channel::errors::DuplicatePidError, prelude::*, signals::RestartMode};
+use zestors_runtime::{RestartMode, errors::DuplicatePidError, prelude::*};
 
 use crate::{Actor, ActorExt as _};
 

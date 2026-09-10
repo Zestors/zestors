@@ -2,7 +2,7 @@ use super::*;
 use rootcause::compat::ReportAsError;
 use std::fmt::Display;
 use thiserror::Error;
-use zestors_messaging::oneshot::RxError;
+use zestors_interface::oneshot::RxError;
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, Hash)]
 pub enum TrySendError<T> {

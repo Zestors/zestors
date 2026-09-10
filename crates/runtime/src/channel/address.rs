@@ -71,7 +71,7 @@ mod tests {
     use super::*;
 
     #[derive(Interface)]
-    #[interface(path = "zestors_messaging")]
+    #[interface(path = "zestors_interface")]
     pub enum MyInterface {
         A(Envelope<u32>),
         AB(Envelope<u64>),

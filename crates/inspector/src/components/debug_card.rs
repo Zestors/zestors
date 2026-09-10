@@ -1,6 +1,6 @@
 use crate::theme::Theme;
 use egui::{CornerRadius, Frame, Margin, RichText, Stroke, Ui};
-use zestors::{channel::Pid, supervision::Health};
+use zestors::{runtime::Pid, supervision::Health};
 
 pub fn render_health_card(ui: &mut Ui, pid: &Pid, health: &Health) {
     Frame::canvas(ui.style())

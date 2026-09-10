@@ -9,9 +9,9 @@ use indexmap::IndexMap;
 use rootcause::report;
 use std::time::Duration;
 use zestors_runtime::{
-    channel::{ActorStatus, ChannelSnapshot, Context},
+    Registry,
     prelude::*,
-    registry::Registry,
+    {ActorStatus, ChannelSnapshot, Context},
 };
 use zestors_supervision::{ChildConfig, ChildDescription, GetChildren, GetHealth, Health, Node};
 

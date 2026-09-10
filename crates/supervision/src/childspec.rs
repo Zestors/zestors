@@ -1,6 +1,6 @@
 use crate::_prelude::*;
 use serde::{Deserialize, Serialize};
-use zestors_runtime::channel::{
+use zestors_runtime::{
     ActorOps, Channel,
     errors::{DuplicatePidError, StartOnError},
 };

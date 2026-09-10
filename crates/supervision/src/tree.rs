@@ -1,6 +1,5 @@
 use zestors_runtime::{
-    channel::{ActorStatus, ChannelSnapshot},
-    registry::Registry,
+    Registry, {ActorStatus, ChannelSnapshot},
 };
 
 use crate::_prelude::*;

@@ -2,7 +2,7 @@ use crate::_prelude::*;
 use rootcause::Report;
 use std::collections::VecDeque;
 use tokio::time::Instant;
-use zestors_runtime::registry::RegistryAddError;
+use zestors_runtime::RegistryAddError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RestartIntensity {

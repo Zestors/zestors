@@ -5,9 +5,9 @@ mod _prelude {
     pub use std::fmt::{Debug, Display};
     pub use std::time::Duration;
     pub use zestors_actor::*;
-    pub use zestors_messaging::prelude::*;
+    pub use zestors_interface::prelude::*;
+    pub use zestors_runtime::RestartMode;
     pub use zestors_runtime::prelude::*;
-    pub use zestors_runtime::signals::RestartMode;
 }
 
 mod childspec;

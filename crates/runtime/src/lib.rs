@@ -1,8 +1,8 @@
-pub mod channel;
-pub mod registry;
-pub mod signals;
+mod channel;
+mod registry;
+mod signals;
 
-pub use channel::{spawn, spawn_task, spawn_task_with, spawn_with};
+pub use {channel::*, registry::*, signals::*};
 
 #[allow(unused_imports)]
 pub(crate) mod _prelude {
@@ -11,7 +11,7 @@ pub(crate) mod _prelude {
     pub(crate) use serde::{Deserialize, Serialize};
     pub(crate) use std::{future::Future, time::Duration};
     pub(crate) use zestors_codegen::{Interface, Message};
-    pub(crate) use zestors_messaging::*;
+    pub(crate) use zestors_interface::*;
 }
 
 pub mod prelude {

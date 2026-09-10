@@ -9,7 +9,7 @@ zestors-runtime.workspace = true
 zestors-actor.workspace = true
 zestors-api-server.workspace = true
 zestors-codegen.workspace = true
-zestors-messaging.workspace = true
+zestors-interface.workspace = true
 
 [dev-dependencies]
 tracing-subscriber.workspace = true

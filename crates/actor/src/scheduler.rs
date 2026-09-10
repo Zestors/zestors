@@ -1,7 +1,7 @@
 use futures::{StreamExt as _, future::BoxFuture, stream::FuturesUnordered};
 use rootcause::Report;
 use zestors_codegen::Message;
-use zestors_messaging::{Mode, prelude::*};
+use zestors_interface::{Mode, prelude::*};
 use zestors_runtime::prelude::*;
 
 use crate::{Handle, Handler, HandlerState};
@@ -72,7 +72,7 @@ impl<H: Handler> BasicScheduler<H> {
 
 /// A type-erased [`Message`], known to be handled by the [`Handler`] `H`.
 #[derive(Message)]
-#[msg(path = "zestors_messaging")]
+#[msg(path = "zestors_interface")]
 pub struct HandlerMessage<H: Handler> {
     msg: Box<dyn DynErasedMessage<H>>,
 }
@@ -147,7 +147,7 @@ impl<M: Message, H: Handle<M>> DynErasedMessage<H> for M {
 ///
 /// This type is also useful for scheduling callbacks in the [`next_event`](Handler::next_event) method of a [`Handler`].
 #[derive(Message)]
-#[msg(path = "zestors_messaging")]
+#[msg(path = "zestors_interface")]
 pub struct HandlerCallback<H: Handler> {
     f: Box<dyn FnOnce(&mut H, HandlerState<'_, H>) -> Result<(), Report> + Send + 'static>,
 }

@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::sync::Notify;
-use zestors_runtime::channel::errors::DuplicatePidError;
+use zestors_runtime::errors::DuplicatePidError;
 
 /// A [`SupervisorSource`] is a dynamic source of [`ChildSpec`]s for a
 /// [`Supervisor`]. The implementation could be a database, a file, or anything

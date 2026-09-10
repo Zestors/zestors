@@ -5,8 +5,8 @@ use crate::{
 use rootcause::Report;
 use std::fmt::Debug;
 use tokio::select;
-use zestors_runtime::{channel::ActorOps, prelude::*};
-use zestors_runtime::{channel::Channel, signals::Signal};
+use zestors_runtime::{ActorOps, prelude::*};
+use zestors_runtime::{Channel, Signal};
 
 pub(super) struct FullHandlerState<H: Handler> {
     inbox: Inbox<H::Interface>,

@@ -8,7 +8,7 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields, Type};
 
 #[proc_macro_derive(Interface, attributes(interface))]
 pub fn derive_interface_polybox(input: TokenStream) -> TokenStream {
-    derive_interface(input, "::zestors::messaging")
+    derive_interface(input, "::zestors::interface")
 }
 
 #[derive(darling::FromAttributes)]
@@ -225,7 +225,7 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_derive(Message, attributes(msg))]
 pub fn derive_message(input: TokenStream) -> TokenStream {
-    _derive_message(input, "::zestors::messaging")
+    _derive_message(input, "::zestors::interface")
 }
 
 #[derive(darling::FromAttributes)]

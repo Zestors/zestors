@@ -1,5 +1,5 @@
 use egui::{Color32, Context, Stroke, Visuals};
-use zestors::channel::ActorStatus;
+use zestors::runtime::ActorStatus;
 
 pub struct Theme;
 

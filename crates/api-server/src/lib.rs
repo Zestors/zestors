@@ -3,7 +3,7 @@ use std::{net::SocketAddr, pin::pin, sync::Arc};
 use tokio::net::TcpListener;
 use zestors_actor::{Actor, Blueprint};
 use zestors_codegen::Interface;
-use zestors_messaging::Envelope;
+use zestors_interface::Envelope;
 use zestors_runtime::prelude::*;
 use zestors_supervision::{GetChildren, GetHealth, Health};
 
@@ -34,7 +34,7 @@ pub struct ApiServer {
 }
 
 #[derive(Interface)]
-#[interface(path = "zestors_messaging")]
+#[interface(path = "zestors_interface")]
 pub enum ApiServerInterface {
     Children(Envelope<GetChildren>),
     Health(Envelope<GetHealth>),

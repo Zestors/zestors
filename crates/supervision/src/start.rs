@@ -3,8 +3,8 @@ use std::{fmt::Debug, sync::Arc};
 use futures::future::BoxFuture;
 use zestors_actor::{Actor, ActorExt as _, Blueprint};
 use zestors_runtime::{
-    channel::{AsDyn as _, Context, Dyn, IntoDyn, errors::StartOnError},
     prelude::*,
+    {AsDyn as _, Context, Dyn, IntoDyn, errors::StartOnError},
 };
 
 pub trait Start: Into<DynStarter> {
