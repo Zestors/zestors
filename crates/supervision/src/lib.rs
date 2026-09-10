@@ -18,8 +18,8 @@ pub use supervisor::*;
 mod start;
 pub use start::*;
 
-mod cfg;
-pub use cfg::*;
+mod strategy;
+pub use strategy::*;
 
 mod messages;
 pub use messages::*;
@@ -33,7 +33,7 @@ pub use tree::*;
 pub(crate) use zestors_runtime::messaging;
 
 pub mod prelude {
-    pub use crate::cfg::{RestartIntensity, SupervisionStrategy};
     pub use crate::childspec::ChildSpec;
+    pub use crate::strategy::{RestartIntensity, SupervisionStrategy};
     pub use crate::supervisor::{SupervisorBlueprint, SupervisorInterface};
 }
