@@ -1,5 +1,7 @@
-use crate::_prelude::*;
+use crate::{new_request, prelude::*};
 use std::{convert::Infallible, fmt::Debug};
+
+use crate::RxError;
 
 /// Defines how a message is sent and what kind of reply is expected.
 ///

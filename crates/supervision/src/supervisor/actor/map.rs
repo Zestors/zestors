@@ -1,6 +1,6 @@
 use super::*;
 use crate::SuperviseeNext;
-use std::task::ready;
+use std::{pin::Pin, task::ready};
 use streamunordered::{StreamUnordered, StreamYield};
 
 #[derive(Debug)]

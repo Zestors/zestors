@@ -1,4 +1,8 @@
-use crate::_prelude::*;
+use std::marker::PhantomData;
+
+use type_sets::AsTypeSet;
+
+use super::*;
 
 /// Provides message-sending operations for a channel.
 ///

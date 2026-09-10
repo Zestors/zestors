@@ -21,7 +21,7 @@ pub trait Interface:
 }
 
 impl Interface for () {
-    type Set = Dyn<()>;
+    type Set = ();
 
     fn try_from_dyn_envelope(envelope: DynEnvelope) -> Result<Self, DynEnvelope> {
         envelope.downcast::<()>().map(|env| env.msg)
@@ -47,7 +47,7 @@ impl TryInto<Envelope<()>> for () {
 }
 
 impl Interface for Infallible {
-    type Set = Dyn<()>;
+    type Set = ();
 
     fn try_from_dyn_envelope(envelope: DynEnvelope) -> Result<Self, DynEnvelope> {
         Err(envelope)

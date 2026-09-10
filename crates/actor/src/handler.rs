@@ -6,6 +6,7 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
 };
+use zestors_messaging::{Envelope, Interface, Message};
 use zestors_runtime::{channel::errors::DuplicatePidError, prelude::*};
 
 /// A declarative and simple way to implement an [`Actor`], by providing a set of

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 zestors-runtime.workspace = true
+zestors-messaging.workspace = true
 futures.workspace = true
 rootcause.workspace = true
 zestors-codegen.workspace = true

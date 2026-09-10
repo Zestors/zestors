@@ -13,9 +13,6 @@ const MSG_QUEUE_CAPACITY: usize = 1_000_000;
 mod strong;
 pub use strong::*;
 
-pub mod errors;
-pub(crate) use errors::*;
-
 mod backpressure;
 pub use backpressure::*;
 
@@ -54,3 +51,9 @@ pub use spec::*;
 
 mod task_box;
 pub use task_box::*;
+
+mod sends;
+pub use sends::*;
+
+pub mod errors;
+pub(crate) use errors::*;

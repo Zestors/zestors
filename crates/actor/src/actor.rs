@@ -1,5 +1,6 @@
 use rootcause::Report;
 use std::{convert::Infallible, fmt::Debug};
+use zestors_messaging::Interface;
 use zestors_runtime::{
     channel::{TaskBox, errors::DuplicatePidError},
     prelude::*,

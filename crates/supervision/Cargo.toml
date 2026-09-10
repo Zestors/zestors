@@ -7,6 +7,7 @@ edition = "2024"
 zestors-runtime.workspace = true
 zestors-actor.workspace = true
 zestors-codegen.workspace = true
+zestors-messaging.workspace = true
 streamunordered.workspace = true
 futures.workspace = true
 tracing.workspace = true

@@ -9,7 +9,6 @@ use zestors::{
     supervision::{GetChildren, GetHealth, Health},
 };
 use zestors_actor::ActorExt;
-
 #[tokio::main]
 async fn main() {
     let child = spawn(async move |mut stream: Inbox<MyInterface>| {

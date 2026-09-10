@@ -3,11 +3,11 @@ use smol_str::{SmolStr, format_smolstr};
 use zestors_codegen::Message;
 
 #[derive(Message, Debug)]
-#[msg(path = "crate", reply = "Vec<ChildDescription>")]
+#[msg(path = "zestors_messaging", reply = "Vec<ChildDescription>")]
 pub struct GetChildren;
 
 #[derive(Message, Debug)]
-#[msg(path = "crate", reply = Health)]
+#[msg(path = "zestors_messaging", reply = Health)]
 pub struct GetHealth;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

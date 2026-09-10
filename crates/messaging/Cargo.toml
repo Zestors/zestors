@@ -1,0 +1,10 @@
+[package]
+name = "zestors-messaging"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+type-sets.workspace = true
+futures.workspace = true
+tokio.workspace = true
+thiserror.workspace = true

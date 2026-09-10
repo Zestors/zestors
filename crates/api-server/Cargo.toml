@@ -8,6 +8,7 @@ zestors-runtime.workspace = true
 zestors-supervision.workspace = true
 zestors-actor.workspace = true
 zestors-codegen.workspace = true
+zestors-messaging.workspace = true
 tracing.workspace = true
 axum.workspace = true
 tokio.workspace = true

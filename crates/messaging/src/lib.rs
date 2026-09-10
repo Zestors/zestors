@@ -2,6 +2,13 @@
 //!
 //! This module provides the core messaging functionality for the Zestors runtime, including message types, envelopes, and interfaces. It defines the traits and structures necessary for sending and receiving messages between different components of the system.
 
+pub mod prelude {
+    pub use crate::{
+        Envelope, Message,
+        oneshot::{Rx, Tx},
+    };
+}
+
 mod interface;
 
 use std::marker::PhantomData;
@@ -17,12 +24,6 @@ pub(crate) use oneshot::*;
 mod envelope;
 pub use envelope::*;
 
-mod sends;
-pub use sends::*;
 use type_sets::AsTypeSet;
 
-pub struct Dyn<T>(PhantomData<fn() -> T>);
-
-impl<T: AsTypeSet> type_sets::AsTypeSet for Dyn<T> {
-    type Set = T::Set;
-}
+// pub mod errors;

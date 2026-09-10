@@ -1,5 +1,5 @@
 use super::*;
-use type_sets::{Members, Subset};
+use type_sets::{AsTypeSet, Members, Subset};
 
 pub trait IntoDyn: ActorOps + Sized {
     type Ref<T: Context>;
@@ -17,7 +17,7 @@ pub trait IntoDyn: ActorOps + Sized {
 
     fn into_dyn<S>(self) -> Self::Ref<Dyn<S>>
     where
-        Dyn<S>: Context + Subset<<Self::Ctx as Context>::Set>,
+        S: Subset<<Self::Ctx as Context>::Set> + AsTypeSet + 'static,
     {
         self.into_dyn_unchecked()
     }

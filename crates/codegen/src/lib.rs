@@ -8,7 +8,7 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields, Type};
 
 #[proc_macro_derive(Interface, attributes(interface))]
 pub fn derive_interface_polybox(input: TokenStream) -> TokenStream {
-    derive_interface(input, "::zestors")
+    derive_interface(input, "::zestors::messaging")
 }
 
 #[derive(darling::FromAttributes)]
@@ -26,8 +26,7 @@ fn derive_interface(input: TokenStream, base: &str) -> TokenStream {
     let enum_name = &input.ident;
 
     let base_path: syn::Path = attrs.path.unwrap_or_else(|| syn::parse_str(base).unwrap());
-    let msg_path: syn::Path =
-        syn::parse_str(&format!("{}::messaging", quote!(#base_path))).unwrap();
+    let msg_path: syn::Path = base_path.clone();
 
     // Ensure we are working with an enum
     let variants = match &input.data {
@@ -121,7 +120,7 @@ fn derive_interface(input: TokenStream, base: &str) -> TokenStream {
                 }
             }
 
-            type Set = #msg_path::Dyn<(#(#inner_types,)*)>;
+            type Set = (#(#inner_types,)*);
         }
 
 
@@ -226,7 +225,7 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_derive(Message, attributes(msg))]
 pub fn derive_message(input: TokenStream) -> TokenStream {
-    _derive_message(input, "::zestors")
+    _derive_message(input, "::zestors::messaging")
 }
 
 #[derive(darling::FromAttributes)]
@@ -249,17 +248,17 @@ fn _derive_message(input: TokenStream, base: &str) -> TokenStream {
 
     let expanded = if let Some(reply_type) = attrs.reply {
         quote!(
-            impl #impl_generics #base_path::messaging::Message for #name #ty_generics #where_clause
+            impl #impl_generics #base_path::Message for #name #ty_generics #where_clause
             {
-                type Mode = #base_path::messaging::Request;
+                type Mode = #base_path::Request;
                 type Outcome = #reply_type;
             }
         )
     } else {
         quote!(
-            impl #impl_generics #base_path::messaging::Message for #name #ty_generics #where_clause
+            impl #impl_generics #base_path::Message for #name #ty_generics #where_clause
             {
-                type Mode = #base_path::messaging::FireAndForget;
+                type Mode = #base_path::FireAndForget;
                 type Outcome = ();
             }
         )

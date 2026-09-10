@@ -10,10 +10,9 @@ use std::{
 use tokio::time::{error::Elapsed, timeout};
 use zestors_runtime::{
     channel::{
-        ActorOps, ActorStatus, Channel, Child, ExitingChild, Pid,
+        ActorOps, ActorStatus, Channel, Child, Dyn, ExitingChild, Pid,
         errors::{JoinError, StartOnError},
     },
-    messaging::Dyn,
     signals::RestartMode,
 };
 

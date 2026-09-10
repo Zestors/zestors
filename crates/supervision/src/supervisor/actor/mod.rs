@@ -1,7 +1,4 @@
-use std::{
-    pin::{Pin, pin},
-    task::{Context, Poll},
-};
+use std::task::{Context, Poll};
 
 use futures::{
     Stream, StreamExt,

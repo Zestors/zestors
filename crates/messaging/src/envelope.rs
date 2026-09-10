@@ -18,7 +18,7 @@ impl<M: Message> Envelope<M> {
         Self { msg, handle }
     }
 
-    pub(crate) fn new_pair(msg: M) -> (Self, MessageReceipt<M>) {
+    pub fn new_pair(msg: M) -> (Self, MessageReceipt<M>) {
         let (resolver, receipt) = <M::Mode as Mode<M::Outcome>>::new();
         (Self::new(msg, resolver), receipt)
     }
@@ -34,7 +34,7 @@ impl DynEnvelope {
         Self(Box::new(envelope))
     }
 
-    pub(crate) fn new_pair<M: Message>(msg: M) -> (Self, MessageReceipt<M>) {
+    pub fn new_pair<M: Message>(msg: M) -> (Self, MessageReceipt<M>) {
         let (envelope, receipt) = Envelope::new_pair(msg);
         (Self::new(envelope), receipt)
     }
