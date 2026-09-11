@@ -68,7 +68,7 @@ impl Actor for ApiServer {
             };
 
             match event {
-                Event::Signal(signal) => match signal {
+                InboxEvent::Signal(signal) => match signal {
                     Signal::Shutdown => {
                         tracing::info!("API server received shutdown signal");
                         break Ok(());
@@ -76,7 +76,7 @@ impl Actor for ApiServer {
                     Signal::Resume | Signal::Suspend => {}
                 },
 
-                Event::Message(msg) => match msg {
+                InboxEvent::Message(msg) => match msg {
                     ApiServerInterface::Children(env) => {
                         env.handle.reply(vec![]).ok();
                     }

@@ -103,7 +103,7 @@ impl<H: Handler> FullHandlerState<H> {
         };
 
         match msg {
-            Event::Signal(signal) => match signal {
+            InboxEvent::Signal(signal) => match signal {
                 Signal::Resume => {
                     handler.on_resume(&self.address).await?;
                     return Ok(RunOnce::Continue);
@@ -120,7 +120,7 @@ impl<H: Handler> FullHandlerState<H> {
                 }
             },
 
-            Event::Message(msg) => {
+            InboxEvent::Message(msg) => {
                 msg.handle_with(state, handler).await?;
                 return Ok(RunOnce::Continue);
             }

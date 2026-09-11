@@ -1,10 +1,15 @@
-//! Messaging module for the Zestors runtime.
+//! Defines the core interface/messaging traits for zestors
 //!
-//! This module provides the core interface functionality for the Zestors runtime, including message types, envelopes, and interfaces. It defines the traits and structures necessary for sending and receiving messages between different components of the system.
+//! There are two big traits defined in this crate:
+//! - [`Message`] specifies what kind of reply a message should return.
+//! - [`Interface`] specifies the messages that an actor can accept.
+//!
+//! Messages are sent inside an [`Envelope`], containing both the message payload,
+//! and the associated [`Resolver`].
 
 pub mod prelude {
     pub use crate::{
-        Envelope, Message,
+        Envelope, Interface, Message,
         oneshot::{Request, Response},
     };
 }
@@ -22,6 +27,4 @@ pub use oneshot::*;
 mod envelope;
 pub use envelope::*;
 
-use type_sets::AsTypeSet;
-
-// pub mod errors;
+pub use zestors_codegen::{Interface, Message};

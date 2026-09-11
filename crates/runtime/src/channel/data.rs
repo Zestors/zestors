@@ -1,5 +1,5 @@
 use super::*;
-use crate::{registry::Registry, signals::Event};
+use crate::{registry::Registry, signals::InboxEvent};
 use eyeball::{ObservableWriteGuard, SharedObservable};
 use std::{
     any::TypeId,
@@ -29,7 +29,7 @@ use type_sets::{AsTypeSet, Contains};
 /// alive.
 #[repr(transparent)]
 pub struct Channel<C: Context = Dyn<()>> {
-    inner: Arc<ChannelData<dyn Queue>>,
+    inner: Arc<ChannelData<dyn DynamicQueue>>,
     _ctx: PhantomData<fn() -> C>,
 }
 
@@ -91,7 +91,7 @@ impl<C: Context> Channel<C> {
         }
     }
 
-    pub(super) fn data(&self) -> &ChannelData<dyn Queue> {
+    pub(super) fn data(&self) -> &ChannelData<dyn DynamicQueue> {
         &self.inner
     }
 
@@ -278,7 +278,9 @@ impl<C: Context> Channel<C> {
     where
         C: Interface,
     {
-        unsafe { &*(&self.data().msg_queue as *const dyn Queue as *const ConcurrentQueue<C>) }
+        unsafe {
+            &*(&self.data().msg_queue as *const dyn DynamicQueue as *const ConcurrentQueue<C>)
+        }
     }
 
     pub(super) fn backpressure(&self) -> &BackPressure {
@@ -336,7 +338,7 @@ impl<I: Interface> Channel<I> {
             false => MSG_QUEUE_CAPACITY,
         };
 
-        let inner: Arc<ChannelData<dyn Queue>> = Arc::new(ChannelData {
+        let inner: Arc<ChannelData<dyn DynamicQueue>> = Arc::new(ChannelData {
             pid,
             msg_notifier: Notify::new(),
             msg_backpressure_limit: BACKPRESSURE_LIMIT,
@@ -457,31 +459,31 @@ impl<I: Interface> Channel<I> {
         }
     }
 
-    pub(crate) async fn next(&self) -> Option<Event<I>> {
+    pub(crate) async fn next(&self) -> Option<InboxEvent<I>> {
         match self.status() {
-            ActorStatus::Suspended => self.recv_signal().await.map(Event::Signal),
+            ActorStatus::Suspended => self.recv_signal().await.map(InboxEvent::Signal),
             ActorStatus::Exited(_) | ActorStatus::Stopping if self.msgs_is_empty() => None,
             _ => {
                 select! {
                     biased;
 
-                    Some(signal) = self.recv_signal() => Some(Event::Signal(signal)),
-                    Some(msg) = self.recv_msg() => Some(Event::Message(msg)),
+                    Some(signal) = self.recv_signal() => Some(InboxEvent::Signal(signal)),
+                    Some(msg) = self.recv_msg() => Some(InboxEvent::Message(msg)),
                     else => None,
                 }
             }
         }
     }
 
-    pub(crate) fn try_next(&self) -> Option<Event<I>> {
+    pub(crate) fn try_next(&self) -> Option<InboxEvent<I>> {
         match self.status() {
-            ActorStatus::Suspended => self.pop_signal().map(Event::Signal),
+            ActorStatus::Suspended => self.pop_signal().map(InboxEvent::Signal),
             ActorStatus::Exited(_) | ActorStatus::Stopping if self.msgs_is_empty() => None,
             _ => {
                 if let Some(signal) = self.pop_signal() {
-                    Some(Event::Signal(signal))
+                    Some(InboxEvent::Signal(signal))
                 } else if let Some(msg) = self.pop_msg() {
-                    Some(Event::Message(msg))
+                    Some(InboxEvent::Message(msg))
                 } else {
                     None
                 }
@@ -623,7 +625,7 @@ where
     }
 }
 
-impl ChannelData<dyn Queue> {
+impl ChannelData<dyn DynamicQueue> {
     pub fn msg_len(&self) -> usize {
         self.msg_queue.len()
     }

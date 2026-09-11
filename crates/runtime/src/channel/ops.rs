@@ -279,7 +279,7 @@ impl Clock {
 }
 
 trait ActorOpsExtPriv: ActorOps {
-    fn data(&self) -> &ChannelData<dyn Queue> {
+    fn data(&self) -> &ChannelData<dyn DynamicQueue> {
         self.handle().data()
     }
 }

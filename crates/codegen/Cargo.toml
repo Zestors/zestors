@@ -18,5 +18,8 @@ proc-macro2 = "1"
 heck = "0.5"
 darling = { version = "0.24" }
 
+[dev-dependencies]
+zestors-interface.workspace = true
+
 [lib]
 proc-macro = true

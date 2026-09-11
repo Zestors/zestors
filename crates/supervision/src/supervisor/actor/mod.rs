@@ -175,7 +175,7 @@ impl InitializingSupervisor {
 
                 Some(msg) = self.supervisor.inbox.next() => {
                     match msg {
-                        Event::Signal(signal) => match signal {
+                        InboxEvent::Signal(signal) => match signal {
                             Signal::Shutdown => {
                                 tracing::info!("Supervisor received shutdown signal during initialization");
                                 self.supervisor.stop_supervisees();
@@ -183,7 +183,7 @@ impl InitializingSupervisor {
                             }
                             Signal::Resume | Signal::Suspend => (),
                         },
-                        Event::Message(msg) => {
+                        InboxEvent::Message(msg) => {
                             self.supervisor.handle_msg(msg);
                         }
                     }
@@ -219,13 +219,13 @@ impl ExitingSupervisor {
 
                 Some(msg) = self.supervisor.inbox.next() => {
                     match msg {
-                        Event::Signal(signal) => match signal {
+                        InboxEvent::Signal(signal) => match signal {
                             Signal::Shutdown
                             | Signal::Resume
                             | Signal::Suspend => (),
                         },
 
-                        Event::Message(msg) => {
+                        InboxEvent::Message(msg) => {
                             self.supervisor.handle_msg(msg);
                         }
                     }

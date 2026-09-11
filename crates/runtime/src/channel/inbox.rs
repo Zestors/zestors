@@ -51,7 +51,7 @@ impl<T: Interface> Inbox<T> {
     /// Upon the first call to `next`, the channel's status will be set to
     /// [`Running`](ActorStatus::Running), and will count as a completion of the initialization
     /// phase. For receiving signals without setting the status to running, see [`Inbox::next_signal`].
-    pub async fn next(&mut self) -> Option<Event<T>> {
+    pub async fn next(&mut self) -> Option<InboxEvent<T>> {
         // If this is the first call to next(), set the status to Running
         self.register_initialized();
 
@@ -94,14 +94,14 @@ impl<T: Interface> Inbox<T> {
     }
 
     // TODO: Remove this method in a future version
-    pub async fn next_with_init(&mut self, init: bool) -> Option<Event<T>> {
+    pub async fn next_with_init(&mut self, init: bool) -> Option<InboxEvent<T>> {
         match init {
             true => self.next().await,
             false => self.handle().next().await,
         }
     }
 
-    pub fn try_next(&mut self) -> Option<Event<T>> {
+    pub fn try_next(&mut self) -> Option<InboxEvent<T>> {
         self.register_initialized();
         self.handle().try_next()
     }

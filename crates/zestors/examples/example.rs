@@ -14,7 +14,7 @@ async fn main() {
     let child = spawn(async move |mut stream: Inbox<MyInterface>| {
         while let Some(msg) = stream.next().await {
             match msg {
-                Event::Signal(signal) => match signal {
+                InboxEvent::Signal(signal) => match signal {
                     Signal::Shutdown => {
                         println!("Received shutdown signal");
                         break;
@@ -22,7 +22,7 @@ async fn main() {
                     Signal::Resume | Signal::Suspend => {}
                 },
 
-                Event::Message(message) => match message {
+                InboxEvent::Message(message) => match message {
                     MyInterface::Add(envelope) => {
                         println!("Received message: {:?}", envelope);
                     }

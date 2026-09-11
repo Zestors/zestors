@@ -6,6 +6,21 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, Fields, Type};
 
+/// Derives the `Interface` trait for an enum.
+///
+/// This only works un unnamed, single-value enum-fields that are envelopes.
+/// Anything else is rejected.
+///
+/// # Example
+/// ```
+/// # use zestors_interface::*;
+/// #[derive(Interface)]
+/// # #[interface(path = "zestors_interface")]
+/// enum MyInterface {
+///     MessageA(Envelope<u32>),
+///     MessageB(Envelope<String>),
+/// }
+/// ```
 #[proc_macro_derive(Interface, attributes(interface))]
 pub fn derive_interface_polybox(input: TokenStream) -> TokenStream {
     derive_interface(input, "::zestors::interface")
@@ -210,18 +225,22 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-/// Derives the `Message` trait for a struct, allowing it to be used as a message
-/// in the Polybox framework.
+/// Derives the `Message` trait.
 ///
 /// This macro accepts an optional `reply` attribute to specify the reply type for the message.
+/// When `reply` is specified, the receipt becomes a `Response` and the resolver a `Request`.
+///
 ///
 /// # Example
-/// ```ignore
+/// ```
+/// # use zestors_interface::*;
 /// #[derive(Message)]
+/// # #[msg(path = "zestors_interface")]
 /// struct SimpleMessage;
 ///
 /// #[derive(Message)]
 /// #[msg(reply = u32)]
+/// # #[msg(path = "zestors_interface")]
 /// struct MessageWithOutput;
 /// ```
 #[proc_macro_derive(Message, attributes(msg))]

@@ -1,9 +1,10 @@
-use type_sets::Members;
-
 use super::*;
 use std::convert::Infallible;
+use type_sets::{AsTypeSet, Members};
 
-/// Defines the set of messages that an actor accepts.
+/// Defines the set of accepted messages, and conversions from/to envelopes.
+///
+/// While possible to implement manually, it is much easier to [derive](derive@Interface).
 pub trait Interface:
     Message<Receipt = ()> + TryInto<Envelope<Self>> + From<Envelope<Self>>
 {

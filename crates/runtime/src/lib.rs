@@ -20,6 +20,6 @@ pub mod prelude {
             ActorOpsExt as _, Address, Child, Inbox, IntoDyn as _, Pid, Sends as _, StrongAddress,
             spawn_with,
         },
-        signals::{Event, Signal},
+        signals::{InboxEvent, Signal},
     };
 }

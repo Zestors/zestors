@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Debug)]
-pub enum Event<M> {
+pub enum InboxEvent<M> {
     Signal(Signal),
     Message(M),
 }

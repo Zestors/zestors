@@ -15,6 +15,7 @@ use std::{convert::Infallible, fmt::Debug};
 /// [`Response<T>`]. Once a reply is sent, the response resolves to `T`.
 ///
 /// This trait must be implemented for any message that is sent in zestors.
+/// It can easily be [derived](derive@Message) as well.
 pub trait Message: Send + 'static + Sized {
     /// The receipt associated with this message, that is returned after sending.
     type Receipt: Receipt<Output = Self::Output, Resolver = Self::Resolver>;

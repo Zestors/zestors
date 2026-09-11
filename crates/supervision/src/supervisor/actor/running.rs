@@ -13,7 +13,7 @@ impl RunningSupervisor {
         loop {
             match self.next().await {
                 Next::InboxEvent(msg) => match msg {
-                    Event::Signal(signal) => match signal {
+                    InboxEvent::Signal(signal) => match signal {
                         Signal::Resume | Signal::Suspend => (),
                         Signal::Shutdown => {
                             tracing::info!("Supervisor received shutdown signal");
@@ -21,7 +21,7 @@ impl RunningSupervisor {
                             break Err(ExitingSupervisor::new(self.supervisor));
                         }
                     },
-                    Event::Message(msg) => {
+                    InboxEvent::Message(msg) => {
                         self.supervisor.handle_msg(msg);
                     }
                 },
@@ -93,6 +93,6 @@ impl RunningSupervisor {
 }
 
 enum Next {
-    InboxEvent(Event<SupervisorInterface>),
+    InboxEvent(InboxEvent<SupervisorInterface>),
     SuperviseeItem(Pid, SuperviseeItem),
 }

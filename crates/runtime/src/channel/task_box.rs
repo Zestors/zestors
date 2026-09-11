@@ -18,15 +18,15 @@ impl TaskBox {
     /// phase.
     pub async fn next(&mut self) -> Option<Signal> {
         match self.inbox.next().await? {
-            Event::Signal(signal) => Some(signal),
-            Event::Message(msg) => match msg {},
+            InboxEvent::Signal(signal) => Some(signal),
+            InboxEvent::Message(msg) => match msg {},
         }
     }
 
     pub fn try_next(&mut self) -> Option<Signal> {
         match self.inbox.try_next()? {
-            Event::Signal(signal) => Some(signal),
-            Event::Message(msg) => match msg {},
+            InboxEvent::Signal(signal) => Some(signal),
+            InboxEvent::Message(msg) => match msg {},
         }
     }
 
