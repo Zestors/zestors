@@ -284,7 +284,7 @@ impl<C: Context> Channel<C> {
     }
 
     pub(super) fn backpressure(&self) -> &BackPressure {
-        BackPressure::default()
+        BackPressure::global()
     }
 
     pub(super) async fn delay_for_backpressure(&self) {

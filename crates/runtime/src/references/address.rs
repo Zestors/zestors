@@ -13,7 +13,7 @@ impl<C: Context> Address<C> {
         }
     }
 
-    pub(super) fn from_ref(channel: &Channel<C>) -> &Self {
+    pub(crate) fn from_ref(channel: &Channel<C>) -> &Self {
         unsafe { std::mem::transmute::<&Channel<C>, &Address<C>>(channel) }
     }
 }

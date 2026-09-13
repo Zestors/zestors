@@ -1,7 +1,4 @@
-use type_sets::Members;
-
 use super::*;
-use std::any::{Any, TypeId};
 
 pub(crate) trait DynamicQueue: Any + Send + Sync + 'static {
     fn len(&self) -> usize;
@@ -39,7 +36,7 @@ impl<I: Interface> DynamicQueue for ConcurrentQueue<I> {
 }
 
 impl dyn DynamicQueue {
-    pub(super) fn try_push_msg<M: Message>(&self, msg: M) -> Result<M::Receipt, NotAccepted<M>> {
+    pub(crate) fn try_push_msg<M: Message>(&self, msg: M) -> Result<M::Receipt, NotAccepted<M>> {
         let (envelope, receipt) = AnyEnvelope::new_pair::<M>(msg);
 
         self.push_envelope_dyn(envelope)

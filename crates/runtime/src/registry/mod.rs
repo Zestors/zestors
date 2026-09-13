@@ -131,3 +131,6 @@ pub enum TypedRegistryError {
     #[error("Address found for pid: {0} but type mismatch")]
     TypeMismatch(Pid),
 }
+
+mod pid;
+pub use pid::*;

@@ -1,7 +1,3 @@
-use std::marker::PhantomData;
-
-use type_sets::AsTypeSet;
-
 use super::*;
 
 /// Provides message-sending operations for a channel.
@@ -67,8 +63,7 @@ pub trait Sends<M: Message>: Sync {
 /// There is a blacket-implementation of [`Sends`] for all types that implement
 /// [`ActorHandle`].
 pub(crate) trait _Sends<M: Message>: Sync {
-    fn _send(&self, msg: M)
-    -> impl Future<Output = Result<M::Receipt, SendError<M>>> + Send;
+    fn _send(&self, msg: M) -> impl Future<Output = Result<M::Receipt, SendError<M>>> + Send;
     fn _try_send(&self, msg: M) -> Result<M::Receipt, TrySendError<M>>;
     fn _send_now(&self, msg: M) -> Result<M::Receipt, SendError<M>>;
     fn _request(&self, msg: M) -> impl Future<Output = Result<M::Output, RequestError<M>>> + Send {

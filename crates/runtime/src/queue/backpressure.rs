@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 static DEFAULT_BACKPRESSURE: OnceLock<BackPressure> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct BackPressure {
+pub(crate) struct BackPressure {
     /// Queue occupancy at which backpressure starts, as a fraction [0, 1].
     starts_at: f32,
 
@@ -36,7 +36,7 @@ impl BackPressure {
         Some(self.max_delay.mul_f32(pressure))
     }
 
-    pub fn default() -> &'static Self {
+    pub fn global() -> &'static Self {
         DEFAULT_BACKPRESSURE.get_or_init(|| Self::new(0.5, Duration::from_millis(10)))
     }
 }

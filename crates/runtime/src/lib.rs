@@ -20,11 +20,8 @@ const KEEP_N_EXITS: usize = 5;
 const SIGNAL_QUEUE_CAPACITY: usize = 1_000_000;
 const MSG_QUEUE_CAPACITY: usize = 1_000_000;
 
-mod strong;
-pub use strong::*;
-
-mod backpressure;
-pub use backpressure::*;
+mod references;
+pub use references::*;
 
 mod ops;
 pub use ops::*;
@@ -41,15 +38,6 @@ pub use status::*;
 mod spawn;
 pub use spawn::*;
 
-mod inbox;
-pub use inbox::*;
-
-mod address;
-pub use address::*;
-
-mod child;
-pub use child::*;
-
 mod data;
 pub use data::*;
 
@@ -63,8 +51,7 @@ pub mod errors;
 pub(crate) use errors::*;
 
 mod context;
-mod pid;
 mod registry;
 mod signals;
 
-pub use {context::*, pid::*, registry::*, signals::*};
+pub use {context::*, registry::*, signals::*};

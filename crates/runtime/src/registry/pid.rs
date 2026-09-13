@@ -2,7 +2,7 @@ use crate::{registry::Registry, *};
 use bs58::Alphabet;
 use smol_str::SmolStr;
 use std::{borrow::Cow, fmt::Display, sync::Arc};
-use type_sets::{AsTypeSet, Members};
+use type_sets::Members;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Pid(SmolStr);
