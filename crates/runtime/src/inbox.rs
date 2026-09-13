@@ -1,6 +1,5 @@
+use crate::*;
 use std::convert::Infallible;
-
-use crate::_prelude::*;
 
 /// A reference to a [`Channel`] that can be used to receive messages and signals from the channel.
 ///

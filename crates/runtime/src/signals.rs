@@ -1,4 +1,4 @@
-use crate::_prelude::*;
+use crate::*;
 
 #[derive(Message, Debug)]
 #[msg(path = "zestors_interface")]

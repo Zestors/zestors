@@ -1,4 +1,4 @@
-use crate::_prelude::*;
+use crate::*;
 use std::convert::Infallible;
 
 /// A [`TaskBox`] is a wrapper around an [`Inbox<Infallible>`] that can only receive signals.
