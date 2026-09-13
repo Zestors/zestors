@@ -54,7 +54,7 @@ impl<T: Interface> Inbox<T> {
         // If this is the first call to next(), set the status to Running
         self.register_initialized();
 
-        self.handle().next().await
+        self.channel().next().await
     }
 
     fn init_completed(&self) -> bool {
@@ -85,29 +85,29 @@ impl<T: Interface> Inbox<T> {
         }
 
         self.init = InitState::Completed;
-        self.handle().register_initialized().unwrap_or(false)
+        self.channel().register_initialized().unwrap_or(false)
     }
 
     pub fn register_stopping(&mut self) -> bool {
-        self.handle().register_stopping().unwrap_or(false)
+        self.channel().register_stopping().unwrap_or(false)
     }
 
     // TODO: Remove this method in a future version
     pub async fn next_with_init(&mut self, init: bool) -> Option<InboxEvent<T>> {
         match init {
             true => self.next().await,
-            false => self.handle().next().await,
+            false => self.channel().next().await,
         }
     }
 
     pub fn try_next(&mut self) -> Option<InboxEvent<T>> {
         self.register_initialized();
-        self.handle().try_next()
+        self.channel().try_next()
     }
 
     /// Returns the next signal from the channel, or `None` if the channel has received.
     pub async fn next_signal(&mut self) -> Option<Signal> {
-        self.handle().recv_signal().await
+        self.channel().recv_signal().await
     }
 
     pub fn is_shutting_down(&self) -> bool {
@@ -159,17 +159,17 @@ impl<T: Interface> Inbox<T> {
     }
 }
 
-impl<T: Interface> ActorOps for Inbox<T> {
+impl<T: Interface> ActorRef for Inbox<T> {
     type Ctx = T;
 
-    fn handle(&self) -> &Channel<Self::Ctx> {
-        &self.channel.handle()
+    fn channel(&self) -> &Channel<Self::Ctx> {
+        &self.channel.channel()
     }
 }
 
 impl<T: Interface> Drop for Inbox<T> {
     fn drop(&mut self) {
-        self.handle().drain_messages_and_signals();
+        self.channel().drain_messages_and_signals();
     }
 }
 

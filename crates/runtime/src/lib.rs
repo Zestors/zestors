@@ -9,7 +9,7 @@ pub(crate) use zestors_interface::*;
 
 pub mod prelude {
     pub use crate::{
-        ActorOpsExt as _, Address, Child, Inbox, InboxEvent, IntoDyn as _, Pid, Sends as _, Signal,
+        ActorOps as _, Address, Child, Inbox, InboxEvent, IntoDyn as _, Pid, Sends as _, Signal,
         StrongAddress, spawn_with,
     };
 }
@@ -23,29 +23,14 @@ const MSG_QUEUE_CAPACITY: usize = 1_000_000;
 mod references;
 pub use references::*;
 
-mod ops;
-pub use ops::*;
-
 mod queue;
 pub use queue::*;
-
-mod dyn_conv;
-pub use dyn_conv::*;
-
-mod status;
-pub use status::*;
 
 mod spawn;
 pub use spawn::*;
 
-mod data;
-pub use data::*;
-
-mod task_box;
-pub use task_box::*;
-
-mod sends;
-pub use sends::*;
+mod channel;
+pub use channel::*;
 
 pub mod errors;
 pub(crate) use errors::*;

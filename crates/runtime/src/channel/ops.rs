@@ -9,24 +9,24 @@ use zestors_interface::{Request, Response};
 ///
 /// Implement this trait, and [`ActorOpsExt`] is automatically implemented for your
 /// type.
-pub trait ActorOps {
+pub trait ActorRef {
     /// The [`Context`] of the associated actor.
     type Ctx: Context;
 
     /// Returns a reference to the [`ActorHandle`] of the associated actor.
-    fn handle(&self) -> &Channel<Self::Ctx>;
+    fn channel(&self) -> &Channel<Self::Ctx>;
 }
 
 /// The core trait for interacting with actors through their [`ActorHandle`].
 /// This trait is sealed, and is implemented automatically for any type that
 /// implements [`ActorOps`].
-pub trait ActorOpsExt: ActorOps + sealed::Sealed {
+pub trait ActorOps: ActorRef + sealed::Sealed {
     /// Same as [`Sends::send`], but checks whether the message type is accepted by the channel.
     fn send_dyn<M: Message>(
         &self,
         msg: M,
     ) -> impl Future<Output = Result<M::Receipt, SendCheckedError<M>>> + Send {
-        let handle = self.handle();
+        let handle = self.channel();
 
         async {
             handle.delay_for_backpressure().await;
@@ -49,8 +49,8 @@ pub trait ActorOpsExt: ActorOps + sealed::Sealed {
             return Err(SendCheckedError::Closed(msg));
         }
 
-        let output = self.handle().try_push_msg(msg)?;
-        self.handle().msg_notify_one();
+        let output = self.channel().try_push_msg(msg)?;
+        self.channel().msg_notify_one();
         Ok(output)
     }
 
@@ -58,7 +58,7 @@ pub trait ActorOpsExt: ActorOps + sealed::Sealed {
         &self,
         msg: M,
     ) -> impl Future<Output = Result<M::Output, RequestCheckedError<M>>> + Send {
-        let handle = self.handle();
+        let handle = self.channel();
         async { Ok(handle.send_dyn(msg).await?.wait().await?) }
     }
 
@@ -152,7 +152,7 @@ pub trait ActorOpsExt: ActorOps + sealed::Sealed {
     }
 
     fn reached_backpressure(&self) -> bool {
-        let handle = self.handle();
+        let handle = self.channel();
 
         handle
             .backpressure()
@@ -185,7 +185,7 @@ pub trait ActorOpsExt: ActorOps + sealed::Sealed {
     fn ping(&self) -> Response<()> {
         let (tx, rx) = Request::new();
 
-        self.handle()
+        self.channel()
             .data()
             .signal(SignalInterface::Ping(Envelope::new(signals::Ping, tx)));
 
@@ -231,7 +231,7 @@ pub trait ActorOpsExt: ActorOps + sealed::Sealed {
     /// This amount should only be used as an indication of the number of
     /// active references to the channel.
     fn ref_count(&self) -> usize {
-        self.handle().ref_count()
+        self.channel().ref_count()
     }
 
     /// The amount of [`Address`]es in existence for this channel.
@@ -243,15 +243,15 @@ pub trait ActorOpsExt: ActorOps + sealed::Sealed {
     }
 
     fn address(&self) -> &Address<Self::Ctx> {
-        Address::from_ref(self.handle())
+        Address::from_ref(self.channel())
     }
 
     fn upgrade(&self) -> Option<StrongAddress<Self::Ctx>> {
-        StrongAddress::from_channel_ref(self.handle())
+        StrongAddress::from_channel_ref(self.channel())
     }
 }
 
-impl<T: ActorOps> ActorOpsExt for T {}
+impl<T: ActorRef> ActorOps for T {}
 
 #[derive(Clone, Copy)]
 struct Clock {
@@ -278,14 +278,14 @@ impl Clock {
     }
 }
 
-trait ActorOpsExtPriv: ActorOps {
-    fn data(&self) -> &ChannelData<dyn DynamicQueue> {
-        self.handle().data()
+trait ActorOpsExtPriv: ActorRef {
+    fn data(&self) -> &ChannelInner<dyn DynamicQueue> {
+        self.channel().data()
     }
 }
-impl<T: ActorOps + ?Sized> ActorOpsExtPriv for T {}
+impl<T: ActorRef + ?Sized> ActorOpsExtPriv for T {}
 
 mod sealed {
     pub trait Sealed {}
-    impl<T: super::ActorOps> Sealed for T {}
+    impl<T: super::ActorRef> Sealed for T {}
 }

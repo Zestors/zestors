@@ -12,7 +12,7 @@ use type_sets::AsTypeSet;
 /// [`Child`] and [`Inbox`] both contain a [`StrongAddress`]. Addresses can
 /// be upgraded to a `StrongAddress`.
 #[repr(transparent)]
-pub struct StrongAddress<C: Context = Dyn<()>> {
+pub struct StrongAddress<C: Context = Dyn> {
     channel: Channel<C>,
 }
 
@@ -55,7 +55,7 @@ impl<C: Context> Drop for StrongAddress<C> {
 
 impl<T: Context> Clone for StrongAddress<T> {
     fn clone(&self) -> Self {
-        self.handle().incr_strong_count();
+        self.channel().incr_strong_count();
 
         StrongAddress {
             channel: self.channel._clone(),
@@ -83,10 +83,10 @@ impl<C: Context> AsDyn for StrongAddress<C> {
     }
 }
 
-impl<C: Context> ActorOps for StrongAddress<C> {
+impl<C: Context> ActorRef for StrongAddress<C> {
     type Ctx = C;
 
-    fn handle(&self) -> &Channel<Self::Ctx> {
+    fn channel(&self) -> &Channel<Self::Ctx> {
         &self.channel
     }
 }

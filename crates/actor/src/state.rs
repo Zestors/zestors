@@ -5,7 +5,7 @@ use crate::{
 use rootcause::Report;
 use std::fmt::Debug;
 use tokio::select;
-use zestors_runtime::{ActorOps, InboxEvent, prelude::*};
+use zestors_runtime::{ActorRef, InboxEvent, prelude::*};
 use zestors_runtime::{Channel, Signal};
 
 pub(super) struct FullHandlerState<H: Handler> {
@@ -128,11 +128,11 @@ impl<H: Handler> FullHandlerState<H> {
     }
 }
 
-impl<H: Handler> ActorOps for FullHandlerState<H> {
+impl<H: Handler> ActorRef for FullHandlerState<H> {
     type Ctx = H::Interface;
 
-    fn handle(&self) -> &Channel<Self::Ctx> {
-        self.address.handle()
+    fn channel(&self) -> &Channel<Self::Ctx> {
+        self.address.channel()
     }
 }
 
@@ -178,10 +178,10 @@ pub struct HandlerState<'a, H: Handler> {
 //     }
 // }
 
-impl<'a, H: Handler> ActorOps for HandlerState<'a, H> {
+impl<'a, H: Handler> ActorRef for HandlerState<'a, H> {
     type Ctx = H::Interface;
 
-    fn handle(&self) -> &Channel<Self::Ctx> {
-        self.address.handle()
+    fn channel(&self) -> &Channel<Self::Ctx> {
+        self.address.channel()
     }
 }

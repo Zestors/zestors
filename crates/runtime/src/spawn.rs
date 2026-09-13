@@ -85,7 +85,7 @@ impl<T: Context> StrongAddress<T> {
             let address = inbox.address().clone();
             let mut bomb = AbortBomb::new(address);
             bomb.address
-                .handle()
+                .channel()
                 .register_spawned()
                 .expect("Transition must succeed, because inbox was just created");
             let spawn_future = AssertUnwindSafe(spawn_fn(inbox)).catch_unwind();
@@ -96,10 +96,10 @@ impl<T: Context> StrongAddress<T> {
                 let mapped_result = match spawn_result {
                     Ok(result) => {
                         match &result {
-                            Ok(_) => bomb.address.handle().register_exited(Ok(())),
+                            Ok(_) => bomb.address.channel().register_exited(Ok(())),
                             Err(_) => bomb
                                 .address
-                                .handle()
+                                .channel()
                                 .register_exited(Err(ExitError::UnhandledError)),
                         };
 
@@ -108,7 +108,7 @@ impl<T: Context> StrongAddress<T> {
 
                     Err(boxed) => {
                         bomb.address
-                            .handle()
+                            .channel()
                             .register_exited(Err(ExitError::Panicked));
                         std::panic::resume_unwind(boxed);
                     }
@@ -150,7 +150,7 @@ impl<T: Context> Drop for AbortBomb<T> {
 
             if !self.address.status().is_dead() {
                 self.address
-                    .handle()
+                    .channel()
                     .register_exited(Err(ExitError::Aborted));
             }
         }

@@ -1,7 +1,7 @@
 use super::*;
 use type_sets::{AsTypeSet, Members, Subset};
 
-pub trait IntoDyn: ActorOps + Sized {
+pub trait IntoDyn: ActorRef + Sized {
     type Ref<T: Context>;
 
     fn into_context_unchecked<C>(self) -> Self::Ref<C>

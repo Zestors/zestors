@@ -55,10 +55,10 @@ impl TaskBox {
     }
 }
 
-impl ActorOps for TaskBox {
+impl ActorRef for TaskBox {
     type Ctx = Infallible;
 
-    fn handle(&self) -> &Channel<Self::Ctx> {
-        &self.inbox.handle()
+    fn channel(&self) -> &Channel<Self::Ctx> {
+        &self.inbox.channel()
     }
 }

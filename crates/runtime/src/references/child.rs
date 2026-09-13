@@ -10,7 +10,7 @@ use std::{fmt::Debug, pin::Pin, task::Poll, time::Duration};
 ///   exit of the child process and retrieve its result.
 /// - The [`StrongAddress`] of the child process, which can be used to interact with the
 /// child process.
-pub struct Child<E = (), C: Context = Dyn<()>> {
+pub struct Child<E = (), C: Context = Dyn> {
     join: Option<tokio::task::JoinHandle<Result<E, Report>>>,
     address: StrongAddress<C>,
     attached: bool,
@@ -99,11 +99,11 @@ impl<E, C: Context> Child<E, C> {
     }
 }
 
-impl<T, R: Context> ActorOps for Child<T, R> {
+impl<T, R: Context> ActorRef for Child<T, R> {
     type Ctx = R;
 
-    fn handle(&self) -> &Channel<Self::Ctx> {
-        self.address.handle()
+    fn channel(&self) -> &Channel<Self::Ctx> {
+        self.address.channel()
     }
 }
 
@@ -160,7 +160,7 @@ impl<T, R: Context> Debug for Child<T, R> {
     }
 }
 
-pub struct ExitingChild<E = (), C: Context = Dyn<()>> {
+pub struct ExitingChild<E = (), C: Context = Dyn> {
     child: Child<E, C>,
     abort_after: Pin<Box<tokio::time::Sleep>>,
 }

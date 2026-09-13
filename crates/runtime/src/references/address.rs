@@ -2,7 +2,7 @@ use crate::*;
 use std::{fmt::Debug, hash::Hash};
 
 #[repr(transparent)]
-pub struct Address<C: Context = Dyn<()>> {
+pub struct Address<C: Context = Dyn> {
     pub(super) channel: Channel<C>,
 }
 
@@ -18,10 +18,10 @@ impl<C: Context> Address<C> {
     }
 }
 
-impl<C: Context> ActorOps for Address<C> {
+impl<C: Context> ActorRef for Address<C> {
     type Ctx = C;
 
-    fn handle(&self) -> &Channel<Self::Ctx> {
+    fn channel(&self) -> &Channel<Self::Ctx> {
         &self.channel
     }
 }

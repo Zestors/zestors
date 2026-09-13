@@ -1,7 +1,7 @@
 use crate::_prelude::*;
 use serde::{Deserialize, Serialize};
 use zestors_runtime::{
-    ActorOps, Channel,
+    ActorRef, Channel,
     errors::{DuplicatePidError, StartOnError},
 };
 
@@ -104,11 +104,11 @@ impl<T: Start> ChildSpec<T> {
     }
 }
 
-impl<T: Start> ActorOps for ChildSpec<T> {
+impl<T: Start> ActorRef for ChildSpec<T> {
     type Ctx = T::Ctx;
 
-    fn handle(&self) -> &Channel<Self::Ctx> {
-        &self.channel.handle()
+    fn channel(&self) -> &Channel<Self::Ctx> {
+        &self.channel.channel()
     }
 }
 

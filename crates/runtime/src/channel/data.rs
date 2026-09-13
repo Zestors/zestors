@@ -1,20 +1,4 @@
 use super::*;
-use crate::{InboxEvent, registry::Registry};
-use eyeball::{ObservableWriteGuard, SharedObservable};
-use std::{
-    any::TypeId,
-    convert::Infallible,
-    fmt::Debug,
-    hash::Hash,
-    marker::PhantomData,
-    sync::{
-        RwLock,
-        atomic::{AtomicUsize, Ordering},
-    },
-};
-use tokio::{select, time::Instant};
-use type_sets::{AsTypeSet, Contains};
-
 /// The `ChannelData` contained in either:
 /// - [`Address`]: A weak reference to the channel data.
 /// - [`Channel`]: A strong reference to the channel data, which can be used to spawn
@@ -28,12 +12,12 @@ use type_sets::{AsTypeSet, Contains};
 /// This means, that in order restart an actor, the [`Channel`] handle must be kept
 /// alive.
 #[repr(transparent)]
-pub struct Channel<C: Context = Dyn<()>> {
-    inner: Arc<ChannelData<dyn DynamicQueue>>,
+pub struct Channel<C: Context = Dyn> {
+    inner: Arc<ChannelInner<dyn DynamicQueue>>,
     _ctx: PhantomData<fn() -> C>,
 }
 
-pub(crate) struct ChannelData<Q: ?Sized> {
+pub(crate) struct ChannelInner<Q: ?Sized> {
     pid: Pid,
     signal_queue: ConcurrentQueue<SignalInterface>,
     signal_notifier: Notify,
@@ -91,24 +75,24 @@ impl<C: Context> Channel<C> {
         }
     }
 
-    pub(super) fn data(&self) -> &ChannelData<dyn DynamicQueue> {
+    pub(crate) fn data(&self) -> &ChannelInner<dyn DynamicQueue> {
         &self.inner
     }
 
-    pub(super) fn try_push_msg<M: Message>(&self, msg: M) -> Result<M::Receipt, NotAccepted<M>> {
+    pub(crate) fn try_push_msg<M: Message>(&self, msg: M) -> Result<M::Receipt, NotAccepted<M>> {
         self.data().msg_queue.try_push_msg(msg)
     }
 
-    pub(super) fn msg_notify_one(&self) {
+    pub(crate) fn msg_notify_one(&self) {
         self.data().msg_notifier.notify_one();
     }
 
     #[expect(unused)]
-    pub(super) fn pop_dyn(&self) -> Result<AnyEnvelope, PopError> {
+    pub(crate) fn pop_dyn(&self) -> Result<AnyEnvelope, PopError> {
         self.data().msg_queue.pop_dyn()
     }
 
-    pub(super) fn update_status<F, T>(&self, f: F) -> T
+    pub(crate) fn update_status<F, T>(&self, f: F) -> T
     where
         F: FnOnce(ActorStatus) -> (Option<ActorStatus>, T),
     {
@@ -126,7 +110,7 @@ impl<C: Context> Channel<C> {
         result
     }
 
-    pub(super) fn register_spawned(&self) -> Result<(), InvalidStatusUpdate> {
+    pub(crate) fn register_spawned(&self) -> Result<(), InvalidStatusUpdate> {
         tracing::debug!("Process spawned");
 
         // Spawn is only valid if the actor is dead.
@@ -152,7 +136,7 @@ impl<C: Context> Channel<C> {
         Ok(())
     }
 
-    pub(super) fn register_exited(&self, reason: Result<(), ExitError>) -> bool {
+    pub(crate) fn register_exited(&self, reason: Result<(), ExitError>) -> bool {
         // Exit is always valid, but doesn't always do something.
         let updated = self.update_status(|status| match status {
             ActorStatus::Stopping | ActorStatus::Exited(_) => (None, false),
@@ -183,7 +167,7 @@ impl<C: Context> Channel<C> {
         }
     }
 
-    pub(super) fn register_initialized(&self) -> Result<bool, InvalidStatusUpdate> {
+    pub(crate) fn register_initialized(&self) -> Result<bool, InvalidStatusUpdate> {
         let updated = self.update_status(|status| match status {
             ActorStatus::Stopping | ActorStatus::Exited(_) => (
                 None,
@@ -202,7 +186,7 @@ impl<C: Context> Channel<C> {
         }
     }
 
-    pub(super) fn register_suspended(&self) -> Result<bool, InvalidStatusUpdate> {
+    pub(crate) fn register_suspended(&self) -> Result<bool, InvalidStatusUpdate> {
         let updated = self.update_status(|status| match status {
             ActorStatus::Stopping | ActorStatus::Exited(_) | ActorStatus::Initializing => (
                 None,
@@ -220,7 +204,7 @@ impl<C: Context> Channel<C> {
         }
     }
 
-    pub(super) fn register_resumed(&self) -> Result<bool, InvalidStatusUpdate> {
+    pub(crate) fn register_resumed(&self) -> Result<bool, InvalidStatusUpdate> {
         let updated = self.update_status(|status| match status {
             ActorStatus::Stopping | ActorStatus::Exited(_) | ActorStatus::Initializing => (
                 None,
@@ -238,7 +222,7 @@ impl<C: Context> Channel<C> {
         }
     }
 
-    pub(super) fn register_stopping(&self) -> Result<bool, InvalidStatusUpdate> {
+    pub(crate) fn register_stopping(&self) -> Result<bool, InvalidStatusUpdate> {
         let updated = self.update_status(|status| match status {
             ActorStatus::Exited(_) => (
                 None,
@@ -259,7 +243,7 @@ impl<C: Context> Channel<C> {
         }
     }
 
-    pub(super) fn raw_queue(&self) -> Option<&ConcurrentQueue<C>>
+    pub(crate) fn raw_queue(&self) -> Option<&ConcurrentQueue<C>>
     where
         C: Interface,
     {
@@ -283,11 +267,11 @@ impl<C: Context> Channel<C> {
         }
     }
 
-    pub(super) fn backpressure(&self) -> &BackPressure {
+    pub(crate) fn backpressure(&self) -> &BackPressure {
         BackPressure::global()
     }
 
-    pub(super) async fn delay_for_backpressure(&self) {
+    pub(crate) async fn delay_for_backpressure(&self) {
         let len = self.data().msg_queue.len();
         let limit = self.data().msg_backpressure_limit;
 
@@ -332,13 +316,13 @@ impl<C: Context> Channel<C> {
 }
 
 impl<I: Interface> Channel<I> {
-    pub(super) fn new(pid: Pid, strong_count: usize) -> Self {
+    pub(crate) fn new(pid: Pid, strong_count: usize) -> Self {
         let msg_queue_capacity = match TypeId::of::<I>() == TypeId::of::<Infallible>() {
             true => 0,
             false => MSG_QUEUE_CAPACITY,
         };
 
-        let inner: Arc<ChannelData<dyn DynamicQueue>> = Arc::new(ChannelData {
+        let inner: Arc<ChannelInner<dyn DynamicQueue>> = Arc::new(ChannelInner {
             pid,
             msg_notifier: Notify::new(),
             msg_backpressure_limit: BACKPRESSURE_LIMIT,
@@ -492,140 +476,7 @@ impl<I: Interface> Channel<I> {
     }
 }
 
-impl<C: Context> Debug for Channel<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ChannelData")
-            .field("pid", &self.data().pid)
-            .field("status", &self.data().status_observer.get())
-            .field("len", &self.data().msg_queue.len())
-            .finish()
-    }
-}
-
-impl<C: Context> Eq for Channel<C> {}
-impl<C: Context> PartialEq for Channel<C> {
-    fn eq(&self, other: &Self) -> bool {
-        self.data().pid == other.data().pid
-    }
-}
-impl<C: Context> Hash for Channel<C> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.data().pid.hash(state);
-    }
-}
-
-impl<C: Context> ActorOps for Channel<C> {
-    type Ctx = C;
-
-    fn handle(&self) -> &Channel<Self::Ctx> {
-        self
-    }
-}
-
-impl<C: Context> Channel<C> {
-    pub(crate) fn ref_count(&self) -> usize {
-        Arc::strong_count(&self.inner)
-    }
-}
-
-impl<M, T> _Sends<M> for Channel<Dyn<T>>
-where
-    M: Message,
-    T: AsTypeSet + Contains<M> + 'static,
-{
-    async fn _send(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
-        match self.send_dyn(msg).await {
-            Ok(output) => Ok(output),
-            Err(SendCheckedError::Closed(msg)) => Err(SendError(msg)),
-            Err(SendCheckedError::NotAccepted(_)) => {
-                panic!(
-                    "Message type {} not accepted by channel {}",
-                    std::any::type_name::<M>(),
-                    std::any::type_name::<Self>(),
-                );
-            }
-        }
-    }
-
-    fn _try_send(&self, msg: M) -> Result<M::Receipt, TrySendError<M>> {
-        match self.try_send_dyn(msg) {
-            Ok(output) => Ok(output),
-            Err(TrySendCheckedError::Closed(msg)) => Err(TrySendError::Closed(msg)),
-            Err(TrySendCheckedError::Full(msg)) => Err(TrySendError::Full(msg)),
-            Err(TrySendCheckedError::NotAccepted(_)) => {
-                panic!(
-                    "Message type {} not accepted by channel {}",
-                    std::any::type_name::<M>(),
-                    std::any::type_name::<Self>(),
-                );
-            }
-        }
-    }
-
-    fn _send_now(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
-        match self.send_now_dyn(msg) {
-            Ok(output) => Ok(output),
-            Err(SendCheckedError::Closed(msg)) => Err(SendError(msg)),
-            Err(SendCheckedError::NotAccepted(_)) => {
-                panic!(
-                    "Message type {} not accepted by channel {}",
-                    std::any::type_name::<M>(),
-                    std::any::type_name::<Self>(),
-                );
-            }
-        }
-    }
-}
-
-impl<M, I> _Sends<M> for Channel<I>
-where
-    M: Message,
-    I: Interface + TryInto<Envelope<M>> + From<Envelope<M>> + Send + 'static,
-{
-    async fn _send(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
-        self.delay_for_backpressure().await;
-        self._send_now(msg)
-    }
-
-    fn _try_send(&self, msg: M) -> Result<M::Receipt, TrySendError<M>> {
-        if self.reached_backpressure() {
-            return Err(TrySendError::Full(msg));
-        }
-
-        self._send_now(msg).map_err(Into::into)
-    }
-
-    fn _send_now(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
-        if !self.status().accepts_messages() {
-            return Err(SendError(msg));
-        }
-
-        if let Some(queue) = self.raw_queue() {
-            let (envelope, receipt) = Envelope::new_pair(msg);
-            let interface = I::from(envelope);
-
-            if let Err(_e) = queue.push(interface) {
-                panic!("Queue was full or empty {}", std::any::type_name::<Self>());
-            }
-
-            Ok(receipt)
-        } else {
-            match self.send_now_dyn(msg) {
-                Err(SendCheckedError::NotAccepted(_)) => {
-                    panic!(
-                        "Message type {} not accepted by channel {}",
-                        std::any::type_name::<M>(),
-                        std::any::type_name::<Self>(),
-                    );
-                }
-                Err(SendCheckedError::Closed(msg)) => Err(SendError(msg)),
-                Ok(output) => Ok(output),
-            }
-        }
-    }
-}
-
-impl ChannelData<dyn DynamicQueue> {
+impl ChannelInner<dyn DynamicQueue> {
     pub fn msg_len(&self) -> usize {
         self.msg_queue.len()
     }
@@ -724,6 +575,42 @@ impl ChannelData<dyn DynamicQueue> {
     pub fn exits(&self) -> Vec<(Instant, Result<(), ExitError>)> {
         let exits = self.exits.read().unwrap();
         exits.clone()
+    }
+}
+
+impl<C: Context> Debug for Channel<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChannelData")
+            .field("pid", &self.data().pid)
+            .field("status", &self.data().status_observer.get())
+            .field("len", &self.data().msg_queue.len())
+            .finish()
+    }
+}
+
+impl<C: Context> Eq for Channel<C> {}
+impl<C: Context> PartialEq for Channel<C> {
+    fn eq(&self, other: &Self) -> bool {
+        self.data().pid == other.data().pid
+    }
+}
+impl<C: Context> Hash for Channel<C> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.data().pid.hash(state);
+    }
+}
+
+impl<C: Context> ActorRef for Channel<C> {
+    type Ctx = C;
+
+    fn channel(&self) -> &Channel<Self::Ctx> {
+        self
+    }
+}
+
+impl<C: Context> Channel<C> {
+    pub(crate) fn ref_count(&self) -> usize {
+        Arc::strong_count(&self.inner)
     }
 }
 
