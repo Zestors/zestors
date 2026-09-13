@@ -44,7 +44,7 @@ impl<H: Handler> FullHandlerState<H> {
             }
 
             _shutdown_signal_received = async {
-                while let Some(signal) = inbox.next_signal().await {
+                while let Some(signal) = inbox.recv_signal().await {
                     match signal {
                         Signal::Shutdown => {
                             break;
@@ -88,7 +88,7 @@ impl<H: Handler> FullHandlerState<H> {
         let (inbox, state) = self.split();
 
         let msg = select! {
-            msg = inbox.next_event() => {
+            msg = inbox.recv_event() => {
                 if let Some(msg) = msg {
                     msg
                 } else {

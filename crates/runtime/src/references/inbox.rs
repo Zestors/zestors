@@ -42,27 +42,19 @@ impl<T: Interface> Inbox<T> {
 
     /// Returns the next event from the channel, or `None` if the channel has received
     /// a [`Signal::Shutdown`] signal and has no more messages to process.
-    ///
-    /// If the channel is [`Suspended`](ActorStatus::Suspended), this method will only
-    /// receive [signals](Signal). Only after receiving a [`Signal::Resume`] signal will
-    /// it start receiving messages again.
-    ///
-    /// Upon the first call to `next`, the channel's status will be set to
-    /// [`Running`](ActorStatus::Running), and will count as a completion of the initialization
-    /// phase. For receiving signals without setting the status to running, see [`Inbox::next_signal`].
-    pub async fn next_event(&mut self) -> Option<InboxEvent<T>> {
+    pub async fn recv_event(&mut self) -> Option<InboxEvent<T>> {
         self.register_initialized();
-        self.channel().next().await
+        self.channel().next_event().await
     }
 
     /// Block until the next message becomes available. Once the actor has received a
     /// [`Signal::Shutdown`], the inbox will be closed, and all remaining messages
     /// are received until the inbox is empty.
-    pub async fn next(&mut self) -> Option<T> {
+    pub async fn recv(&mut self) -> Option<T> {
         self.register_initialized();
 
         loop {
-            match self.channel().next().await {
+            match self.channel().next_event().await {
                 Some(ev) => {
                     if let InboxEvent::Message(msg) = ev {
                         return Some(msg);
@@ -73,17 +65,14 @@ impl<T: Interface> Inbox<T> {
         }
     }
 
-    pub fn try_next(&mut self) -> Option<InboxEvent<T>> {
+    pub fn try_recv(&mut self) -> Option<InboxEvent<T>> {
         self.register_initialized();
         self.channel().try_next()
     }
 
-    pub async fn next_signal(&mut self) -> Option<Signal> {
-        self.channel().recv_signal().await
-    }
-
-    pub async fn next_msg(&mut self) -> Option<T> {
-        self.channel().recv_msg().await
+    pub async fn recv_signal(&mut self) -> Option<Signal> {
+        self.register_initialized();
+        self.channel().next_signal().await
     }
 
     fn init_completed(&self) -> bool {
@@ -126,7 +115,7 @@ impl<T: Interface> Inbox<T> {
     }
 
     async fn wait_resume(&mut self) {
-        while let Some(signal) = self.next_signal().await {
+        while let Some(signal) = self.recv_signal().await {
             match signal {
                 Signal::Resume | Signal::Shutdown => break,
                 _ => {}
@@ -155,7 +144,7 @@ impl<T: Interface> Inbox<T> {
 
             tokio::select! {
                 res = &mut fut => return Ok(res),
-                signal = self.next_signal() => match signal {
+                signal = self.recv_signal() => match signal {
                     Some(Signal::Shutdown) | None => return Err(Cancelled),
                     Some(Signal::Suspend) => {
                         self.wait_resume().await;

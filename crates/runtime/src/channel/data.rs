@@ -342,7 +342,7 @@ impl<I: Interface> Channel<I> {
         }
     }
 
-    pub(crate) async fn recv_msg(&self) -> Option<I> {
+    pub(crate) async fn next_msg(&self) -> Option<I> {
         let raw_queue = self
             .raw_queue()
             .expect("Channel is not of the expected interface type");
@@ -379,7 +379,7 @@ impl<I: Interface> Channel<I> {
         }
     }
 
-    pub(crate) async fn recv_signal(&self) -> Option<Signal> {
+    pub(crate) async fn next_signal(&self) -> Option<Signal> {
         let mut notify = pin!(self.data().signal_notifier.notified());
 
         loop {
@@ -443,16 +443,16 @@ impl<I: Interface> Channel<I> {
         }
     }
 
-    pub(crate) async fn next(&self) -> Option<InboxEvent<I>> {
+    pub(crate) async fn next_event(&self) -> Option<InboxEvent<I>> {
         match self.status() {
-            ActorStatus::Suspended => self.recv_signal().await.map(InboxEvent::Signal),
+            ActorStatus::Suspended => self.next_signal().await.map(InboxEvent::Signal),
             ActorStatus::Exited(_) | ActorStatus::Stopping if self.msgs_is_empty() => None,
             _ => {
                 select! {
                     biased;
 
-                    Some(signal) = self.recv_signal() => Some(InboxEvent::Signal(signal)),
-                    Some(msg) = self.recv_msg() => Some(InboxEvent::Message(msg)),
+                    Some(signal) = self.next_signal() => Some(InboxEvent::Signal(signal)),
+                    Some(msg) = self.next_msg() => Some(InboxEvent::Message(msg)),
                     else => None,
                 }
             }

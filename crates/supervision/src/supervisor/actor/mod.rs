@@ -173,7 +173,7 @@ impl InitializingSupervisor {
                     }
                 }
 
-                Some(msg) = self.supervisor.inbox.next_event() => {
+                Some(msg) = self.supervisor.inbox.recv_event() => {
                     match msg {
                         InboxEvent::Signal(signal) => match signal {
                             Signal::Shutdown => {
@@ -217,7 +217,7 @@ impl ExitingSupervisor {
                     break exit_result;
                 }
 
-                Some(msg) = self.supervisor.inbox.next_event() => {
+                Some(msg) = self.supervisor.inbox.recv_event() => {
                     match msg {
                         InboxEvent::Signal(signal) => match signal {
                             Signal::Shutdown

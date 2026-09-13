@@ -11,8 +11,8 @@ use zestors_actor::ActorExt;
 use zestors_runtime::spawn;
 #[tokio::main]
 async fn main() {
-    let child = spawn(async move |mut stream: Inbox<MyInterface>| {
-        while let Some(msg) = stream.next().await {
+    let child = spawn(async move |mut inbox: Inbox<MyInterface>| {
+        while let Some(msg) = inbox.recv().await {
             match msg {
                 MyInterface::Add(envelope) => {
                     println!("Received message: {:?}", envelope);

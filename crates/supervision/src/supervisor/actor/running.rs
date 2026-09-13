@@ -83,7 +83,7 @@ impl RunningSupervisor {
                 Next::SuperviseeItem(next.pid, next.item)
             }
 
-            Some(msg) = self.supervisor.inbox.next_event() => {
+            Some(msg) = self.supervisor.inbox.recv_event() => {
                 Next::InboxEvent(msg)
             }
 
