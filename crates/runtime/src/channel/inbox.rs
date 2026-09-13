@@ -173,3 +173,8 @@ impl<T: Interface> Drop for Inbox<T> {
         self.handle().drain_messages_and_signals();
     }
 }
+
+pub enum InboxEvent<M> {
+    Signal(Signal),
+    Message(M),
+}

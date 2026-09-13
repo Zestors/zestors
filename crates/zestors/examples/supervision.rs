@@ -7,10 +7,10 @@ use zestors::{
     },
     api_server::ApiServer,
     prelude::*,
-    runtime::RestartMode,
     runtime::errors::Cancelled,
     supervision::{InMemorySupervisorSource, Supervisor, SupervisorBlueprint},
 };
+use zestors_actor::RestartMode;
 use zestors_supervision::{BlueprintSupervisionExt as _, Node};
 
 #[derive(Interface, HandlerInterface)]

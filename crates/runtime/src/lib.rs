@@ -1,12 +1,14 @@
 mod channel;
+mod context;
+mod pid;
 mod registry;
 mod signals;
 
-pub use {channel::*, registry::*, signals::*};
+pub use {channel::*, context::*, pid::*, registry::*, signals::*};
 
 #[allow(unused_imports)]
 pub(crate) mod _prelude {
-    pub(crate) use crate::{channel::*, registry::*, signals::*};
+    pub(crate) use crate::*;
     pub(crate) use rootcause::Report;
     pub(crate) use serde::{Deserialize, Serialize};
     pub(crate) use std::{future::Future, time::Duration};
@@ -16,10 +18,7 @@ pub(crate) mod _prelude {
 
 pub mod prelude {
     pub use crate::{
-        channel::{
-            ActorOpsExt as _, Address, Child, Inbox, IntoDyn as _, Pid, Sends as _, StrongAddress,
-            spawn_with,
-        },
-        signals::{InboxEvent, Signal},
+        ActorOpsExt as _, Address, Child, Inbox, InboxEvent, IntoDyn as _, Pid, Sends as _, Signal,
+        StrongAddress, spawn_with,
     };
 }

@@ -1,5 +1,5 @@
 use super::*;
-use crate::{registry::Registry, signals::InboxEvent};
+use crate::{InboxEvent, registry::Registry};
 use eyeball::{ObservableWriteGuard, SharedObservable};
 use std::{
     any::TypeId,

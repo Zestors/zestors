@@ -67,7 +67,7 @@ impl<R: Blueprint> _Spawnable for R {
 }
 
 impl Start for DynStarter {
-    type Ctx = Dyn<()>;
+    type Ctx = Dyn;
     type Exit = ();
 
     async fn start_on(

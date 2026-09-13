@@ -9,11 +9,8 @@ use std::{
 };
 use tokio::time::{error::Elapsed, timeout};
 use zestors_runtime::{
-    RestartMode,
-    {
-        ActorOps, ActorStatus, Channel, Child, Dyn, ExitingChild, Pid,
-        errors::{JoinError, StartOnError},
-    },
+    ActorOps, ActorStatus, Channel, Child, Dyn, ExitingChild, Pid,
+    errors::{JoinError, StartOnError},
 };
 
 #[derive(Debug)]
@@ -143,7 +140,7 @@ impl Stream for Supervisee {
 }
 
 impl ActorOps for Supervisee {
-    type Ctx = Dyn<()>;
+    type Ctx = Dyn;
 
     fn handle(&self) -> &Channel<Self::Ctx> {
         self.spec.handle()

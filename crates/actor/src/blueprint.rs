@@ -1,7 +1,7 @@
 use std::{fmt::Debug, future::Future, time::Duration};
-use zestors_runtime::{RestartMode, errors::DuplicatePidError, prelude::*};
+use zestors_runtime::{errors::DuplicatePidError, prelude::*};
 
-use crate::{Actor, ActorExt as _};
+use crate::{Actor, ActorExt as _, RestartMode};
 
 pub trait Blueprint: Debug + Send + Sync + 'static {
     type Actor: Actor;
