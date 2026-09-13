@@ -7,12 +7,6 @@ pub struct Address<C: Context = Dyn> {
 }
 
 impl<C: Context> Address<C> {
-    pub(super) fn new(channel: &Channel<C>) -> Self {
-        Self {
-            channel: channel._clone(),
-        }
-    }
-
     pub(crate) fn from_ref(channel: &Channel<C>) -> &Self {
         unsafe { std::mem::transmute::<&Channel<C>, &Address<C>>(channel) }
     }

@@ -1,6 +1,6 @@
 use crate::*;
 use std::sync::OnceLock;
-use type_sets::Members;
+use type_sets::{AsTypeSet, Members};
 
 /// A thread-safe global registry mapping process identifiers ([`Pid`]) to their weak handles ([`Address`]).
 ///
@@ -93,7 +93,7 @@ impl Registry {
     /// - the set of types does not match the registered address's type set
     pub fn get_dyn<S>(&self, pid: &Pid) -> Result<Address<Dyn<S>>, TypedRegistryError>
     where
-        Dyn<S>: Context + Members,
+        S: AsTypeSet + 'static + Members,
     {
         self.get(pid)
             .ok_or_else(|| TypedRegistryError::NotFound(pid.clone()))?

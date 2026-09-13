@@ -88,7 +88,7 @@ impl<H: Handler> FullHandlerState<H> {
         let (inbox, state) = self.split();
 
         let msg = select! {
-            msg = inbox.next() => {
+            msg = inbox.next_event() => {
                 if let Some(msg) = msg {
                     msg
                 } else {

@@ -17,7 +17,7 @@ impl TaskBox {
     /// [`Running`](ActorStatus::Running), and will count as a completion of the initialization
     /// phase.
     pub async fn next(&mut self) -> Option<Signal> {
-        match self.inbox.next().await? {
+        match self.inbox.next_event().await? {
             InboxEvent::Signal(signal) => Some(signal),
             InboxEvent::Message(msg) => match msg {},
         }

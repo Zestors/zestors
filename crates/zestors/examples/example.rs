@@ -14,32 +14,22 @@ async fn main() {
     let child = spawn(async move |mut stream: Inbox<MyInterface>| {
         while let Some(msg) = stream.next().await {
             match msg {
-                InboxEvent::Signal(signal) => match signal {
-                    Signal::Shutdown => {
-                        println!("Received shutdown signal");
-                        break;
-                    }
-                    Signal::Resume | Signal::Suspend => {}
-                },
-
-                InboxEvent::Message(message) => match message {
-                    MyInterface::Add(envelope) => {
-                        println!("Received message: {:?}", envelope);
-                    }
-                    MyInterface::Print(envelope) => {
-                        println!("Received message: {:?}", envelope);
-                    }
-                    MyInterface::Health(Envelope { handle, .. }) => {
-                        handle.reply(Health::healthy()).ok();
-                    }
-                    MyInterface::Children(Envelope { handle, .. }) => {
-                        handle.reply(vec![]).ok();
-                    }
-                    MyInterface::Rpc(envelope) => {
-                        println!("Received any message. Not handleable, dropping...");
-                        drop(envelope);
-                    }
-                },
+                MyInterface::Add(envelope) => {
+                    println!("Received message: {:?}", envelope);
+                }
+                MyInterface::Print(envelope) => {
+                    println!("Received message: {:?}", envelope);
+                }
+                MyInterface::Health(Envelope { handle, .. }) => {
+                    handle.reply(Health::healthy()).ok();
+                }
+                MyInterface::Children(Envelope { handle, .. }) => {
+                    handle.reply(vec![]).ok();
+                }
+                MyInterface::Rpc(envelope) => {
+                    println!("Received any message. Not handleable, dropping...");
+                    drop(envelope);
+                }
             }
         }
 

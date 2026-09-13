@@ -8,26 +8,19 @@ pub trait IntoDyn: ActorRef + Sized {
     where
         C: Context;
 
-    fn into_dyn_unchecked<S>(self) -> Self::Ref<Dyn<S>>
-    where
-        Dyn<S>: Context,
-    {
-        self.into_context_unchecked()
-    }
-
     fn into_dyn<S>(self) -> Self::Ref<Dyn<S>>
     where
         S: Subset<<Self::Ctx as Context>::Set> + AsTypeSet + 'static,
     {
-        self.into_dyn_unchecked()
+        self.into_context_unchecked()
     }
 
     fn into_dyn_checked<S>(self) -> Result<Self::Ref<Dyn<S>>, Self>
     where
-        Dyn<S>: Context + Members,
+        S: AsTypeSet + 'static + Members,
     {
-        if self.is_superset_of(Dyn::<S>::members()) {
-            Ok(self.into_dyn_unchecked())
+        if self.is_superset_of(S::members()) {
+            Ok(self.into_context_unchecked())
         } else {
             Err(self)
         }
@@ -38,8 +31,7 @@ pub trait IntoDyn: ActorRef + Sized {
         I: Interface,
     {
         if self.is_interface::<I>() {
-            // Ok(self.into_dyn_unchecked())
-            todo!()
+            Ok(self.into_context_unchecked())
         } else {
             Err(self)
         }
@@ -47,23 +39,23 @@ pub trait IntoDyn: ActorRef + Sized {
 }
 
 pub trait AsDyn: IntoDyn {
-    fn as_dyn_unchecked<S>(&self) -> &Self::Ref<S>
+    fn as_context_unchecked<S>(&self) -> &Self::Ref<S>
     where
         S: Context;
 
-    fn as_dyn<S>(&self) -> &Self::Ref<S>
+    fn as_dyn<S>(&self) -> &Self::Ref<Dyn<S>>
     where
-        S: Context + Subset<<Self::Ctx as Context>::Set>,
+        S: Subset<<Self::Ctx as Context>::Set> + AsTypeSet + 'static,
     {
-        self.as_dyn_unchecked()
+        self.as_context_unchecked()
     }
 
-    fn as_dyn_checked<S>(&self) -> Option<&Self::Ref<S>>
+    fn as_dyn_checked<S>(&self) -> Option<&Self::Ref<Dyn<S>>>
     where
-        S: Context + Members,
+        S: AsTypeSet + 'static + Members,
     {
         if self.is_superset_of(S::members()) {
-            Some(self.as_dyn_unchecked())
+            Some(self.as_context_unchecked())
         } else {
             None
         }
@@ -74,7 +66,7 @@ pub trait AsDyn: IntoDyn {
         I: Interface,
     {
         if self.is_interface::<I>() {
-            Some(self.as_dyn_unchecked())
+            Some(self.as_context_unchecked())
         } else {
             None
         }

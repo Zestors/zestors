@@ -61,7 +61,7 @@ impl Actor for ApiServer {
                     break api_exit.map_err(Into::into);
                 },
 
-                event = state.next() => match event {
+                event = state.next_event() => match event {
                     Some(event) => event,
                     None => break Err(rootcause::report!("Actor event stream closed unexpectedly")),
                 }

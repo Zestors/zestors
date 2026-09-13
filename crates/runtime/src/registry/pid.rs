@@ -2,7 +2,7 @@ use crate::{registry::Registry, *};
 use bs58::Alphabet;
 use smol_str::SmolStr;
 use std::{borrow::Cow, fmt::Display, sync::Arc};
-use type_sets::Members;
+use type_sets::{AsTypeSet, Members};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Pid(SmolStr);
@@ -39,7 +39,7 @@ impl Pid {
 
     pub fn dyn_address<S>(&self) -> Result<Address<Dyn<S>>, TypedRegistryError>
     where
-        Dyn<S>: Context + Members,
+        S: AsTypeSet + 'static + Members,
     {
         Registry::local().get_dyn::<S>(self)
     }

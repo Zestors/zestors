@@ -75,7 +75,7 @@ impl<C: Context> IntoDyn for StrongAddress<C> {
 }
 
 impl<C: Context> AsDyn for StrongAddress<C> {
-    fn as_dyn_unchecked<S>(&self) -> &StrongAddress<S>
+    fn as_context_unchecked<S>(&self) -> &StrongAddress<S>
     where
         S: Context,
     {

@@ -50,11 +50,40 @@ impl<T: Interface> Inbox<T> {
     /// Upon the first call to `next`, the channel's status will be set to
     /// [`Running`](ActorStatus::Running), and will count as a completion of the initialization
     /// phase. For receiving signals without setting the status to running, see [`Inbox::next_signal`].
-    pub async fn next(&mut self) -> Option<InboxEvent<T>> {
-        // If this is the first call to next(), set the status to Running
+    pub async fn next_event(&mut self) -> Option<InboxEvent<T>> {
+        self.register_initialized();
+        self.channel().next().await
+    }
+
+    /// Block until the next message becomes available. Once the actor has received a
+    /// [`Signal::Shutdown`], the inbox will be closed, and all remaining messages
+    /// are received until the inbox is empty.
+    pub async fn next(&mut self) -> Option<T> {
         self.register_initialized();
 
-        self.channel().next().await
+        loop {
+            match self.channel().next().await {
+                Some(ev) => {
+                    if let InboxEvent::Message(msg) = ev {
+                        return Some(msg);
+                    }
+                }
+                None => return None,
+            }
+        }
+    }
+
+    pub fn try_next(&mut self) -> Option<InboxEvent<T>> {
+        self.register_initialized();
+        self.channel().try_next()
+    }
+
+    pub async fn next_signal(&mut self) -> Option<Signal> {
+        self.channel().recv_signal().await
+    }
+
+    pub async fn next_msg(&mut self) -> Option<T> {
+        self.channel().recv_msg().await
     }
 
     fn init_completed(&self) -> bool {
@@ -90,24 +119,6 @@ impl<T: Interface> Inbox<T> {
 
     pub fn register_stopping(&mut self) -> bool {
         self.channel().register_stopping().unwrap_or(false)
-    }
-
-    // TODO: Remove this method in a future version
-    pub async fn next_with_init(&mut self, init: bool) -> Option<InboxEvent<T>> {
-        match init {
-            true => self.next().await,
-            false => self.channel().next().await,
-        }
-    }
-
-    pub fn try_next(&mut self) -> Option<InboxEvent<T>> {
-        self.register_initialized();
-        self.channel().try_next()
-    }
-
-    /// Returns the next signal from the channel, or `None` if the channel has received.
-    pub async fn next_signal(&mut self) -> Option<Signal> {
-        self.channel().recv_signal().await
     }
 
     pub fn is_shutting_down(&self) -> bool {
