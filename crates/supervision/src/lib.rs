@@ -32,6 +32,6 @@ pub use tree::*;
 
 pub mod prelude {
     pub use crate::childspec::ChildSpec;
-    pub use crate::strategy::{RestartIntensity, SupervisionStrategy};
+    pub use crate::strategy::SupervisionStrategy;
     pub use crate::supervisor::{SupervisorBlueprint, SupervisorInterface};
 }

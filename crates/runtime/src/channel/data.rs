@@ -318,7 +318,7 @@ impl<C: Context> Channel<C> {
 impl<I: Interface> Channel<I> {
     pub(crate) fn new(pid: Pid, strong_count: usize) -> Self {
         let msg_queue_capacity = match TypeId::of::<I>() == TypeId::of::<Infallible>() {
-            true => 0,
+            true => 1,
             false => MSG_QUEUE_CAPACITY,
         };
 
@@ -437,7 +437,7 @@ impl<I: Interface> Channel<I> {
                 }
             }
             SignalInterface::Ping(envelope) => {
-                let _ = envelope.handle.reply(());
+                let _ = envelope.request.reply(());
                 None
             }
         }

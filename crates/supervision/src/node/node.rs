@@ -79,7 +79,7 @@ impl NodeActor {
                     std::process::exit(0);
                 }
                 Err(err) => {
-                    if !self.restart_limiter.allow_restart() {
+                    if !self.restart_limiter.acquire_permit() {
                         tracing::error!("Root-Supervisor exited with error: {:?}", err);
                         tokio::time::sleep(Duration::from_secs(1)).await;
                         std::process::exit(1);

@@ -9,7 +9,7 @@ use super::*;
 pub struct RegisterChild(pub ChildSpec);
 
 #[derive(Message, Debug)]
-#[msg(path = "zestors_interface", reply = "Option<ChildSpec>")]
+#[msg(path = "zestors_interface", reply = "Option<Supervisee>")]
 pub struct DeregisterChild(pub Pid);
 
 #[derive(Interface, Debug)]
@@ -17,4 +17,6 @@ pub struct DeregisterChild(pub Pid);
 pub enum SupervisorInterface {
     Children(Envelope<GetChildren>),
     Health(Envelope<GetHealth>),
+    Register(Envelope<RegisterChild>),
+    Deregister(Envelope<DeregisterChild>),
 }

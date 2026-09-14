@@ -17,11 +17,13 @@ use zestors_runtime::{
 pub struct Supervisee {
     spec: ChildSpec,
     state: SuperviseeState,
+    restarter: RestartLimiter,
 }
 
 impl Supervisee {
     pub fn new(spec: ChildSpec) -> Self {
         Self {
+            restarter: RestartLimiter::new(spec.cfg().intensity.clone()),
             spec,
             state: SuperviseeState::idle(),
         }
@@ -34,11 +36,30 @@ impl Supervisee {
         }
     }
 
+    /// Whether this type of exit requires the child to be restarted.
+    #[must_use]
+    pub fn requires_restart(&self, exit: &SuperviseeExit) -> bool {
+        match (self.cfg().restart_mode, exit) {
+            (RestartMode::Always, _) => true,
+            (RestartMode::Never, _) => false,
+            (RestartMode::OnError, SuperviseeExit::NormalExit | SuperviseeExit::NormalShutdown) => {
+                false
+            }
+            (RestartMode::OnError, SuperviseeExit::JoinError(_)) => true,
+        }
+    }
+
+    /// Whether the restart-limiter allows the child to be restarted
+    #[must_use]
+    pub fn acquire_restart_permit(&mut self) -> bool {
+        self.restarter.acquire_permit()
+    }
+
     pub fn status(&self) -> SuperviseeStatus {
         self.state.status()
     }
 
-    pub fn start(&mut self) -> Result<bool, SuperviseeStartError> {
+    pub fn start(&mut self) -> Result<bool, SuperviseeIsShuttingDown> {
         self.state.map(|state| match state {
             // If the supervisee is idle or dead, we can start it.
             SuperviseeState::Dead { .. } => {
@@ -54,9 +75,7 @@ impl Supervisee {
             SuperviseeState::Starting { .. } | SuperviseeState::Alive { .. } => (state, Ok(false)),
 
             // If the supervisee is shutting down, we cannot start it.
-            SuperviseeState::ShuttingDown { .. } => {
-                (state, Err(SuperviseeStartError::IsShuttingDown))
-            }
+            SuperviseeState::ShuttingDown { .. } => (state, Err(SuperviseeIsShuttingDown)),
         })
     }
 
@@ -86,7 +105,7 @@ impl Supervisee {
             SuperviseeState::Starting { fut } => match fut.await {
                 Ok(child) => {
                     self.state = SuperviseeState::Alive { child };
-                    SuperviseeItem::Started
+                    SuperviseeItem::Spawned
                 }
 
                 Err(start_error) => {
@@ -157,7 +176,7 @@ pub struct SuperviseeNext {
 pub enum SuperviseeItem {
     StartError(StartSuperviseeError),
     Exit(SuperviseeExit),
-    Started,
+    Spawned,
     Initialized,
 }
 
@@ -166,19 +185,6 @@ pub enum SuperviseeExit {
     JoinError(JoinError),
     NormalExit,
     NormalShutdown,
-}
-
-impl SuperviseeExit {
-    pub fn should_restart(&self, mode: RestartMode) -> bool {
-        match (mode, self) {
-            (RestartMode::Always, _) => true,
-            (RestartMode::Never, _) => false,
-            (RestartMode::OnError, SuperviseeExit::NormalExit | SuperviseeExit::NormalShutdown) => {
-                false
-            }
-            (RestartMode::OnError, SuperviseeExit::JoinError(_)) => true,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -302,11 +308,8 @@ impl From<Elapsed> for StartSuperviseeError {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("Cannot start supervisee: {0:?}")]
-pub enum SuperviseeStartError {
-    #[error("Supervisee is shutting down")]
-    IsShuttingDown,
-}
+#[error("Cannot start supervisee: Currently shutting down")]
+pub struct SuperviseeIsShuttingDown;
 
 struct StartFuture(
     Pin<Box<dyn std::future::Future<Output = Result<Child, StartSuperviseeError>> + Send>>,

@@ -1,7 +1,6 @@
+use crate::{Actor, ActorExt as _, RestartIntensity, RestartMode};
 use std::{fmt::Debug, future::Future, time::Duration};
 use zestors_runtime::{errors::DuplicatePidError, prelude::*};
-
-use crate::{Actor, ActorExt as _, RestartMode};
 
 pub trait Blueprint: Debug + Send + Sync + 'static {
     type Actor: Actor;
@@ -23,6 +22,10 @@ pub trait Blueprint: Debug + Send + Sync + 'static {
     fn default_restart_mode(&self) -> RestartMode {
         RestartMode::default()
     }
+
+    fn default_restart_intensity(&self) -> RestartIntensity {
+        RestartIntensity::default()
+    }
 }
 
 impl<T: Actor + Clone + Debug + Send + Sync + 'static> Blueprint for T {
@@ -40,7 +43,7 @@ pub trait BlueprintExt: Blueprint + Sized {
     ) -> impl Future<
         Output = Result<
             Child<<Self::Actor as Actor>::Exit, <Self::Actor as Actor>::Interface>,
-            StartWithError,
+            InstantiateWithError,
         >,
     > + Send
     where
@@ -49,7 +52,7 @@ pub trait BlueprintExt: Blueprint + Sized {
         async {
             self.instantiate()
                 .await
-                .map_err(StartWithError::InstantiationFailed)?
+                .map_err(InstantiateWithError::InstantiationFailed)?
                 .spawn_with(pid)
                 .map_err(Into::into)
         }
@@ -134,11 +137,11 @@ where
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum StartWithError {
-    #[error("Instantiation failed: {0}")]
+pub enum InstantiateWithError {
+    #[error("Actor-instantiation failed: {0}")]
     InstantiationFailed(rootcause::Report),
 
-    #[error("Spawn failed: {0}")]
+    #[error("Spawning failed: {0}")]
     DuplicatePid(
         #[from]
         #[source]

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::_prelude::*;
+use crate::{_prelude::*, supervisor::actor::SuperviseeMap};
 use indexmap::IndexMap;
 use zestors_runtime::prelude::*;
 
@@ -8,7 +8,7 @@ pub struct SupervisorBlueprint {
     supervisees: IndexMap<Pid, ChildSpec>,
     strategy: SupervisionStrategy,
     restart_intensity: RestartIntensity,
-    source_fn: Option<Arc<dyn Fn() -> Box<dyn SupervisorSource> + Send + Sync>>,
+    source: Option<Arc<dyn SupervisorSource>>,
 }
 
 impl SupervisorBlueprint {
@@ -17,7 +17,7 @@ impl SupervisorBlueprint {
             supervisees: Default::default(),
             strategy: SupervisionStrategy::default(),
             restart_intensity: RestartIntensity::default(),
-            source_fn: None,
+            source: None,
         }
     }
 
@@ -29,9 +29,9 @@ impl SupervisorBlueprint {
         Self::new().with_strategy(SupervisionStrategy::OneForAll)
     }
 
-    pub fn rest_for_one() -> Self {
-        Self::new().with_strategy(SupervisionStrategy::RestForOne)
-    }
+    // pub fn rest_for_one() -> Self {
+    //     Self::new().with_strategy(SupervisionStrategy::RestForOne)
+    // }
 
     pub fn with_strategy(mut self, strategy: SupervisionStrategy) -> Self {
         self.strategy = strategy;
@@ -48,19 +48,8 @@ impl SupervisorBlueprint {
         self
     }
 
-    pub fn with_source_fn<S>(mut self, source_fn: impl Fn() -> S + Send + Sync + 'static) -> Self
-    where
-        S: SupervisorSource,
-    {
-        self.source_fn = Some(Arc::new(move || Box::new(source_fn())));
-        self
-    }
-
-    pub fn with_source<S>(mut self, source: S) -> Self
-    where
-        S: SupervisorSource + Clone + Sync,
-    {
-        self.source_fn = Some(Arc::new(move || Box::new(source.clone())));
+    pub fn with_source<S: SupervisorSource>(mut self, source: Arc<S>) -> Self {
+        self.source = Some(source);
         self
     }
 
@@ -114,7 +103,12 @@ impl Blueprint for SupervisorBlueprint {
     type Actor = Supervisor;
 
     async fn instantiate(&self) -> rootcause::Result<Self::Actor> {
-        todo!()
+        Ok(Supervisor::new(
+            SuperviseeMap::new(self.supervisees.values().cloned()),
+            self.strategy,
+            self.restart_intensity.clone(),
+            self.source.clone(),
+        ))
     }
 
     fn default_abort_timeout(&self) -> Duration {

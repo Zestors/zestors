@@ -1,6 +1,6 @@
 use futures::future::pending;
 use rootcause::Report;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use zestors::{
     actor::{
         BasicScheduler, Handle, Handler, HandlerExit, HandlerState, actor_fn, blueprint_fn, task_fn,
@@ -113,6 +113,8 @@ async fn main() -> Result<(), Report> {
         .with_max_level(tracing::Level::DEBUG)
         .init();
 
+    let source = InMemorySupervisorSource::new_arc();
+
     let (spec_a, _addr) = blueprint_fn(|| MyActor::new("A"))
         .with_pid("HelloActor")?
         .with_mode(RestartMode::Never)
@@ -140,6 +142,7 @@ async fn main() -> Result<(), Report> {
 
     let (super_spec_b, _addr) = Supervisor::blueprint()
         .with_children([spec_c, spec_d])
+        .with_source(source.clone())
         .with_pid("SupervisorB")?
         .split();
 
@@ -178,8 +181,6 @@ async fn main() -> Result<(), Report> {
     .with_pid("TaskActor")?
     .split();
 
-    let source = InMemorySupervisorSource::new();
-
     let root_supervisor = SupervisorBlueprint::one_for_one()
         .with_children([
             super_spec_a,
@@ -194,7 +195,6 @@ async fn main() -> Result<(), Report> {
                 .with_pid("DynBlueprintActor2")?
                 .into(),
         ])
-        .with_source(source.clone())
         .with_pid("RootSupervisor")?;
 
     let root_address = Node::new(root_supervisor).start().await?;
@@ -208,10 +208,10 @@ async fn main() -> Result<(), Report> {
     pending().await
 }
 
-fn spawn_tasks_in_background(source: InMemorySupervisorSource) {
+fn spawn_tasks_in_background(source: Arc<InMemorySupervisorSource>) {
     tokio::task::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio::time::sleep(Duration::from_secs(3)).await;
 
             source
                 .add(

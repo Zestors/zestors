@@ -20,11 +20,11 @@ async fn main() {
                 MyInterface::Print(envelope) => {
                     println!("Received message: {:?}", envelope);
                 }
-                MyInterface::Health(Envelope { handle, .. }) => {
-                    handle.reply(Health::healthy()).ok();
+                MyInterface::Health(Envelope { request, .. }) => {
+                    request.reply(Health::healthy()).ok();
                 }
-                MyInterface::Children(Envelope { handle, .. }) => {
-                    handle.reply(vec![]).ok();
+                MyInterface::Children(Envelope { request, .. }) => {
+                    request.reply(vec![]).ok();
                 }
                 MyInterface::Rpc(envelope) => {
                     println!("Received any message. Not handleable, dropping...");
@@ -92,7 +92,7 @@ impl Handle<u32> for MyActor {
     async fn handle(
         &mut self,
         state: HandlerState<'_, Self>,
-        Envelope { msg, handle: () }: Envelope<u32>,
+        Envelope { msg, request: () }: Envelope<u32>,
     ) -> Result<(), Report> {
         println!("Received message: {:?}", msg);
 
@@ -132,7 +132,10 @@ impl Handle<GetHealth> for MyActor {
     async fn handle(
         &mut self,
         _state: HandlerState<'_, Self>,
-        Envelope { msg: _, handle }: Envelope<GetHealth>,
+        Envelope {
+            msg: _,
+            request: handle,
+        }: Envelope<GetHealth>,
     ) -> Result<(), Report> {
         handle.reply(Health::healthy().with_debug_repr(&self)).ok();
 
@@ -154,7 +157,10 @@ impl Handle<GetChildren> for MyActor {
     async fn handle(
         &mut self,
         _: HandlerState<'_, Self>,
-        Envelope { msg: _, handle }: Envelope<GetChildren>,
+        Envelope {
+            msg: _,
+            request: handle,
+        }: Envelope<GetChildren>,
     ) -> Result<(), Report> {
         handle.reply(vec![]).ok();
         Ok(())

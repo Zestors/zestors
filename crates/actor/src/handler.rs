@@ -1,13 +1,9 @@
 use crate::{Actor, FullHandlerState, HandledBy, HandlerState};
 use futures::future::ready;
 use rootcause::{Report, report};
-use std::{
-    convert::Infallible,
-    fmt::Debug,
-    ops::{Deref, DerefMut},
-};
+use std::{convert::Infallible, fmt::Debug};
 use zestors_interface::{Envelope, Interface, Message};
-use zestors_runtime::{errors::DuplicatePidError, prelude::*};
+use zestors_runtime::prelude::*;
 
 /// A declarative and simple way to implement an [`Actor`], by providing a set of
 /// lifecycle hooks and message handlers. Any type that implements [`Handler`]

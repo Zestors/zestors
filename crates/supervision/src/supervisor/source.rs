@@ -38,10 +38,10 @@ pub enum SupervisorSourceEvent {
     Removed(Pid),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct InMemorySupervisorSource {
-    inner: Arc<Mutex<LocalSupervisorChildren>>,
-    notify: Arc<Notify>,
+    inner: Mutex<LocalSupervisorChildren>,
+    notify: Notify,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -56,6 +56,10 @@ impl InMemorySupervisorSource {
             inner: Default::default(),
             notify: Default::default(),
         }
+    }
+
+    pub fn new_arc() -> Arc<Self> {
+        Arc::new(Self::new())
     }
 
     pub fn add<T: Start>(&self, spec: ChildSpec<T>) -> Result<(), DuplicatePidError> {

@@ -8,6 +8,7 @@ use zestors_runtime::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChildConfig {
     pub restart_mode: RestartMode,
+    pub intensity: RestartIntensity,
     pub abort_timeout: Duration,
     pub init_timeout: Duration,
     pub start_timeout: Duration,
@@ -20,12 +21,13 @@ pub struct ChildDescription {
 }
 
 impl ChildConfig {
-    pub fn new_for_blueprint<T: Blueprint>(blueprint: &T) -> Self {
+    pub fn from_blueprint<T: Blueprint>(blueprint: &T) -> Self {
         Self {
             restart_mode: blueprint.default_restart_mode(),
             abort_timeout: blueprint.default_abort_timeout(),
             init_timeout: blueprint.default_init_timeout(),
             start_timeout: blueprint.default_instantiation_timeout(),
+            intensity: blueprint.default_restart_intensity(),
         }
     }
 }
@@ -40,9 +42,9 @@ pub struct ChildSpec<T: Start = DynStarter> {
 impl<T: Blueprint> ChildSpec<T> {
     pub fn create(id: impl Into<Pid>, blueprint: T) -> Result<Self, DuplicatePidError> {
         Ok(Self {
-            cfg: blueprint.generate_config(),
-            blueprint: blueprint.into(),
             channel: StrongAddress::<<T::Actor as Actor>::Interface>::create(id.into())?,
+            cfg: ChildConfig::from_blueprint(&blueprint),
+            blueprint,
         })
     }
 
@@ -144,10 +146,6 @@ pub trait BlueprintSupervisionExt: Blueprint + Sized {
         Self: Send + Sync + 'static,
     {
         DynStarter::new(self)
-    }
-
-    fn generate_config(&self) -> ChildConfig {
-        ChildConfig::new_for_blueprint(self)
     }
 
     fn with_pid(self, pid: impl Into<Pid>) -> Result<ChildSpec<Self>, DuplicatePidError> {

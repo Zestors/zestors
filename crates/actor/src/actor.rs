@@ -13,7 +13,7 @@ pub trait Actor: Send + Sized + 'static {
 
     fn run(
         self,
-        state: Inbox<Self::Interface>,
+        inbox: Inbox<Self::Interface>,
     ) -> impl Future<Output = Result<Self::Exit, Report>> + Send + 'static;
 }
 

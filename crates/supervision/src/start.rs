@@ -30,7 +30,7 @@ impl<B: Blueprint> Start for B {
             .await
             .map_err(|x| StartOnError::Instantiation(x.into()))?;
 
-        channel.spawn(|state| actor.run(state)).map_err(Into::into)
+        channel.spawn(|inbox| actor.run(inbox)).map_err(Into::into)
     }
 }
 
