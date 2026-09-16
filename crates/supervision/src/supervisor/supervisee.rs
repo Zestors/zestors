@@ -210,10 +210,6 @@ pub(crate) enum SuperviseeItem {
     Started(Result<(), StartSuperviseeError>),
     Initialized(Result<(), ExitStatus>),
     Exit(SuperviseeExit),
-    // StartError(StartSuperviseeError),
-    // InitFailed(ExitStatus),
-    // Exit(SuperviseeExit),
-    // Initialized,
 }
 
 #[derive(Debug)]

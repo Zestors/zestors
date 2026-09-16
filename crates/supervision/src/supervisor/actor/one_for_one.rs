@@ -89,11 +89,11 @@ impl<'a> OneForOneSupervisor<'a> {
                 SuperviseeItem::Started(Ok(())) => {}
                 SuperviseeItem::Started(Err(error)) => {
                     tracing::warn!(%error, "Supervisee failed to start");
-                    self.handle_exit(&pid, ExitReason::Start)?;
+                    self.handle_exit(&pid, ExitReason::StartFailure)?;
                 }
                 SuperviseeItem::Initialized(Err(status)) => {
                     tracing::warn!(%status, "Supervisee exited before finishing initialization");
-                    self.handle_exit(&pid, ExitReason::Start)?;
+                    self.handle_exit(&pid, ExitReason::StartFailure)?;
                 }
                 SuperviseeItem::Exit(exit) => {
                     if let SuperviseeExit::JoinError(e) = &exit {
@@ -144,14 +144,15 @@ impl<'a> OneForOneSupervisor<'a> {
     }
 
     fn handle_initialized(&mut self, pid: &Pid) {
-        shared::handle_initialized(self.inner, &mut self.initializing, pid)
+        self.inner.handle_initialized(&mut self.initializing, pid)
     }
 
     fn shutdown(&mut self) -> ControlFlow<()> {
-        shared::shutdown(self.inner, &mut self.exiting)
+        self.inner.shutdown(&mut self.exiting)
     }
 
     fn remove_spec(&mut self, pid: &Pid) -> Option<Supervisee> {
-        shared::remove_spec(self.inner, &mut self.initializing, &mut self.exiting, pid)
+        self.inner
+            .remove_spec(&mut self.initializing, &mut self.exiting, pid)
     }
 }

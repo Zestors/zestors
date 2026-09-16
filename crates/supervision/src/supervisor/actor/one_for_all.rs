@@ -101,7 +101,7 @@ impl<'a> OneForAllSupervisor<'a> {
                 SuperviseeItem::Started(Ok(())) => {}
                 SuperviseeItem::Started(Err(error)) => {
                     tracing::warn!(%error, "Supervisee failed to start");
-                    self.handle_exit(&pid, ExitReason::Start)?;
+                    self.handle_exit(&pid, ExitReason::StartFailure)?;
                 }
 
                 SuperviseeItem::Exit(exit) => {
@@ -116,7 +116,7 @@ impl<'a> OneForAllSupervisor<'a> {
                 }
                 SuperviseeItem::Initialized(Err(status)) => {
                     tracing::warn!(%status, "Supervisee exited before finishing initialization");
-                    self.handle_exit(&pid, ExitReason::Start)?;
+                    self.handle_exit(&pid, ExitReason::StartFailure)?;
                 }
             },
         }
@@ -228,16 +228,17 @@ impl<'a> OneForAllSupervisor<'a> {
     }
 
     fn handle_initialized(&mut self, pid: &Pid) {
-        shared::handle_initialized(self.inner, &mut self.initializing, pid)
+        self.inner.handle_initialized(&mut self.initializing, pid)
     }
 
     fn shutdown(&mut self) -> ControlFlow<()> {
-        shared::shutdown(self.inner, &mut self.exiting)
+        self.inner.shutdown(&mut self.exiting)
     }
 
     fn remove_spec(&mut self, pid: &Pid) -> Option<Supervisee> {
-        let supervisee =
-            shared::remove_spec(self.inner, &mut self.initializing, &mut self.exiting, pid);
+        let supervisee = self
+            .inner
+            .remove_spec(&mut self.initializing, &mut self.exiting, pid);
 
         if supervisee.is_some() {
             if self.restarting.swap_remove(pid) && self.restarting.is_empty() {

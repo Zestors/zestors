@@ -143,11 +143,11 @@ impl<'a> RestForOneSupervisor<'a> {
                 SuperviseeItem::Started(Ok(())) => {}
                 SuperviseeItem::Started(Err(error)) => {
                     tracing::warn!(%error, "Supervisee failed to start");
-                    self.handle_exit(&pid, ExitReason::Start)?;
+                    self.handle_exit(&pid, ExitReason::StartFailure)?;
                 }
                 SuperviseeItem::Initialized(Err(status)) => {
                     tracing::warn!(%status, "Supervisee exited before finishing initialization");
-                    self.handle_exit(&pid, ExitReason::Start)?;
+                    self.handle_exit(&pid, ExitReason::StartFailure)?;
                 }
                 SuperviseeItem::Exit(exit) => {
                     if let SuperviseeExit::JoinError(e) = &exit {
@@ -180,7 +180,7 @@ impl<'a> RestForOneSupervisor<'a> {
         }
 
         if self.cascade.current() == Some(pid) {
-            return self.advance_cascade();
+            return self.handle_cascade_current_exit(pid, reason);
         }
 
         if self.cascade.pending_contains(pid) {
@@ -227,6 +227,55 @@ impl<'a> RestForOneSupervisor<'a> {
         }
     }
 
+    /// Handles an exit event for whichever pid the cascade is currently
+    /// waiting on.
+    ///
+    /// During `Stopping`, this is the expected confirmation that a
+    /// deliberately-stopped sibling has exited, so we just advance.
+    ///
+    /// During `Restarting`, `current` is only ever waited on for a
+    /// successful `Initialized`, which is handled separately in
+    /// `handle_next`; reaching this function means it failed to (re)start
+    /// instead. Rather than silently abandoning it and moving on to the next
+    /// pid, retry it in place — same `current`, same `pending` — if it still
+    /// needs a restart and has budget for one.
+    fn handle_cascade_current_exit(&mut self, pid: &Pid, reason: ExitReason) -> ControlFlow<()> {
+        if !matches!(self.cascade, Cascade::Restarting { .. }) {
+            // `current()` is only ever `Some` during `Stopping` or
+            // `Restarting`; we just ruled out the latter.
+            debug_assert!(matches!(self.cascade, Cascade::Stopping { .. }));
+            return self.advance_cascade();
+        }
+
+        // A genuine `Exit` for `current` can only happen after it's reached
+        // `Alive`, which only happens after `Initialized(Ok(_))` — and that
+        // case is handled separately in `handle_next`, advancing the cascade
+        // past `current` before any further event for it can arrive. So by
+        // the time we get here, it must have failed to (re)start instead.
+        debug_assert!(matches!(reason, ExitReason::StartFailure));
+
+        let Some(supervisee) = self.inner.supervisees.get_mut(pid) else {
+            return self.advance_cascade();
+        };
+
+        if !reason.requires_restart(supervisee) {
+            // `remove_spec` already advances the cascade when the removed
+            // pid is `current`.
+            self.remove_spec(pid);
+            return ControlFlow::Continue(());
+        }
+
+        if !supervisee.acquire_restart_permit() {
+            return self.shutdown();
+        }
+
+        if let Err(e) = supervisee.start() {
+            tracing::error!(%e, "Failed to restart supervisee");
+        }
+
+        ControlFlow::Continue(())
+    }
+
     /// Begins a rest-for-one cascade: everything started after `trigger`
     /// gets stopped one at a time, in reverse start order.
     fn start_cascade(&mut self, trigger: &Pid) -> ControlFlow<()> {
@@ -254,6 +303,11 @@ impl<'a> RestForOneSupervisor<'a> {
         mut to_restart: Vec<Pid>,
         to_drop: Vec<Pid>,
     ) -> ControlFlow<()> {
+        // The caller (`handle_exit`) already routes an exit for `current`
+        // itself through `handle_cascade_current_exit` before ever reaching
+        // here, so `trigger` must be some other pid.
+        debug_assert_ne!(&trigger, &current);
+
         let all: Vec<Pid> = self.inner.supervisees.pids().cloned().collect();
         let pos_of = |target: &Pid| {
             all.iter()
@@ -393,16 +447,17 @@ impl<'a> RestForOneSupervisor<'a> {
     }
 
     fn handle_initialized(&mut self, pid: &Pid) {
-        shared::handle_initialized(self.inner, &mut self.initializing, pid)
+        self.inner.handle_initialized(&mut self.initializing, pid)
     }
 
     fn shutdown(&mut self) -> ControlFlow<()> {
-        shared::shutdown(self.inner, &mut self.exiting)
+        self.inner.shutdown(&mut self.exiting)
     }
 
     fn remove_spec(&mut self, pid: &Pid) -> Option<Supervisee> {
-        let supervisee =
-            shared::remove_spec(self.inner, &mut self.initializing, &mut self.exiting, pid);
+        let supervisee = self
+            .inner
+            .remove_spec(&mut self.initializing, &mut self.exiting, pid);
 
         if supervisee.is_some() && self.cascade.current() == Some(pid) {
             // The pid our cascade was waiting on just got yanked out from

@@ -1,8 +1,3 @@
-use std::{
-    sync::Arc,
-    task::{Context, Poll},
-};
-
 use crate::{
     _prelude::*,
     supervisor::actor::{
@@ -12,7 +7,13 @@ use crate::{
 };
 use futures::{Stream, StreamExt};
 use indexmap::{IndexMap, IndexSet};
+use map::SuperviseeMap;
 use rootcause::{Report, prelude::ResultExt as _, report};
+use std::{
+    ops::ControlFlow,
+    sync::Arc,
+    task::{Context, Poll},
+};
 use zestors_runtime::{ActorStatus, errors::DuplicatePidError};
 
 pub struct Supervisor {
@@ -144,6 +145,46 @@ impl SupervisorInner {
 
         Ok(())
     }
+
+    /// Shared by every restart strategy: pulls this supervisor's own inbox into
+    /// `Stopping` and stops every currently-alive supervisee, returning `Break`
+    /// once there's nothing left to wait for.
+    pub(super) fn shutdown(&mut self, exiting: &mut IndexSet<Pid>) -> ControlFlow<()> {
+        self.inbox.register_stopping();
+
+        exiting.extend(self.supervisees.stop_all());
+
+        if exiting.is_empty() {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    pub(super) fn handle_initialized(&mut self, initializing: &mut IndexSet<Pid>, pid: &Pid) {
+        if initializing.swap_remove(pid) && self.is_initializing() && initializing.is_empty() {
+            self.inbox.register_initialized();
+        }
+    }
+
+    /// The part of `remove_spec` common to every strategy; strategies with extra
+    /// per-pid bookkeeping (e.g. an in-progress restart cascade) clean that up
+    /// themselves around this call.
+    pub(super) fn remove_spec(
+        &mut self,
+        initializing: &mut IndexSet<Pid>,
+        exiting: &mut IndexSet<Pid>,
+        pid: &Pid,
+    ) -> Option<Supervisee> {
+        let supervisee = self.supervisees.remove(pid);
+
+        if supervisee.is_some() {
+            initializing.swap_remove(pid);
+            exiting.swap_remove(pid);
+        }
+
+        supervisee
+    }
 }
 
 enum InnerNext {
@@ -154,14 +195,14 @@ enum InnerNext {
 
 enum ExitReason {
     /// The supervisee failed to start; always requires a restart attempt.
-    Start,
+    StartFailure,
     Exit(SuperviseeExit),
 }
 
 impl ExitReason {
     fn requires_restart(&self, supervisee: &Supervisee) -> bool {
         match self {
-            ExitReason::Start => true,
+            ExitReason::StartFailure => supervisee.cfg().restart_mode != RestartMode::Never,
             ExitReason::Exit(e) => supervisee.requires_restart(e),
         }
     }
@@ -171,8 +212,6 @@ mod map;
 mod one_for_all;
 mod one_for_one;
 mod rest_for_one;
-mod shared;
-use map::SuperviseeMap;
 
 mod interface;
 pub use interface::*;
