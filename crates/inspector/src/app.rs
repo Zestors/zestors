@@ -39,7 +39,6 @@ impl MyApp {
                     }
                     Err(e) => {
                         self.error_message = Some(format!("Error updating processes: {:#?}", e));
-                        eprintln!("Error updating processes: {:#?}", e);
                     }
                 },
                 ApiMessage::NewChannelSnapshots(channel_snapshots) => match channel_snapshots {
@@ -50,7 +49,6 @@ impl MyApp {
                     Err(e) => {
                         self.error_message =
                             Some(format!("Error updating channel snapshots: {:#?}", e));
-                        eprintln!("Error updating channel snapshots: {:#?}", e);
                     }
                 },
             }

@@ -56,7 +56,7 @@ impl SupervisionTree {
             return;
         };
 
-        let children = match tokio::time::timeout(timeout, address.request_dyn(GetChildren)).await {
+        let children = match tokio::time::timeout(timeout, address.call_dyn(GetChildren)).await {
             Ok(Ok(children)) => children,
             Ok(Err(err)) => {
                 tracing::warn!(

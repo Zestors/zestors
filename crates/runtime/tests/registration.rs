@@ -22,7 +22,7 @@ async fn register_and_deregister_refcounts_basics() {
     assert_eq!(child.strong_count(), 2);
     assert_eq!(child.weak_count(), 2);
 
-    child.watch_initialization().await.unwrap();
+    child.watch_init().await.unwrap();
 
     println!("Signaling shutdown for child with pid: {:?}", child.pid());
     child.signal_shutdown();

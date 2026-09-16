@@ -123,7 +123,7 @@ where
 
             Ok(receipt)
         } else {
-            match self.send_now_dyn(msg) {
+            match self.call_now_dyn(msg) {
                 Err(CastCheckedError::NotAccepted(_)) => {
                     panic!(
                         "Message type {} not accepted by channel {}",
@@ -144,7 +144,7 @@ where
     T: AsTypeSet + Contains<M> + 'static,
 {
     async fn _cast(&self, msg: M) -> Result<M::Receipt, CastError<M>> {
-        match self.send_dyn(msg).await {
+        match self.cast_dyn(msg).await {
             Ok(output) => Ok(output),
             Err(CastCheckedError::Closed(msg)) => Err(CastError(msg)),
             Err(CastCheckedError::NotAccepted(_)) => {
@@ -158,7 +158,7 @@ where
     }
 
     fn _try_cast(&self, msg: M) -> Result<M::Receipt, TryCastError<M>> {
-        match self.try_send_dyn(msg) {
+        match self.try_cast_dyn(msg) {
             Ok(output) => Ok(output),
             Err(TryCastCheckedError::Closed(msg)) => Err(TryCastError::Closed(msg)),
             Err(TryCastCheckedError::Full(msg)) => Err(TryCastError::Full(msg)),
@@ -173,7 +173,7 @@ where
     }
 
     fn _cast_now(&self, msg: M) -> Result<M::Receipt, CastError<M>> {
-        match self.send_now_dyn(msg) {
+        match self.call_now_dyn(msg) {
             Ok(output) => Ok(output),
             Err(CastCheckedError::Closed(msg)) => Err(CastError(msg)),
             Err(CastCheckedError::NotAccepted(_)) => {

@@ -1,7 +1,18 @@
 use super::*;
 use futures::FutureExt as _;
 use std::{convert::Infallible, panic::AssertUnwindSafe};
+use tokio::task_local;
 use tracing::Instrument as _;
+
+task_local! {
+    static PID_INFO: PidInfo;
+}
+
+#[derive(Clone, Debug)]
+struct PidInfo {
+    this: Pid,
+    parent: Option<Pid>,
+}
 
 /// Same as [`spawn_with`], but spawns a process that cannot accept messages.
 pub fn spawn_task_with<E, F>(
@@ -78,9 +89,8 @@ impl<T: Context> StrongAddress<T> {
         R: Send + 'static,
         F: Future<Output = Result<R, Report>> + Send + 'static,
     {
-        let span = tracing::debug_span!("process", pid = %self.pid());
-
-        let tokio_handle = tokio::spawn({
+        let tokio_handle = tokio::task::spawn({
+            let span = tracing::debug_span!("process", pid = %self.pid());
             let inbox = Inbox::try_new(self.clone())?;
             let address = inbox.address().clone();
             let mut bomb = AbortBomb::new(address);
@@ -90,35 +100,42 @@ impl<T: Context> StrongAddress<T> {
                 .expect("Transition must succeed, because inbox was just created");
             let spawn_future = AssertUnwindSafe(spawn_fn(inbox)).catch_unwind();
 
-            async move {
-                let spawn_result = spawn_future.await;
+            PID_INFO
+                .scope(
+                    PidInfo {
+                        this: self.pid().clone(),
+                        parent: Pid::current(),
+                    },
+                    async move {
+                        let spawn_result = spawn_future.await;
 
-                let mapped_result = match spawn_result {
-                    Ok(result) => {
-                        match &result {
-                            Ok(_) => bomb.address.channel().register_exited(Ok(())),
-                            Err(_) => bomb
-                                .address
-                                .channel()
-                                .register_exited(Err(ExitError::UnhandledError)),
+                        let mapped_result = match spawn_result {
+                            Ok(result) => {
+                                match &result {
+                                    Ok(_) => bomb.address.channel().register_exited(Ok(())),
+                                    Err(_) => bomb
+                                        .address
+                                        .channel()
+                                        .register_exited(Err(ExitError::UnhandledError)),
+                                };
+
+                                result
+                            }
+
+                            Err(boxed) => {
+                                bomb.address
+                                    .channel()
+                                    .register_exited(Err(ExitError::Panicked));
+                                std::panic::resume_unwind(boxed);
+                            }
                         };
 
-                        result
-                    }
+                        bomb.defuse();
 
-                    Err(boxed) => {
-                        bomb.address
-                            .channel()
-                            .register_exited(Err(ExitError::Panicked));
-                        std::panic::resume_unwind(boxed);
-                    }
-                };
-
-                bomb.defuse();
-
-                mapped_result
-            }
-            .instrument(span)
+                        mapped_result
+                    },
+                )
+                .instrument(span)
         });
 
         Ok(Child::new(tokio_handle, self))
@@ -155,4 +172,12 @@ impl<T: Context> Drop for AbortBomb<T> {
             }
         }
     }
+}
+
+pub(crate) fn current_pid() -> Option<Pid> {
+    PID_INFO.try_with(|info| info.this.clone()).ok()
+}
+
+pub(crate) fn parent_pid() -> Option<Pid> {
+    PID_INFO.try_with(|info| info.parent.clone()).ok().flatten()
 }

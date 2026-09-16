@@ -53,11 +53,15 @@ impl ActorStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Copy, thiserror::Error)]
 pub enum ExitStatus {
+    #[error("Normal exit")]
     Normal,
+    #[error("Panicked")]
     Panicked,
+    #[error("Aborted")]
     Aborted,
+    #[error("Unhandled error")]
     UnhandledError,
 }
 
@@ -91,17 +95,6 @@ impl ExitStatus {
             self,
             ExitStatus::Panicked | ExitStatus::Aborted | ExitStatus::UnhandledError
         )
-    }
-}
-
-impl Display for ExitStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ExitStatus::Normal => write!(f, "Normal"),
-            ExitStatus::Panicked => write!(f, "Panic"),
-            ExitStatus::Aborted => write!(f, "Abort"),
-            ExitStatus::UnhandledError => write!(f, "UnhandledError"),
-        }
     }
 }
 

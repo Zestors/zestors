@@ -67,6 +67,21 @@ impl Supervisee {
         }
     }
 
+    /// Whether exiting with this status before finishing initialization
+    /// requires the child to be restarted. A `Normal` exit is treated the
+    /// same as [`SuperviseeExit::NormalExit`]: under `OnError` it's a
+    /// successful completion, not a failure, even though it happened before
+    /// the child reported itself as running.
+    #[must_use]
+    pub(crate) fn requires_restart_for_init_exit(&self, status: &ExitStatus) -> bool {
+        match (self.cfg().restart_mode, status) {
+            (RestartMode::Always, _) => true,
+            (RestartMode::Never, _) => false,
+            (RestartMode::OnError, ExitStatus::Normal) => false,
+            (RestartMode::OnError, _) => true,
+        }
+    }
+
     /// Whether the restart-limiter allows the child to be restarted
     #[must_use]
     pub(crate) fn acquire_restart_permit(&mut self) -> bool {
@@ -416,9 +431,7 @@ struct InitFuture(BoxFuture<'static, Result<(), ExitStatus>>);
 impl InitFuture {
     fn new(child: &Child) -> Self {
         let address = child.address().clone();
-        InitFuture(Box::pin(
-            async move { address.watch_initialization().await },
-        ))
+        InitFuture(Box::pin(async move { address.watch_init().await }))
     }
 }
 

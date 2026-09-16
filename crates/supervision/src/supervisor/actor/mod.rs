@@ -14,7 +14,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use zestors_runtime::{ActorStatus, errors::DuplicatePidError};
+use zestors_runtime::{ActorStatus, ExitStatus, errors::DuplicatePidError};
 
 pub struct Supervisor {
     supervisees: SuperviseeMap,
@@ -146,11 +146,14 @@ impl SupervisorInner {
         Ok(())
     }
 
-    /// Shared by every restart strategy: pulls this supervisor's own inbox into
-    /// `Stopping` and stops every currently-alive supervisee, returning `Break`
-    /// once there's nothing left to wait for.
+    /// Shared by `one_for_one` and `one_for_all`: pulls this supervisor's own
+    /// inbox into `Stopping` and stops every currently-alive supervisee all
+    /// at once, returning `Break` once there's nothing left to wait for.
+    /// `rest_for_one` doesn't use this — its children can depend on each
+    /// other, so it tears them down one at a time instead (see
+    /// `RestForOneSupervisor::shutdown`).
     pub(super) fn shutdown(&mut self, exiting: &mut IndexSet<Pid>) -> ControlFlow<()> {
-        self.inbox.register_stopping();
+        self.register_stopping();
 
         exiting.extend(self.supervisees.stop_all());
 
@@ -159,6 +162,12 @@ impl SupervisorInner {
         } else {
             ControlFlow::Continue(())
         }
+    }
+
+    /// Pulls this supervisor's own inbox into `Stopping`, so e.g. `add_spec`
+    /// starts rejecting new children and external watchers see it exiting.
+    pub(super) fn register_stopping(&mut self) {
+        self.inbox.register_stopping();
     }
 
     pub(super) fn handle_initialized(&mut self, initializing: &mut IndexSet<Pid>, pid: &Pid) {
@@ -196,6 +205,8 @@ enum InnerNext {
 enum ExitReason {
     /// The supervisee failed to start; always requires a restart attempt.
     StartFailure,
+    /// The supervisee exited before finishing initialization.
+    InitExit(ExitStatus),
     Exit(SuperviseeExit),
 }
 
@@ -203,6 +214,7 @@ impl ExitReason {
     fn requires_restart(&self, supervisee: &Supervisee) -> bool {
         match self {
             ExitReason::StartFailure => supervisee.cfg().restart_mode != RestartMode::Never,
+            ExitReason::InitExit(status) => supervisee.requires_restart_for_init_exit(status),
             ExitReason::Exit(e) => supervisee.requires_restart(e),
         }
     }

@@ -91,18 +91,20 @@ impl<'a> OneForOneSupervisor<'a> {
                     tracing::warn!(%error, "Supervisee failed to start");
                     self.handle_exit(&pid, ExitReason::StartFailure)?;
                 }
+
+                SuperviseeItem::Initialized(Ok(())) => {
+                    self.handle_initialized(&pid);
+                }
                 SuperviseeItem::Initialized(Err(status)) => {
                     tracing::warn!(%status, "Supervisee exited before finishing initialization");
-                    self.handle_exit(&pid, ExitReason::StartFailure)?;
+                    self.handle_exit(&pid, ExitReason::InitExit(status))?;
                 }
+
                 SuperviseeItem::Exit(exit) => {
                     if let SuperviseeExit::JoinError(e) = &exit {
                         tracing::warn!(%e, "Supervisee exited with a join error");
                     }
                     self.handle_exit(&pid, ExitReason::Exit(exit))?;
-                }
-                SuperviseeItem::Initialized(Ok(())) => {
-                    self.handle_initialized(&pid);
                 }
             },
         }

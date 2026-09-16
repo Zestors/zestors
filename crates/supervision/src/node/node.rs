@@ -1,6 +1,5 @@
 use crate::_prelude::*;
-use rootcause::report;
-use std::{sync::OnceLock, time::Duration};
+use std::time::Duration;
 
 pub struct Node {
     restart_intensity: RestartIntensity,
@@ -13,13 +12,7 @@ struct NodeActor {
     supervisor_spec: ChildSpec<SupervisorBlueprint>,
 }
 
-static ROOT_SUPERVISOR_PID: OnceLock<ChildDescription> = OnceLock::new();
-
 impl Node {
-    pub fn root_supervisor() -> Option<&'static ChildDescription> {
-        ROOT_SUPERVISOR_PID.get()
-    }
-
     pub fn new(spec: ChildSpec<SupervisorBlueprint>) -> Self {
         Self {
             restart_intensity: RestartIntensity::new(3, Duration::from_secs(120)),
@@ -32,43 +25,42 @@ impl Node {
         self
     }
 
-    pub async fn start(self) -> Result<Address<SupervisorInterface>, Report> {
+    pub async fn run(self) -> i32 {
         let Self {
             restart_intensity,
             supervisor_spec,
         } = self;
 
-        ROOT_SUPERVISOR_PID
-            .set(ChildDescription {
-                pid: supervisor_spec.pid().clone(),
-                cfg: supervisor_spec.cfg().clone(),
-            })
-            .map_err(|_| report!("Root Node can only be started once."))?;
-
-        let supervisor_child = supervisor_spec.start().await?;
-        let supervisor_address = supervisor_child.address().clone();
-
-        tokio::spawn(
-            NodeActor {
-                supervisor_child,
-                supervisor_spec,
-                restart_limiter: RestartLimiter::new(restart_intensity),
+        let supervisor_child = match supervisor_spec.start().await {
+            Ok(child) => child,
+            Err(err) => {
+                tracing::error!("Failed to start supervisor: {:?}", err);
+                return 1;
             }
-            .run(),
-        );
+        };
 
-        Ok(supervisor_address)
+        NodeActor {
+            supervisor_child,
+            supervisor_spec,
+            restart_limiter: RestartLimiter::new(restart_intensity),
+        }
+        .run()
+        .await
+    }
+
+    pub fn root_supervisor(&self) -> &ChildSpec<SupervisorBlueprint> {
+        &self.supervisor_spec
     }
 }
 
 impl NodeActor {
-    async fn run(mut self) {
+    async fn run(mut self) -> i32 {
         loop {
             let supervisor_exit = tokio::select! {
                 res = &mut self.supervisor_child => res,
                 _ = wait_for_shutdown_signal() => {
                     tracing::info!("Received Ctrl+C signal. Shutting down node.");
-                    self.exit_gracefully().await;
+                    return self.exit_gracefully().await;
                 }
             };
 
@@ -76,13 +68,13 @@ impl NodeActor {
                 Ok(()) => {
                     tracing::info!("Root-Supervisor exited gracefully. Shutting down node.");
                     tokio::time::sleep(Duration::from_secs(1)).await;
-                    std::process::exit(0);
+                    return 0;
                 }
                 Err(err) => {
                     if !self.restart_limiter.acquire_permit() {
                         tracing::error!("Root-Supervisor exited with error: {:?}", err);
                         tokio::time::sleep(Duration::from_secs(1)).await;
-                        std::process::exit(1);
+                        return 1;
                     } else {
                         tracing::warn!(
                             "Root-Supervisor exited with error: {:?}. Restarting...",
@@ -96,7 +88,7 @@ impl NodeActor {
         }
     }
 
-    async fn exit_gracefully(self) -> ! {
+    async fn exit_gracefully(self) -> i32 {
         let timeout = self.supervisor_spec.cfg().abort_timeout;
 
         tokio::select! {
@@ -104,18 +96,18 @@ impl NodeActor {
                 match exit {
                     Ok(()) => {
                         tracing::info!("Root-Supervisor exited gracefully. Shutting down node.");
-                        std::process::exit(0)
+                        return 0;
                     }
                     Err(err) => {
                         tracing::error!("Root-Supervisor failed to exit gracefully within timeout: {:?}", err);
                         tokio::time::sleep(Duration::from_secs(3)).await;
-                        std::process::exit(1)
+                        return 1;
                     }
                 }
             }
             _ = wait_for_shutdown_signal() => {
                 tracing::warn!("Received second shutdown signal. Forcing immediate termination.");
-                std::process::exit(130)
+                return 130;
             }
         }
     }

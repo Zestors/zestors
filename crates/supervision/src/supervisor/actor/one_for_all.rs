@@ -116,7 +116,7 @@ impl<'a> OneForAllSupervisor<'a> {
                 }
                 SuperviseeItem::Initialized(Err(status)) => {
                     tracing::warn!(%status, "Supervisee exited before finishing initialization");
-                    self.handle_exit(&pid, ExitReason::StartFailure)?;
+                    self.handle_exit(&pid, ExitReason::InitExit(status))?;
                 }
             },
         }

@@ -43,6 +43,14 @@ impl Pid {
     {
         Registry::local().get_dyn::<S>(self)
     }
+
+    pub fn current() -> Option<Self> {
+        crate::current_pid()
+    }
+
+    pub fn parent() -> Option<Self> {
+        crate::parent_pid()
+    }
 }
 
 impl Default for Pid {

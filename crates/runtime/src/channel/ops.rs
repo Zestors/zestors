@@ -22,7 +22,7 @@ pub trait ActorRef {
 /// implements [`ActorOps`].
 pub trait ActorOps: ActorRef + sealed::Sealed {
     /// Same as [`Sends::send`], but checks whether the message type is accepted by the channel.
-    fn send_dyn<M: Message>(
+    fn cast_dyn<M: Message>(
         &self,
         msg: M,
     ) -> impl Future<Output = Result<M::Receipt, CastCheckedError<M>>> + Send {
@@ -30,21 +30,21 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
 
         async {
             handle.delay_for_backpressure().await;
-            handle.send_now_dyn(msg)
+            handle.call_now_dyn(msg)
         }
     }
 
     /// Same as [`Sends::try_send`], but checks whether the message type is accepted by the channel.
-    fn try_send_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, TryCastCheckedError<M>> {
+    fn try_cast_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, TryCastCheckedError<M>> {
         if self.reached_backpressure() {
             return Err(TryCastCheckedError::Full(msg));
         }
 
-        self.send_now_dyn(msg).map_err(Into::into)
+        self.call_now_dyn(msg).map_err(Into::into)
     }
 
     /// Same as [`Sends::send_now`], but checks whether the message type is accepted by the channel.
-    fn send_now_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, CastCheckedError<M>> {
+    fn call_now_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, CastCheckedError<M>> {
         if !self.status().accepts_messages() {
             return Err(CastCheckedError::Closed(msg));
         }
@@ -54,12 +54,12 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         Ok(output)
     }
 
-    fn request_dyn<M: Message>(
+    fn call_dyn<M: Message>(
         &self,
         msg: M,
     ) -> impl Future<Output = Result<M::Output, CallCheckedError<M>>> + Send {
         let handle = self.channel();
-        async { Ok(handle.send_dyn(msg).await?.wait().await?) }
+        async { Ok(handle.cast_dyn(msg).await?.wait().await?) }
     }
 
     fn pid(&self) -> &Pid {
@@ -100,22 +100,12 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.data().watch(check_for)
     }
 
-    fn watch_initialization(&self) -> impl Future<Output = Result<(), ExitStatus>> + Send {
+    fn watch_init(&self) -> impl Future<Output = Result<(), ExitStatus>> + Send {
         self.watch(|status| match status {
             ActorStatus::Running => return Some(Ok(())),
             ActorStatus::Exited(exit) => {
                 return Some(Err(exit));
             }
-            _ => None,
-        })
-    }
-
-    fn watch_start(&self) -> impl Future<Output = ()> + Send
-    where
-        Self: Sync,
-    {
-        self.watch(|status| match status {
-            ActorStatus::Running => return Some(()),
             _ => None,
         })
     }

@@ -14,6 +14,18 @@ pub struct ChildConfig {
     pub start_timeout: Duration,
 }
 
+impl Default for ChildConfig {
+    fn default() -> Self {
+        Self {
+            restart_mode: RestartMode::Always,
+            intensity: RestartIntensity::default(),
+            abort_timeout: Duration::from_secs(5),
+            init_timeout: Duration::from_secs(5),
+            start_timeout: Duration::from_secs(5),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChildDescription {
     pub pid: Pid,
@@ -148,7 +160,7 @@ pub trait BlueprintSupervisionExt: Blueprint + Sized {
         DynStarter::new(self)
     }
 
-    fn with_pid(self, pid: impl Into<Pid>) -> Result<ChildSpec<Self>, DuplicatePidError> {
+    fn pid(self, pid: impl Into<Pid>) -> Result<ChildSpec<Self>, DuplicatePidError> {
         ChildSpec::create(pid, self)
     }
 

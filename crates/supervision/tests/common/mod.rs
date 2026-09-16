@@ -145,7 +145,7 @@ pub async fn wait_for_generation(
 ) {
     wait_for(timeout, || async {
         matches!(
-            tokio::time::timeout(Duration::from_millis(200), address.request_dyn(Generation)).await,
+            tokio::time::timeout(Duration::from_millis(200), address.call_dyn(Generation)).await,
             Ok(Ok(g)) if g == expected
         )
     })

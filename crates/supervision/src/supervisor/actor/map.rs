@@ -6,8 +6,19 @@ use zestors_runtime::errors::DuplicatePidError;
 
 #[derive(Debug, Default)]
 pub(super) struct SuperviseeMap {
-    mapping: IndexMap<Pid, Option<usize>>,
+    mapping: IndexMap<Pid, SuperviseeMapEntry>,
     supervisees: Pin<Box<StreamUnordered<Supervisee>>>,
+}
+
+#[derive(Debug)]
+struct SuperviseeMapEntry {
+    token: Option<usize>,
+}
+
+impl SuperviseeMapEntry {
+    fn new(token: usize) -> Self {
+        Self { token: Some(token) }
+    }
 }
 
 impl SuperviseeMap {
@@ -19,16 +30,16 @@ impl SuperviseeMap {
             let pid = supervisee.pid().clone();
 
             let token = this.supervisees.insert(supervisee);
-            this.mapping.insert(pid, Some(token));
+            this.mapping.insert(pid, SuperviseeMapEntry::new(token));
         }
 
         this
     }
 
     pub(super) fn start_all(&mut self) -> Result<(), (Pid, SuperviseeIsShuttingDown)> {
-        for (pid, token) in self.mapping.iter() {
-            if let Some(token) = token {
-                let supervisee = self.supervisees.get_mut(*token).expect("Should exist");
+        for (pid, entry) in self.mapping.iter() {
+            if let Some(token) = entry.token {
+                let supervisee = self.supervisees.get_mut(token).expect("Should exist");
                 if let Err(e) = supervisee.start() {
                     return Err((pid.clone(), e));
                 }
@@ -44,17 +55,22 @@ impl SuperviseeMap {
     pub(super) fn stop_all(&mut self) -> Vec<Pid> {
         self.mapping
             .iter()
-            .filter_map(|(pid, token)| {
-                let supervisee = self.supervisees.get_mut((*token)?).expect("Should exist");
+            .filter_map(|(pid, entry)| {
+                let supervisee = self
+                    .supervisees
+                    .get_mut(entry.token?)
+                    .expect("Should exist");
                 supervisee.stop().is_shutting_down().then(|| pid.clone())
             })
             .collect()
     }
 
     fn supervisees(&self) -> impl Iterator<Item = &Supervisee> {
-        self.mapping
-            .values()
-            .filter_map(|token| token.map(|token| self.supervisees.get(token).unwrap()))
+        self.mapping.values().filter_map(|entry| {
+            entry
+                .token
+                .map(|token| self.supervisees.get(token).unwrap())
+        })
     }
 
     pub(super) fn addresses(&self) -> impl Iterator<Item = &Address> {
@@ -72,15 +88,17 @@ impl SuperviseeMap {
     }
 
     pub(super) fn get_mut<'a>(&'a mut self, pid: &Pid) -> Option<&'a mut Supervisee> {
-        self.mapping
-            .get(pid)
-            .and_then(|token| token.map(|token| self.supervisees.get_mut(token).unwrap()))
+        self.mapping.get(pid).and_then(|entry| {
+            entry
+                .token
+                .map(|token| self.supervisees.get_mut(token).unwrap())
+        })
     }
 
     pub(super) fn remove(&mut self, pid: &Pid) -> Option<Supervisee> {
         match self.mapping.get_mut(pid) {
-            Some(token) => {
-                if let Some(token) = token.take() {
+            Some(entry) => {
+                if let Some(token) = entry.token.take() {
                     let removed = self.supervisees.as_mut().take(token);
                     Some(removed.expect("Should be there"))
                 } else {
@@ -95,7 +113,7 @@ impl SuperviseeMap {
         if self
             .mapping
             .get(supervisee.pid())
-            .is_some_and(|token| token.is_some())
+            .is_some_and(|entry| entry.token.is_some())
         {
             return Err(DuplicatePidError {
                 pid: supervisee.pid().clone(),
@@ -104,7 +122,7 @@ impl SuperviseeMap {
 
         let pid = supervisee.pid().clone();
         let token = self.supervisees.as_mut().insert(supervisee);
-        self.mapping.insert(pid, Some(token));
+        self.mapping.insert(pid, SuperviseeMapEntry::new(token));
 
         Ok(())
     }

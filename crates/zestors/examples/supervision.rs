@@ -116,38 +116,38 @@ async fn main() -> Result<(), Report> {
     let source = InMemorySupervisorSource::new_arc();
 
     let (spec_a, _addr) = blueprint_fn(|| MyActor::new("A"))
-        .with_pid("HelloActor")?
+        .pid("HelloActor")?
         .with_mode(RestartMode::Never)
         .split();
 
     let (spec_b, _addr) = blueprint_fn(|| MyActor::new("B"))
-        .with_pid("HelloActor2")?
+        .pid("HelloActor2")?
         .with_mode(RestartMode::Always)
         .split();
 
     let (super_spec_a, _addr) = Supervisor::blueprint()
-        .with_children([spec_a, spec_b])
-        .with_pid("SupervisorA")?
+        .children([spec_a, spec_b])
+        .pid("SupervisorA")?
         .split();
 
     let (spec_c, _addr) = blueprint_fn(|| MyActor::new("C"))
-        .with_pid("HelloActor3")?
+        .pid("HelloActor3")?
         .with_mode(RestartMode::Always)
         .split();
 
     let (spec_d, _addr) = blueprint_fn(|| MyActor::new("D"))
-        .with_pid("HelloActor4")?
+        .pid("HelloActor4")?
         .with_mode(RestartMode::Always)
         .split();
 
     let (super_spec_b, _addr) = Supervisor::blueprint()
-        .with_children([spec_c, spec_d])
+        .children([spec_c, spec_d])
         .with_source(source.clone())
-        .with_pid("SupervisorB")?
+        .pid("SupervisorB")?
         .split();
 
     let (dyn_actor_spec, _addr) = actor_fn(async |_: Inbox<MyInterface>| Ok(()))
-        .with_pid("DynActor")?
+        .pid("DynActor")?
         .split();
 
     let (task_spec, _addr) = task_fn(|mut task_box| async move {
@@ -174,30 +174,42 @@ async fn main() -> Result<(), Report> {
 
         Ok(())
     })
-    .with_pid("TaskActor")?
+    .pid("TaskActor")?
     .split();
 
-    let root_supervisor = SupervisorBlueprint::one_for_one()
-        .with_children([
+    let app_supervisor = Supervisor::blueprint()
+        .strategy(SupervisionStrategy::OneForOne)
+        .children([
             super_spec_a,
             super_spec_b,
-            ApiServer::blueprint("127.0.0.1:8080".parse().unwrap())
-                .with_pid("ApiServer")?
-                .into(),
             dyn_actor_spec,
             task_spec,
             blueprint_fn(|| actor_fn(async |_: Inbox<MyInterface>| Ok(())))
-                .with_pid("DynBlueprintActor")?
+                .pid("DynBlueprintActor")?
                 .into(),
             blueprint_fn(|| MyActor::new("E"))
-                .with_pid("DynBlueprintActor2")?
+                .pid("DynBlueprintActor2")?
                 .into(),
         ])
-        .with_pid("RootSupervisor")?;
+        .pid("app-supervisor")?;
 
-    let root_address = Node::new(root_supervisor).start().await?;
+    let node = Node::new(
+        Supervisor::blueprint()
+            .strategy(SupervisionStrategy::RestForOne)
+            .child(
+                ApiServer::blueprint("127.0.0.1:8080".parse().unwrap())
+                    .root_supervisor_pid("root-supervisor")
+                    .pid("ApiServer")?,
+            )
+            .child(app_supervisor)
+            .pid("root-supervisor")?,
+    );
 
-    root_address.watch_start().await;
+    let root_address = node.root_supervisor().address().clone();
+
+    tokio::spawn(node.run()).await?;
+
+    root_address.watch_init().await?;
 
     spawn_tasks_in_background(source);
 

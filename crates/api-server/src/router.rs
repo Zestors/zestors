@@ -1,5 +1,6 @@
 use axum::{
     Json, Router,
+    extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -59,12 +60,16 @@ async fn get_tree(pid: Option<Pid>, include_debug: Option<bool>) -> ApiResult {
 }
 
 /// Returns all processes in the tree, with their actor-status and child-configuration
-#[route(GET "/processes" with ApiServer)]
+#[route(GET "/processes" )]
 #[axum::debug_handler]
-async fn get_processes() -> ApiResult<Json<IndexMap<Pid, (ChildConfig, ActorStatus, Vec<Pid>)>>> {
-    let root_desc = Node::root_supervisor()
-        .ok_or_else(|| report!("No root supervisor"))?
-        .clone();
+async fn get_processes(
+    State(state): State<ApiServer>,
+) -> ApiResult<Json<IndexMap<Pid, (ChildConfig, ActorStatus, Vec<Pid>)>>> {
+    let root_pid = state.root_supervisor.clone();
+    let root_desc = ChildDescription {
+        pid: root_pid,
+        cfg: ChildConfig::default(),
+    };
     let root_address = Registry::local()
         .get(&root_desc.pid)
         .ok_or_else(|| report!("Root supervisor not found in registry"))?;
@@ -104,7 +109,7 @@ async fn get_processes() -> ApiResult<Json<IndexMap<Pid, (ChildConfig, ActorStat
 }
 
 async fn get_children(address: &Address<impl Context>) -> rootcause::Result<Vec<ChildDescription>> {
-    Ok(timeout(Duration::from_millis(50), address.request_dyn(GetChildren)).await??)
+    Ok(timeout(Duration::from_millis(50), address.call_dyn(GetChildren)).await??)
 }
 
 #[route(GET "/snapshots" with ApiServer)]
@@ -130,7 +135,7 @@ async fn get_health(Json(pids): Json<Vec<Pid>>) -> ApiResult<Json<Vec<Option<Hea
             return None;
         };
 
-        match timeout(Duration::from_millis(50), address.request_dyn(GetHealth)).await {
+        match timeout(Duration::from_millis(50), address.call_dyn(GetHealth)).await {
             Ok(Ok(health)) => Some(health),
             _ => None,
         }

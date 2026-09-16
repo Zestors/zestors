@@ -4,33 +4,43 @@ use tokio::net::TcpListener;
 use zestors_actor::{Actor, Blueprint};
 use zestors_codegen::Interface;
 use zestors_interface::Envelope;
-use zestors_runtime::prelude::*;
-use zestors_supervision::{GetChildren, GetHealth, Health};
+use zestors_runtime::{Registry, prelude::*};
+use zestors_supervision::{ChildDescription, GetChildren, GetHealth, Health, SupervisorInterface};
 
 mod router;
 
 #[derive(Clone, Debug)]
 pub struct ApiServerBlueprint {
     pub addr: SocketAddr,
+    pub root_supervisor_pid: Option<Pid>,
 }
 
 impl Blueprint for ApiServerBlueprint {
     type Actor = ApiServer;
 
     async fn instantiate(&self) -> rootcause::Result<Self::Actor> {
-        Ok(ApiServer::new(self.clone()))
+        Ok(ApiServer::build(self.clone())?)
     }
 }
 
 impl ApiServerBlueprint {
     pub fn new(addr: SocketAddr) -> Self {
-        Self { addr }
+        Self {
+            addr,
+            root_supervisor_pid: None,
+        }
+    }
+
+    pub fn root_supervisor_pid(mut self, pid: impl Into<Pid>) -> Self {
+        self.root_supervisor_pid = Some(pid.into());
+        self
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct ApiServer {
     cfg: Arc<ApiServerBlueprint>,
+    root_supervisor: Pid,
 }
 
 #[derive(Interface)]
@@ -90,8 +100,21 @@ impl Actor for ApiServer {
 }
 
 impl ApiServer {
-    fn new(cfg: ApiServerBlueprint) -> Self {
-        Self { cfg: Arc::new(cfg) }
+    fn build(cfg: ApiServerBlueprint) -> Result<Self, Report> {
+        let root_supervisor = cfg
+            .root_supervisor_pid
+            .clone()
+            .or_else(|| Pid::parent())
+            .ok_or_else(|| rootcause::report!("No root supervisor PID found"))?;
+
+        Registry::local()
+            .get(&root_supervisor)
+            .ok_or_else(|| rootcause::report!("Root supervisor not found"))?;
+
+        Ok(Self {
+            cfg: Arc::new(cfg),
+            root_supervisor,
+        })
     }
 
     pub fn blueprint(addr: SocketAddr) -> ApiServerBlueprint {

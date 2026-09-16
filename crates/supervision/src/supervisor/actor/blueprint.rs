@@ -20,18 +20,18 @@ impl SupervisorBlueprint {
     }
 
     pub fn one_for_one() -> Self {
-        Self::new().with_strategy(SupervisionStrategy::OneForOne)
+        Self::new().strategy(SupervisionStrategy::OneForOne)
     }
 
     pub fn one_for_all() -> Self {
-        Self::new().with_strategy(SupervisionStrategy::OneForAll)
+        Self::new().strategy(SupervisionStrategy::OneForAll)
     }
 
     pub fn rest_for_one() -> Self {
-        Self::new().with_strategy(SupervisionStrategy::RestForOne)
+        Self::new().strategy(SupervisionStrategy::RestForOne)
     }
 
-    pub fn with_strategy(mut self, strategy: SupervisionStrategy) -> Self {
+    pub fn strategy(mut self, strategy: SupervisionStrategy) -> Self {
         self.strategy = strategy;
         self
     }
@@ -41,7 +41,7 @@ impl SupervisorBlueprint {
         self
     }
 
-    pub fn with_child<T: Start + Sync>(mut self, spec: ChildSpec<T>) -> Self {
+    pub fn child<T: Start + Sync>(mut self, spec: ChildSpec<T>) -> Self {
         self.supervisees.insert(spec.pid().clone(), spec.into_dyn());
         self
     }
@@ -51,10 +51,7 @@ impl SupervisorBlueprint {
         self
     }
 
-    pub fn with_children<T: Start>(
-        mut self,
-        specs: impl IntoIterator<Item = ChildSpec<T>>,
-    ) -> Self {
+    pub fn children<T: Start>(mut self, specs: impl IntoIterator<Item = ChildSpec<T>>) -> Self {
         for spec in specs {
             let spec = spec.into_dyn();
             self.supervisees.insert(spec.pid().clone(), spec);
