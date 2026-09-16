@@ -4,16 +4,20 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-futures.workspace = true
-tracing.workspace = true
-rootcause.workspace = true
-zestors-core.workspace = true
+zestors-supervision.workspace = true
+zestors-runtime.workspace = true
+zestors-actor.workspace = true
 zestors-api-server.workspace = true
+zestors-codegen.workspace = true
+zestors-interface.workspace = true
 
 [dev-dependencies]
 tracing-subscriber.workspace = true
 tokio.workspace = true
 serde.workspace = true
+futures.workspace = true
+tracing.workspace = true
+rootcause.workspace = true
 
 [features]
 _ra = []

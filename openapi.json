@@ -15,10 +15,7 @@
             "description": "Whether to include debug state in the supervision tree",
             "required": false,
             "schema": {
-              "type": [
-                "boolean",
-                "null"
-              ]
+              "type": ["boolean", "null"]
             }
           },
           {
@@ -79,57 +76,41 @@
         "oneOf": [
           {
             "type": "object",
-            "required": [
-              "type"
-            ],
+            "required": ["type"],
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "initializing"
-                ]
+                "enum": ["initializing"]
               }
             }
           },
           {
             "type": "object",
-            "required": [
-              "type"
-            ],
+            "required": ["type"],
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "running"
-                ]
+                "enum": ["running"]
               }
             }
           },
           {
             "type": "object",
-            "required": [
-              "type"
-            ],
+            "required": ["type"],
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "suspended"
-                ]
+                "enum": ["suspended"]
               }
             }
           },
           {
             "type": "object",
-            "required": [
-              "type"
-            ],
+            "required": ["type"],
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "exiting"
-                ]
+                "enum": ["exiting"]
               }
             }
           },
@@ -140,15 +121,11 @@
               },
               {
                 "type": "object",
-                "required": [
-                  "type"
-                ],
+                "required": ["type"],
                 "properties": {
                   "type": {
                     "type": "string",
-                    "enum": [
-                      "dead"
-                    ]
+                    "enum": ["dead"]
                   }
                 }
               }
@@ -158,15 +135,7 @@
       },
       "ChannelSnapshot": {
         "type": "object",
-        "required": [
-          "pid",
-          "status",
-          "signal_len",
-          "msg_len",
-          "spawns",
-          "exits",
-          "created_at"
-        ],
+        "required": ["pid", "status", "signal_len", "msg_len", "spawns", "exits", "created_at"],
         "properties": {
           "created_at": {
             "$ref": "#/components/schemas/String"
@@ -184,15 +153,11 @@
                   "oneOf": [
                     {
                       "type": "string",
-                      "enum": [
-                        "Normal"
-                      ]
+                      "enum": ["Normal"]
                     },
                     {
                       "type": "object",
-                      "required": [
-                        "Error"
-                      ],
+                      "required": ["Error"],
                       "properties": {
                         "Error": {
                           "$ref": "#/components/schemas/ExitError"
@@ -228,10 +193,7 @@
       },
       "ChildDescription": {
         "type": "object",
-        "required": [
-          "pid",
-          "cfg"
-        ],
+        "required": ["pid", "cfg"],
         "properties": {
           "cfg": {
             "$ref": "#/components/schemas/SuperviseeConfig"
@@ -248,10 +210,7 @@
       },
       "DurationSchema": {
         "type": "object",
-        "required": [
-          "secs",
-          "nanos"
-        ],
+        "required": ["secs", "nanos"],
         "properties": {
           "nanos": {
             "type": "integer",
@@ -270,15 +229,11 @@
         "oneOf": [
           {
             "type": "string",
-            "enum": [
-              "Normal"
-            ]
+            "enum": ["Normal"]
           },
           {
             "type": "object",
-            "required": [
-              "Error"
-            ],
+            "required": ["Error"],
             "properties": {
               "Error": {
                 "$ref": "#/components/schemas/ExitError"
@@ -289,30 +244,18 @@
       },
       "ExitError": {
         "type": "string",
-        "enum": [
-          "Panic",
-          "Abort",
-          "UnhandledError"
-        ]
+        "enum": ["Panic", "Abort", "UnhandledError"]
       },
       "RestartMode": {
         "type": "string",
-        "enum": [
-          "Always",
-          "OnError",
-          "Never"
-        ]
+        "enum": ["Always", "OnError", "Never"]
       },
       "String": {
         "type": "string"
       },
       "SuperviseeConfig": {
         "type": "object",
-        "required": [
-          "restart_mode",
-          "abort_timeout",
-          "init_timeout"
-        ],
+        "required": ["restart_mode", "abort_timeout", "init_timeout"],
         "properties": {
           "abort_timeout": {
             "$ref": "#/components/schemas/DurationSchema"
@@ -327,9 +270,7 @@
       },
       "SupervisionTree": {
         "type": "object",
-        "required": [
-          "description"
-        ],
+        "required": ["description"],
         "properties": {
           "channel_state": {
             "oneOf": [

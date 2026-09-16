@@ -1,5 +1,5 @@
 use egui::{Color32, Context, Stroke, Visuals};
-use zestors::channel::ActorStatus;
+use zestors::runtime::ActorStatus;
 
 pub struct Theme;
 
@@ -39,7 +39,7 @@ impl Theme {
                 Color32::from_rgb(38, 45, 60),   // Blue BG
                 Color32::from_rgb(97, 175, 239), // Blue FG
             ),
-            ActorStatus::ShuttingDown => (
+            ActorStatus::Stopping => (
                 "Exiting".to_string(),
                 Color32::from_rgb(70, 45, 25),    // Orange BG
                 Color32::from_rgb(209, 154, 102), // Orange FG

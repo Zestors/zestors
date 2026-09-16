@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 use std::collections::HashSet;
 use tokio::{sync::mpsc, time::Instant};
 use zestors::{
-    channel::{ActorStatus, ChannelSnapshot, Pid},
+    runtime::{ActorStatus, ChannelSnapshot, Pid},
     supervision::ChildConfig,
 };
 

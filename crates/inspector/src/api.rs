@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use zestors::{
-    channel::{ActorStatus, ChannelSnapshot, Pid},
+    runtime::{ActorStatus, ChannelSnapshot, Pid},
     supervision::ChildConfig,
 };
 

@@ -6,9 +6,24 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, Fields, Type};
 
+/// Derives the `Interface` trait for an enum.
+///
+/// This only works un unnamed, single-value enum-fields that are envelopes.
+/// Anything else is rejected.
+///
+/// # Example
+/// ```
+/// # use zestors_interface::*;
+/// #[derive(Interface)]
+/// # #[interface(path = "zestors_interface")]
+/// enum MyInterface {
+///     MessageA(Envelope<u32>),
+///     MessageB(Envelope<String>),
+/// }
+/// ```
 #[proc_macro_derive(Interface, attributes(interface))]
 pub fn derive_interface_polybox(input: TokenStream) -> TokenStream {
-    derive_interface(input, "::zestors")
+    derive_interface(input, "::zestors::interface")
 }
 
 #[derive(darling::FromAttributes)]
@@ -26,8 +41,7 @@ fn derive_interface(input: TokenStream, base: &str) -> TokenStream {
     let enum_name = &input.ident;
 
     let base_path: syn::Path = attrs.path.unwrap_or_else(|| syn::parse_str(base).unwrap());
-    let msg_path: syn::Path =
-        syn::parse_str(&format!("{}::messaging", quote!(#base_path))).unwrap();
+    let msg_path: syn::Path = base_path.clone();
 
     // Ensure we are working with an enum
     let variants = match &input.data {
@@ -74,7 +88,7 @@ fn derive_interface(input: TokenStream, base: &str) -> TokenStream {
                 });
 
                 into_matches.push(quote! {
-                    Self::#variant_name(envelope) => #msg_path::DynEnvelope::new::<#inner_type>(envelope),
+                    Self::#variant_name(envelope) => #msg_path::AnyEnvelope::new::<#inner_type>(envelope),
                 });
 
                 from_impls.push(quote! {
@@ -103,7 +117,7 @@ fn derive_interface(input: TokenStream, base: &str) -> TokenStream {
 
     let expanded = quote! {
         impl #msg_path::Interface for #enum_name {
-            fn try_from_dyn_envelope(envelope: #msg_path::DynEnvelope) -> Result<Self, #msg_path::DynEnvelope> {
+            fn try_from_dyn_envelope(envelope: #msg_path::AnyEnvelope) -> Result<Self, #msg_path::AnyEnvelope> {
                 #(#try_from_matches)*
                 Err(envelope)
             }
@@ -115,19 +129,20 @@ fn derive_interface(input: TokenStream, base: &str) -> TokenStream {
             //     Err(self)
             // }
 
-            fn into_dyn_envelope(self) -> #msg_path::DynEnvelope {
+            fn into_dyn_envelope(self) -> #msg_path::AnyEnvelope {
                 match self {
                     #(#into_matches)*
                 }
             }
 
-            type Set = #msg_path::type_sets::Set![#(#inner_types),*];
+            type Set = (#(#inner_types,)*);
         }
 
 
         impl #msg_path::Message for #enum_name {
-            type Outcome = ();
-            type Mode = #msg_path::FireAndForget;
+            type Output = ();
+            type Resolver = ();
+            type Receipt = ();
         }
 
 
@@ -185,7 +200,7 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
 
                 handle_matches.push(quote! {
                     Self::#variant_name(envelope) => {
-                        <T as #base_path::handler::Handle<#inner_type>>::handle(actor, state, envelope).await
+                        <T as #base_path::actor::Handle<#inner_type>>::handle(actor, state, envelope).await
                     }
                 });
                 inner_types.push(inner_type);
@@ -195,11 +210,11 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
     }
 
     let expanded = quote! {
-        impl<T> #base_path::handler::HandlerInterface<T> for #enum_name
+        impl<T> #base_path::actor::HandlerInterface<T> for #enum_name
         where
-            T: #base_path::handler::Handler + #( #base_path::handler::Handle<#inner_types> + )*
+            T: #base_path::actor::Handler + #( #base_path::actor::Handle<#inner_types> + )*
         {
-            async fn handle_with(self, state: #base_path::handler::HandlerState<'_, T>, actor: &mut T) -> Result<(), Report> {
+            async fn handle_with(self, state: #base_path::actor::HandlerState<'_, T>, actor: &mut T) -> Result<(), Report> {
                 match self {
                     #(#handle_matches)*
                 }
@@ -210,23 +225,27 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-/// Derives the `Message` trait for a struct, allowing it to be used as a message
-/// in the Polybox framework.
+/// Derives the `Message` trait.
 ///
 /// This macro accepts an optional `reply` attribute to specify the reply type for the message.
+/// When `reply` is specified, the receipt becomes a `Response` and the resolver a `Request`.
+///
 ///
 /// # Example
-/// ```ignore
+/// ```
+/// # use zestors_interface::*;
 /// #[derive(Message)]
+/// # #[msg(path = "zestors_interface")]
 /// struct SimpleMessage;
 ///
 /// #[derive(Message)]
 /// #[msg(reply = u32)]
-/// struct MessageWithOutcome;
+/// # #[msg(path = "zestors_interface")]
+/// struct MessageWithOutput;
 /// ```
 #[proc_macro_derive(Message, attributes(msg))]
 pub fn derive_message(input: TokenStream) -> TokenStream {
-    _derive_message(input, "::zestors")
+    _derive_message(input, "::zestors::interface")
 }
 
 #[derive(darling::FromAttributes)]
@@ -249,18 +268,20 @@ fn _derive_message(input: TokenStream, base: &str) -> TokenStream {
 
     let expanded = if let Some(reply_type) = attrs.reply {
         quote!(
-            impl #impl_generics #base_path::messaging::Message for #name #ty_generics #where_clause
+            impl #impl_generics #base_path::Message for #name #ty_generics #where_clause
             {
-                type Mode = #base_path::messaging::Request;
-                type Outcome = #reply_type;
+                type Output = #reply_type;
+                type Receipt = #base_path::Reply<#reply_type>;
+                type Resolver = #base_path::Request<#reply_type>;
             }
         )
     } else {
         quote!(
-            impl #impl_generics #base_path::messaging::Message for #name #ty_generics #where_clause
+            impl #impl_generics #base_path::Message for #name #ty_generics #where_clause
             {
-                type Mode = #base_path::messaging::FireAndForget;
-                type Outcome = ();
+                type Output = ();
+                type Resolver = ();
+                type Receipt = ();
             }
         )
     };

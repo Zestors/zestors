@@ -1,10 +1,11 @@
 use rootcause::Report;
 use std::{net::SocketAddr, pin::pin, sync::Arc};
 use tokio::net::TcpListener;
-use zestors_core::{
-    prelude::*,
-    supervision::{GetChildren, GetHealth, Health},
-};
+use zestors_actor::{Actor, Blueprint};
+use zestors_codegen::Interface;
+use zestors_interface::Envelope;
+use zestors_runtime::prelude::*;
+use zestors_supervision::{GetChildren, GetHealth, Health};
 
 mod router;
 
@@ -33,7 +34,7 @@ pub struct ApiServer {
 }
 
 #[derive(Interface)]
-#[interface(path = "zestors_core")]
+#[interface(path = "zestors_interface")]
 pub enum ApiServerInterface {
     Children(Envelope<GetChildren>),
     Health(Envelope<GetHealth>),
@@ -60,14 +61,14 @@ impl Actor for ApiServer {
                     break api_exit.map_err(Into::into);
                 },
 
-                event = state.next() => match event {
+                event = state.recv_event() => match event {
                     Some(event) => event,
                     None => break Err(rootcause::report!("Actor event stream closed unexpectedly")),
                 }
             };
 
             match event {
-                Event::Signal(signal) => match signal {
+                InboxEvent::Signal(signal) => match signal {
                     Signal::Shutdown => {
                         tracing::info!("API server received shutdown signal");
                         break Ok(());
@@ -75,12 +76,12 @@ impl Actor for ApiServer {
                     Signal::Resume | Signal::Suspend => {}
                 },
 
-                Event::Message(msg) => match msg {
+                InboxEvent::Message(msg) => match msg {
                     ApiServerInterface::Children(env) => {
-                        env.handle.send(vec![]).ok();
+                        env.req.reply(vec![]).ok();
                     }
                     ApiServerInterface::Health(env) => {
-                        env.handle.send(Health::healthy()).ok();
+                        env.req.reply(Health::healthy()).ok();
                     }
                 },
             }
@@ -109,3 +110,5 @@ impl ApiServer {
         Ok(())
     }
 }
+
+pub mod prelude {}

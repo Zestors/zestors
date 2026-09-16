@@ -1,0 +1,24 @@
+[package]
+name = "zestors-supervision"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+zestors-runtime.workspace = true
+zestors-actor.workspace = true
+zestors-codegen.workspace = true
+zestors-interface.workspace = true
+streamunordered.workspace = true
+futures.workspace = true
+tracing.workspace = true
+rootcause.workspace = true
+thiserror.workspace = true
+indexmap.workspace = true
+tokio.workspace = true
+type-sets.workspace = true
+serde.workspace = true
+smol_str.workspace = true
+jiff.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

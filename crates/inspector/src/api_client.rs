@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use reqwest::StatusCode;
 use rootcause::report;
 use zestors::{
-    channel::{ActorStatus, ChannelSnapshot, Pid},
+    runtime::{ActorStatus, ChannelSnapshot, Pid},
     supervision::{ChildConfig, Health, SupervisionTree},
 };
 

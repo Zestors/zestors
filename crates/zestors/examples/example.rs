@@ -1,46 +1,35 @@
 use rootcause::Report;
 use std::time::Duration;
 use zestors::{
-    HandlerInterface,
-    handler::{
+    actor::{
         BasicScheduler, Handle, HandledBy, Handler, HandlerCallback, HandlerMessage, HandlerState,
     },
     prelude::*,
-    spawn,
-    supervision::{ActorExt as _, GetChildren, GetHealth, Health},
+    supervision::{GetChildren, GetHealth, Health},
 };
-
+use zestors_actor::ActorExt;
+use zestors_runtime::spawn;
 #[tokio::main]
 async fn main() {
-    let child = spawn(Pid::rand(), async move |mut stream: Inbox<MyInterface>| {
-        while let Some(msg) = stream.next().await {
+    let child = spawn(async move |mut inbox: Inbox<MyInterface>| {
+        while let Some(msg) = inbox.recv().await {
             match msg {
-                Event::Signal(signal) => match signal {
-                    Signal::Shutdown => {
-                        println!("Received shutdown signal");
-                        break;
-                    }
-                    Signal::Resume | Signal::Suspend => {}
-                },
-
-                Event::Message(message) => match message {
-                    MyInterface::Add(envelope) => {
-                        println!("Received message: {:?}", envelope);
-                    }
-                    MyInterface::Print(envelope) => {
-                        println!("Received message: {:?}", envelope);
-                    }
-                    MyInterface::Health(Envelope { handle, .. }) => {
-                        handle.send(Health::healthy()).ok();
-                    }
-                    MyInterface::Children(Envelope { handle, .. }) => {
-                        handle.send(vec![]).ok();
-                    }
-                    MyInterface::Rpc(envelope) => {
-                        println!("Received any message. Not handleable, dropping...");
-                        drop(envelope);
-                    }
-                },
+                MyInterface::Add(envelope) => {
+                    println!("Received message: {:?}", envelope);
+                }
+                MyInterface::Print(envelope) => {
+                    println!("Received message: {:?}", envelope);
+                }
+                MyInterface::Health(Envelope { req, .. }) => {
+                    req.reply(Health::healthy()).ok();
+                }
+                MyInterface::Children(Envelope { req, .. }) => {
+                    req.reply(vec![]).ok();
+                }
+                MyInterface::Rpc(envelope) => {
+                    println!("Received any message. Not handleable, dropping...");
+                    drop(envelope);
+                }
             }
         }
 
@@ -103,7 +92,7 @@ impl Handle<u32> for MyActor {
     async fn handle(
         &mut self,
         state: HandlerState<'_, Self>,
-        Envelope { msg, handle: () }: Envelope<u32>,
+        Envelope { msg, req: () }: Envelope<u32>,
     ) -> Result<(), Report> {
         println!("Received message: {:?}", msg);
 
@@ -143,9 +132,12 @@ impl Handle<GetHealth> for MyActor {
     async fn handle(
         &mut self,
         _state: HandlerState<'_, Self>,
-        Envelope { msg: _, handle }: Envelope<GetHealth>,
+        Envelope {
+            msg: _,
+            req: handle,
+        }: Envelope<GetHealth>,
     ) -> Result<(), Report> {
-        handle.send(Health::healthy().with_debug_repr(&self)).ok();
+        handle.reply(Health::healthy().with_debug_repr(&self)).ok();
 
         self.scheduler.schedule_msg(async move {
             tokio::time::sleep(Duration::from_secs(1)).await;
@@ -165,9 +157,12 @@ impl Handle<GetChildren> for MyActor {
     async fn handle(
         &mut self,
         _: HandlerState<'_, Self>,
-        Envelope { msg: _, handle }: Envelope<GetChildren>,
+        Envelope {
+            msg: _,
+            req: handle,
+        }: Envelope<GetChildren>,
     ) -> Result<(), Report> {
-        handle.send(vec![]).ok();
+        handle.reply(vec![]).ok();
         Ok(())
     }
 }
@@ -175,7 +170,7 @@ impl Handle<GetChildren> for MyActor {
 async fn test() {
     let child = MyActor::new()
         // .map_actor_exit(|x| x.map(|x| x * 2))
-        .spawn(Pid::rand());
+        .spawn();
     let address = child.address().clone();
 
     address.send(5u32).await.unwrap();

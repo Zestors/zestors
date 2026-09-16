@@ -1,9 +1,0 @@
-[package]
-name = "type-sets"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-
-[features]
-_ra = []

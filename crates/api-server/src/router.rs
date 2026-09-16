@@ -8,14 +8,12 @@ use futures::{StreamExt, stream};
 use indexmap::IndexMap;
 use rootcause::report;
 use std::time::Duration;
-use zestors_core::{
-    channel::{ActorStatus, ChannelSnapshot, ChannelSpec},
-    node::Node,
+use zestors_runtime::{
+    Registry,
     prelude::*,
-    registry::Registry,
-    signals::RestartMode,
-    supervision::{ChildConfig, ChildDescription, GetChildren, GetHealth, Health, SupervisionTree},
+    {ActorStatus, ChannelSnapshot, Context},
 };
+use zestors_supervision::{ChildConfig, ChildDescription, GetChildren, GetHealth, Health, Node};
 
 impl ApiServer {
     pub(super) fn create_router(&self) -> Router {
@@ -62,6 +60,7 @@ async fn get_tree(pid: Option<Pid>, include_debug: Option<bool>) -> ApiResult {
 
 /// Returns all processes in the tree, with their actor-status and child-configuration
 #[route(GET "/processes" with ApiServer)]
+#[axum::debug_handler]
 async fn get_processes() -> ApiResult<Json<IndexMap<Pid, (ChildConfig, ActorStatus, Vec<Pid>)>>> {
     let root_desc = Node::root_supervisor()
         .ok_or_else(|| report!("No root supervisor"))?
@@ -104,9 +103,7 @@ async fn get_processes() -> ApiResult<Json<IndexMap<Pid, (ChildConfig, ActorStat
     Ok(Json(results))
 }
 
-async fn get_children(
-    address: &Address<impl ChannelSpec>,
-) -> rootcause::Result<Vec<ChildDescription>> {
+async fn get_children(address: &Address<impl Context>) -> rootcause::Result<Vec<ChildDescription>> {
     Ok(timeout(Duration::from_millis(50), address.request_dyn(GetChildren)).await??)
 }
 
