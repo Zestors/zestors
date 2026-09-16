@@ -9,7 +9,7 @@ pub(crate) use zestors_interface::*;
 
 pub mod prelude {
     pub use crate::{
-        ActorOps as _, Address, Child, Inbox, InboxEvent, IntoDyn as _, Pid, Sends as _, Signal,
+        ActorOps as _, Address, Cast as _, Child, Inbox, InboxEvent, IntoDyn as _, Pid, Signal,
         StrongAddress, spawn_with,
     };
 }

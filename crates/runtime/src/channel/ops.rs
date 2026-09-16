@@ -25,7 +25,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     fn send_dyn<M: Message>(
         &self,
         msg: M,
-    ) -> impl Future<Output = Result<M::Receipt, SendCheckedError<M>>> + Send {
+    ) -> impl Future<Output = Result<M::Receipt, CastCheckedError<M>>> + Send {
         let handle = self.channel();
 
         async {
@@ -35,18 +35,18 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     }
 
     /// Same as [`Sends::try_send`], but checks whether the message type is accepted by the channel.
-    fn try_send_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, TrySendCheckedError<M>> {
+    fn try_send_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, TryCastCheckedError<M>> {
         if self.reached_backpressure() {
-            return Err(TrySendCheckedError::Full(msg));
+            return Err(TryCastCheckedError::Full(msg));
         }
 
         self.send_now_dyn(msg).map_err(Into::into)
     }
 
     /// Same as [`Sends::send_now`], but checks whether the message type is accepted by the channel.
-    fn send_now_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, SendCheckedError<M>> {
+    fn send_now_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, CastCheckedError<M>> {
         if !self.status().accepts_messages() {
-            return Err(SendCheckedError::Closed(msg));
+            return Err(CastCheckedError::Closed(msg));
         }
 
         let output = self.channel().try_push_msg(msg)?;
@@ -57,7 +57,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     fn request_dyn<M: Message>(
         &self,
         msg: M,
-    ) -> impl Future<Output = Result<M::Output, RequestCheckedError<M>>> + Send {
+    ) -> impl Future<Output = Result<M::Output, CallCheckedError<M>>> + Send {
         let handle = self.channel();
         async { Ok(handle.send_dyn(msg).await?.wait().await?) }
     }

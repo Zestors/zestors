@@ -11,7 +11,7 @@ use super::*;
 /// - [`Sends::send_now`] checks whether the channel is open but ignores
 ///   backpressure.
 /// - [`Sends::force_send`] ignores both backpressure and the channel status.
-pub trait Sends<M: Message>: Sync {
+pub trait Cast<M: Message>: Sync {
     /// Sends a message, applying backpressure when the channel is under load.
     ///
     /// This method waits asynchronously while backpressure is active. It
@@ -19,7 +19,7 @@ pub trait Sends<M: Message>: Sync {
     ///
     /// Unlike [`Sends::try_send`], this method waits rather than returning
     /// immediately when backpressure is active.
-    fn send(&self, msg: M) -> impl Future<Output = Result<M::Receipt, SendError<M>>> + Send;
+    fn cast(&self, msg: M) -> impl Future<Output = Result<M::Receipt, CastError<M>>> + Send;
 
     /// Attempts to send a message without waiting.
     ///
@@ -29,7 +29,7 @@ pub trait Sends<M: Message>: Sync {
     ///
     /// Unlike [`Sends::send`], this method never waits for backpressure to
     /// subside.
-    fn try_send(&self, msg: M) -> Result<M::Receipt, TrySendError<M>>;
+    fn try_cast(&self, msg: M) -> Result<M::Receipt, TryCastError<M>>;
 
     /// Sends a message immediately if the channel is open.
     ///
@@ -38,7 +38,7 @@ pub trait Sends<M: Message>: Sync {
     ///
     /// Use [`Sends::force_send`] when the channel status should also be
     /// ignored.
-    fn send_now(&self, msg: M) -> Result<M::Receipt, SendError<M>>;
+    fn cast_now(&self, msg: M) -> Result<M::Receipt, CastError<M>>;
 
     // /// Sends a message immediately, ignoring backpressure and channel status.
     // ///
@@ -53,27 +53,27 @@ pub trait Sends<M: Message>: Sync {
     ///
     /// This is the same as [`Sends::send`] with [`MessageOutput::receive`] called on the result. The resulting value is therefore [`Message::Output`] instead of
     /// [`Message::Output`].
-    fn request(&self, msg: M) -> impl Future<Output = Result<M::Output, RequestError<M>>> + Send {
-        async move { Ok(self.send(msg).await?.wait().await?) }
+    fn call(&self, msg: M) -> impl Future<Output = Result<M::Output, CallError<M>>> + Send {
+        async move { Ok(self.cast(msg).await?.wait().await?) }
     }
 }
 
-impl<M, H> Sends<M> for H
+impl<M, H> Cast<M> for H
 where
     H: ActorRef + Sync,
     M: Message,
-    Channel<H::Ctx>: _Sends<M>,
+    Channel<H::Ctx>: _Cast<M>,
 {
-    async fn send(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
-        self.channel()._send(msg).await
+    async fn cast(&self, msg: M) -> Result<M::Receipt, CastError<M>> {
+        self.channel()._cast(msg).await
     }
 
-    fn try_send(&self, msg: M) -> Result<M::Receipt, TrySendError<M>> {
-        self.channel()._try_send(msg)
+    fn try_cast(&self, msg: M) -> Result<M::Receipt, TryCastError<M>> {
+        self.channel()._try_cast(msg)
     }
 
-    fn send_now(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
-        self.channel()._send_now(msg)
+    fn cast_now(&self, msg: M) -> Result<M::Receipt, CastError<M>> {
+        self.channel()._cast_now(msg)
     }
 }
 
@@ -81,36 +81,36 @@ where
 ///
 /// There is a blacket-implementation of [`Sends`] for all types that implement
 /// [`ActorHandle`].
-pub(crate) trait _Sends<M: Message>: Sync {
-    fn _send(&self, msg: M) -> impl Future<Output = Result<M::Receipt, SendError<M>>> + Send;
-    fn _try_send(&self, msg: M) -> Result<M::Receipt, TrySendError<M>>;
-    fn _send_now(&self, msg: M) -> Result<M::Receipt, SendError<M>>;
-    fn _request(&self, msg: M) -> impl Future<Output = Result<M::Output, RequestError<M>>> + Send {
-        async move { Ok(self._send(msg).await?.wait().await?) }
+pub(crate) trait _Cast<M: Message>: Sync {
+    fn _cast(&self, msg: M) -> impl Future<Output = Result<M::Receipt, CastError<M>>> + Send;
+    fn _try_cast(&self, msg: M) -> Result<M::Receipt, TryCastError<M>>;
+    fn _cast_now(&self, msg: M) -> Result<M::Receipt, CastError<M>>;
+    fn _call(&self, msg: M) -> impl Future<Output = Result<M::Output, CallError<M>>> + Send {
+        async move { Ok(self._cast(msg).await?.wait().await?) }
     }
 }
 
-impl<M, I> _Sends<M> for Channel<I>
+impl<M, I> _Cast<M> for Channel<I>
 where
     M: Message,
     I: Interface + TryInto<Envelope<M>> + From<Envelope<M>> + Send + 'static,
 {
-    async fn _send(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
+    async fn _cast(&self, msg: M) -> Result<M::Receipt, CastError<M>> {
         self.delay_for_backpressure().await;
-        self._send_now(msg)
+        self._cast_now(msg)
     }
 
-    fn _try_send(&self, msg: M) -> Result<M::Receipt, TrySendError<M>> {
+    fn _try_cast(&self, msg: M) -> Result<M::Receipt, TryCastError<M>> {
         if self.reached_backpressure() {
-            return Err(TrySendError::Full(msg));
+            return Err(TryCastError::Full(msg));
         }
 
-        self._send_now(msg).map_err(Into::into)
+        self._cast_now(msg).map_err(Into::into)
     }
 
-    fn _send_now(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
+    fn _cast_now(&self, msg: M) -> Result<M::Receipt, CastError<M>> {
         if !self.status().accepts_messages() {
-            return Err(SendError(msg));
+            return Err(CastError(msg));
         }
 
         if let Some(queue) = self.raw_queue() {
@@ -124,30 +124,30 @@ where
             Ok(receipt)
         } else {
             match self.send_now_dyn(msg) {
-                Err(SendCheckedError::NotAccepted(_)) => {
+                Err(CastCheckedError::NotAccepted(_)) => {
                     panic!(
                         "Message type {} not accepted by channel {}",
                         std::any::type_name::<M>(),
                         std::any::type_name::<Self>(),
                     );
                 }
-                Err(SendCheckedError::Closed(msg)) => Err(SendError(msg)),
+                Err(CastCheckedError::Closed(msg)) => Err(CastError(msg)),
                 Ok(output) => Ok(output),
             }
         }
     }
 }
 
-impl<M, T> _Sends<M> for Channel<Dyn<T>>
+impl<M, T> _Cast<M> for Channel<Dyn<T>>
 where
     M: Message,
     T: AsTypeSet + Contains<M> + 'static,
 {
-    async fn _send(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
+    async fn _cast(&self, msg: M) -> Result<M::Receipt, CastError<M>> {
         match self.send_dyn(msg).await {
             Ok(output) => Ok(output),
-            Err(SendCheckedError::Closed(msg)) => Err(SendError(msg)),
-            Err(SendCheckedError::NotAccepted(_)) => {
+            Err(CastCheckedError::Closed(msg)) => Err(CastError(msg)),
+            Err(CastCheckedError::NotAccepted(_)) => {
                 panic!(
                     "Message type {} not accepted by channel {}",
                     std::any::type_name::<M>(),
@@ -157,12 +157,12 @@ where
         }
     }
 
-    fn _try_send(&self, msg: M) -> Result<M::Receipt, TrySendError<M>> {
+    fn _try_cast(&self, msg: M) -> Result<M::Receipt, TryCastError<M>> {
         match self.try_send_dyn(msg) {
             Ok(output) => Ok(output),
-            Err(TrySendCheckedError::Closed(msg)) => Err(TrySendError::Closed(msg)),
-            Err(TrySendCheckedError::Full(msg)) => Err(TrySendError::Full(msg)),
-            Err(TrySendCheckedError::NotAccepted(_)) => {
+            Err(TryCastCheckedError::Closed(msg)) => Err(TryCastError::Closed(msg)),
+            Err(TryCastCheckedError::Full(msg)) => Err(TryCastError::Full(msg)),
+            Err(TryCastCheckedError::NotAccepted(_)) => {
                 panic!(
                     "Message type {} not accepted by channel {}",
                     std::any::type_name::<M>(),
@@ -172,11 +172,11 @@ where
         }
     }
 
-    fn _send_now(&self, msg: M) -> Result<M::Receipt, SendError<M>> {
+    fn _cast_now(&self, msg: M) -> Result<M::Receipt, CastError<M>> {
         match self.send_now_dyn(msg) {
             Ok(output) => Ok(output),
-            Err(SendCheckedError::Closed(msg)) => Err(SendError(msg)),
-            Err(SendCheckedError::NotAccepted(_)) => {
+            Err(CastCheckedError::Closed(msg)) => Err(CastError(msg)),
+            Err(CastCheckedError::NotAccepted(_)) => {
                 panic!(
                     "Message type {} not accepted by channel {}",
                     std::any::type_name::<M>(),

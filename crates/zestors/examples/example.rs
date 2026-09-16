@@ -36,7 +36,7 @@ async fn main() {
         Ok(())
     });
 
-    child.address().send(10u32).await.unwrap();
+    child.address().cast(10u32).await.unwrap();
     child.address().signal_shutdown();
     child.watch_exit().await.unwrap();
 
@@ -173,12 +173,12 @@ async fn test() {
         .spawn();
     let address = child.address().clone();
 
-    address.send(5u32).await.unwrap();
-    child.send(15u32).await.unwrap();
-    child.send("Hello, world!".to_string()).await.unwrap();
+    address.cast(5u32).await.unwrap();
+    child.cast(15u32).await.unwrap();
+    child.cast("Hello, world!".to_string()).await.unwrap();
 
     child
-        .send(HandlerCallback::new(|actor, state| Ok(())))
+        .cast(HandlerCallback::new(|actor, state| Ok(())))
         .await
         .unwrap();
 

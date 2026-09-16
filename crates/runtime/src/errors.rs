@@ -5,7 +5,7 @@ use thiserror::Error;
 use zestors_interface::ReceiptError;
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, Hash)]
-pub enum TrySendError<T> {
+pub enum TryCastError<T> {
     #[error("Channel is closed")]
     Closed(T),
 
@@ -13,21 +13,21 @@ pub enum TrySendError<T> {
     Full(T),
 }
 
-impl<T> TrySendError<T> {
+impl<T> TryCastError<T> {
     pub fn into_inner(self) -> T {
         match self {
-            TrySendError::Closed(t) => t,
-            TrySendError::Full(t) => t,
+            TryCastError::Closed(t) => t,
+            TryCastError::Full(t) => t,
         }
     }
 }
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, Hash)]
 #[error("Channel is closed")]
-pub struct SendError<T>(pub T);
+pub struct CastError<T>(pub T);
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, Hash)]
-pub enum SendCheckedError<T> {
+pub enum CastCheckedError<T> {
     #[error("Channel is closed")]
     Closed(T),
 
@@ -35,17 +35,17 @@ pub enum SendCheckedError<T> {
     NotAccepted(T),
 }
 
-impl<T> SendCheckedError<T> {
+impl<T> CastCheckedError<T> {
     pub fn into_inner(self) -> T {
         match self {
-            SendCheckedError::Closed(t) => t,
-            SendCheckedError::NotAccepted(t) => t,
+            CastCheckedError::Closed(t) => t,
+            CastCheckedError::NotAccepted(t) => t,
         }
     }
 }
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, Hash)]
-pub enum TrySendCheckedError<T> {
+pub enum TryCastCheckedError<T> {
     #[error("Channel is closed")]
     Closed(T),
 
@@ -60,24 +60,24 @@ pub enum TrySendCheckedError<T> {
 #[error("Message type not accepted by channel")]
 pub struct NotAccepted<T>(pub T);
 
-impl<T> TrySendCheckedError<T> {
+impl<T> TryCastCheckedError<T> {
     pub fn into_inner(self) -> T {
         match self {
-            TrySendCheckedError::Closed(t) => t,
-            TrySendCheckedError::Full(t) => t,
-            TrySendCheckedError::NotAccepted(t) => t,
+            TryCastCheckedError::Closed(t) => t,
+            TryCastCheckedError::Full(t) => t,
+            TryCastCheckedError::NotAccepted(t) => t,
         }
     }
 }
 
-impl<T> From<SendError<T>> for TrySendError<T> {
-    fn from(err: SendError<T>) -> Self {
-        TrySendError::Closed(err.0)
+impl<T> From<CastError<T>> for TryCastError<T> {
+    fn from(err: CastError<T>) -> Self {
+        TryCastError::Closed(err.0)
     }
 }
 
 #[derive(Debug, thiserror::Error, Clone)]
-pub enum RequestError<M> {
+pub enum CallError<M> {
     #[error("The channel was closed")]
     Closed(M),
 
@@ -85,20 +85,20 @@ pub enum RequestError<M> {
     NoResponse,
 }
 
-impl<M> From<SendError<M>> for RequestError<M> {
-    fn from(err: SendError<M>) -> Self {
-        RequestError::Closed(err.0)
+impl<M> From<CastError<M>> for CallError<M> {
+    fn from(err: CastError<M>) -> Self {
+        CallError::Closed(err.0)
     }
 }
 
-impl<M> From<ReceiptError> for RequestError<M> {
+impl<M> From<ReceiptError> for CallError<M> {
     fn from(_err: ReceiptError) -> Self {
         Self::NoResponse
     }
 }
 
 #[derive(Debug, thiserror::Error, Clone)]
-pub enum RequestCheckedError<M> {
+pub enum CallCheckedError<M> {
     #[error("The channel was closed")]
     Closed(M),
 
@@ -109,81 +109,81 @@ pub enum RequestCheckedError<M> {
     NoResponse,
 }
 
-impl<M> From<SendCheckedError<M>> for RequestCheckedError<M> {
-    fn from(err: SendCheckedError<M>) -> Self {
+impl<M> From<CastCheckedError<M>> for CallCheckedError<M> {
+    fn from(err: CastCheckedError<M>) -> Self {
         match err {
-            SendCheckedError::Closed(m) => RequestCheckedError::Closed(m),
-            SendCheckedError::NotAccepted(m) => RequestCheckedError::NotAccepted(m),
+            CastCheckedError::Closed(m) => CallCheckedError::Closed(m),
+            CastCheckedError::NotAccepted(m) => CallCheckedError::NotAccepted(m),
         }
     }
 }
 
-impl<M> From<ReceiptError> for RequestCheckedError<M> {
+impl<M> From<ReceiptError> for CallCheckedError<M> {
     fn from(_err: ReceiptError) -> Self {
         Self::NoResponse
     }
 }
 
-impl<M> From<NotAccepted<M>> for RequestCheckedError<M> {
+impl<M> From<NotAccepted<M>> for CallCheckedError<M> {
     fn from(err: NotAccepted<M>) -> Self {
-        RequestCheckedError::NotAccepted(err.0)
+        CallCheckedError::NotAccepted(err.0)
     }
 }
 
-impl<M> From<RequestError<M>> for RequestCheckedError<M> {
-    fn from(err: RequestError<M>) -> Self {
+impl<M> From<CallError<M>> for CallCheckedError<M> {
+    fn from(err: CallError<M>) -> Self {
         match err {
-            RequestError::Closed(m) => RequestCheckedError::Closed(m),
-            RequestError::NoResponse => RequestCheckedError::NoResponse,
+            CallError::Closed(m) => CallCheckedError::Closed(m),
+            CallError::NoResponse => CallCheckedError::NoResponse,
         }
     }
 }
 
-impl<T> From<PushError<T>> for TrySendError<T> {
+impl<T> From<PushError<T>> for TryCastError<T> {
     fn from(err: PushError<T>) -> Self {
         match err {
-            PushError::Closed(t) => TrySendError::Closed(t),
-            PushError::Full(t) => TrySendError::Full(t),
+            PushError::Closed(t) => TryCastError::Closed(t),
+            PushError::Full(t) => TryCastError::Full(t),
         }
     }
 }
 
-impl<T> From<SendCheckedError<T>> for TrySendCheckedError<T> {
-    fn from(err: SendCheckedError<T>) -> Self {
+impl<T> From<CastCheckedError<T>> for TryCastCheckedError<T> {
+    fn from(err: CastCheckedError<T>) -> Self {
         match err {
-            SendCheckedError::Closed(t) => TrySendCheckedError::Closed(t),
-            SendCheckedError::NotAccepted(t) => TrySendCheckedError::NotAccepted(t),
+            CastCheckedError::Closed(t) => TryCastCheckedError::Closed(t),
+            CastCheckedError::NotAccepted(t) => TryCastCheckedError::NotAccepted(t),
         }
     }
 }
 
-impl<T> From<PushError<T>> for TrySendCheckedError<T> {
+impl<T> From<PushError<T>> for TryCastCheckedError<T> {
     fn from(err: PushError<T>) -> Self {
         match err {
-            PushError::Closed(t) => TrySendCheckedError::Closed(t),
-            PushError::Full(t) => TrySendCheckedError::Full(t),
+            PushError::Closed(t) => TryCastCheckedError::Closed(t),
+            PushError::Full(t) => TryCastCheckedError::Full(t),
         }
     }
 }
 
-impl<T> From<TrySendError<T>> for TrySendCheckedError<T> {
-    fn from(err: TrySendError<T>) -> Self {
+impl<T> From<TryCastError<T>> for TryCastCheckedError<T> {
+    fn from(err: TryCastError<T>) -> Self {
         match err {
-            TrySendError::Closed(t) => TrySendCheckedError::Closed(t),
-            TrySendError::Full(t) => TrySendCheckedError::Full(t),
+            TryCastError::Closed(t) => TryCastCheckedError::Closed(t),
+            TryCastError::Full(t) => TryCastCheckedError::Full(t),
         }
     }
 }
 
-impl<T> From<NotAccepted<T>> for TrySendCheckedError<T> {
+impl<T> From<NotAccepted<T>> for TryCastCheckedError<T> {
     fn from(err: NotAccepted<T>) -> Self {
-        TrySendCheckedError::NotAccepted(err.0)
+        TryCastCheckedError::NotAccepted(err.0)
     }
 }
 
-impl<T> From<NotAccepted<T>> for SendCheckedError<T> {
+impl<T> From<NotAccepted<T>> for CastCheckedError<T> {
     fn from(err: NotAccepted<T>) -> Self {
-        SendCheckedError::NotAccepted(err.0)
+        CastCheckedError::NotAccepted(err.0)
     }
 }
 
