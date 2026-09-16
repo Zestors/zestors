@@ -77,37 +77,6 @@ impl SupervisionTree {
         }
     }
 
-    // pub async fn populate_health(&mut self, timeout: Duration) {
-    //     let mut queue = VecDeque::new();
-    //     queue.push_back(self);
-
-    //     while let Some(node) = queue.pop_front() {
-    //         let address = match Registry::local().get(&node.description.pid) {
-    //             Some(address) => address,
-    //             None => {
-    //                 continue;
-    //             }
-    //         };
-
-    //         let Ok(Ok(debug_state)) =
-    //             tokio::time::timeout(timeout, address.request_dyn(GetDebugInfo)).await
-    //         else {
-    //             continue;
-    //         };
-
-    //         node.health = Some(debug_state);
-
-    //         for child in &mut node.children {
-    //             queue.push_back(child);
-    //         }
-    //     }
-    // }
-
-    // pub async fn populated_debug_state(mut self, timeout: Duration) -> Self {
-    //     self.populate_health(timeout).await;
-    //     self
-    // }
-
     pub fn populate_channel_snapshots(&mut self) {
         let mut queue = VecDeque::new();
         queue.push_back(self);

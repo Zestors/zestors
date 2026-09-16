@@ -18,7 +18,7 @@ pub(super) struct OneForAllSupervisor<'a> {
 }
 
 impl<'a> OneForAllSupervisor<'a> {
-    pub fn new(inner: &'a mut SupervisorInner) -> Self {
+    pub(super) fn new(inner: &'a mut SupervisorInner) -> Self {
         Self {
             inner,
             initializing: IndexSet::new(),
@@ -29,7 +29,7 @@ impl<'a> OneForAllSupervisor<'a> {
         }
     }
 
-    pub async fn run(&mut self) -> Result<(), Report> {
+    pub(super) async fn run(&mut self) -> Result<(), Report> {
         let start_result = self.inner.supervisees.start_all();
         self.initializing = self.inner.supervisees.pids().cloned().collect();
 
@@ -79,7 +79,9 @@ impl<'a> OneForAllSupervisor<'a> {
                         msg: DeregisterChild(pid),
                         request,
                     }) => {
-                        request.reply(self.remove_spec(&pid)).ok();
+                        request
+                            .reply(self.remove_spec(&pid).map(|s| s.get_description()))
+                            .ok();
                     }
                 },
             },
@@ -96,15 +98,25 @@ impl<'a> OneForAllSupervisor<'a> {
             },
 
             InnerNext::Supervisee(SuperviseeNext { pid, item }) => match item {
-                SuperviseeItem::StartError(error) => {
-                    self.handle_exit(&pid, ExitReason::Start(error))?;
+                SuperviseeItem::Started(Ok(())) => {}
+                SuperviseeItem::Started(Err(error)) => {
+                    tracing::warn!(%error, "Supervisee failed to start");
+                    self.handle_exit(&pid, ExitReason::Start)?;
                 }
+
                 SuperviseeItem::Exit(exit) => {
+                    if let SuperviseeExit::JoinError(e) = &exit {
+                        tracing::warn!(%e, "Supervisee exited with a join error");
+                    }
                     self.handle_exit(&pid, ExitReason::Exit(exit))?;
                 }
-                SuperviseeItem::Spawned => {}
-                SuperviseeItem::Initialized => {
+
+                SuperviseeItem::Initialized(Ok(())) => {
                     self.handle_initialized(&pid);
+                }
+                SuperviseeItem::Initialized(Err(status)) => {
+                    tracing::warn!(%status, "Supervisee exited before finishing initialization");
+                    self.handle_exit(&pid, ExitReason::Start)?;
                 }
             },
         }
@@ -174,8 +186,7 @@ impl<'a> OneForAllSupervisor<'a> {
 
             if supervisee.cfg().restart_mode == RestartMode::Never {
                 self.cascade_drop.insert(pid.clone());
-                supervisee.stop();
-                if supervisee.status() != SuperviseeStatus::Dead {
+                if supervisee.stop().is_shutting_down() {
                     self.restarting.insert(pid);
                 }
                 continue;
@@ -186,8 +197,7 @@ impl<'a> OneForAllSupervisor<'a> {
             }
 
             self.cascade_restart.insert(pid.clone());
-            supervisee.stop();
-            if supervisee.status() != SuperviseeStatus::Dead {
+            if supervisee.stop().is_shutting_down() {
                 self.restarting.insert(pid);
             }
         }

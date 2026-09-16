@@ -62,7 +62,7 @@ impl Cascade {
 }
 
 impl<'a> RestForOneSupervisor<'a> {
-    pub fn new(inner: &'a mut SupervisorInner) -> Self {
+    pub(super) fn new(inner: &'a mut SupervisorInner) -> Self {
         Self {
             inner,
             initializing: IndexSet::new(),
@@ -71,7 +71,7 @@ impl<'a> RestForOneSupervisor<'a> {
         }
     }
 
-    pub async fn run(&mut self) -> Result<(), Report> {
+    pub(super) async fn run(&mut self) -> Result<(), Report> {
         let start_result = self.inner.supervisees.start_all();
         self.initializing = self.inner.supervisees.pids().cloned().collect();
 
@@ -115,20 +115,22 @@ impl<'a> RestForOneSupervisor<'a> {
                         msg: RegisterChild(spec),
                         request,
                     }) => {
-                        request.reply(self.add_spec(spec)).ok();
+                        request.reply(self.inner.add_spec(spec)).ok();
                     }
                     SupervisorInterface::Deregister(Envelope {
                         msg: DeregisterChild(pid),
                         request,
                     }) => {
-                        request.reply(self.remove_spec(&pid)).ok();
+                        request
+                            .reply(self.remove_spec(&pid).map(|s| s.get_description()))
+                            .ok();
                     }
                 },
             },
 
             InnerNext::Source(ev) => match ev {
                 SupervisorSourceEvent::Added(spec) => {
-                    if let Err(e) = self.add_spec(spec) {
+                    if let Err(e) = self.inner.add_spec(spec) {
                         tracing::warn!(%e, "Failed to add supervisee from source");
                     }
                 }
@@ -138,14 +140,22 @@ impl<'a> RestForOneSupervisor<'a> {
             },
 
             InnerNext::Supervisee(SuperviseeNext { pid, item }) => match item {
-                SuperviseeItem::StartError(error) => {
-                    self.handle_exit(&pid, ExitReason::Start(error))?;
+                SuperviseeItem::Started(Ok(())) => {}
+                SuperviseeItem::Started(Err(error)) => {
+                    tracing::warn!(%error, "Supervisee failed to start");
+                    self.handle_exit(&pid, ExitReason::Start)?;
+                }
+                SuperviseeItem::Initialized(Err(status)) => {
+                    tracing::warn!(%status, "Supervisee exited before finishing initialization");
+                    self.handle_exit(&pid, ExitReason::Start)?;
                 }
                 SuperviseeItem::Exit(exit) => {
+                    if let SuperviseeExit::JoinError(e) = &exit {
+                        tracing::warn!(%e, "Supervisee exited with a join error");
+                    }
                     self.handle_exit(&pid, ExitReason::Exit(exit))?;
                 }
-                SuperviseeItem::Spawned => {}
-                SuperviseeItem::Initialized => {
+                SuperviseeItem::Initialized(Ok(())) => {
                     self.handle_initialized(&pid);
 
                     // A restart step in our cascade just finished
@@ -323,8 +333,7 @@ impl<'a> RestForOneSupervisor<'a> {
 
             if supervisee.cfg().restart_mode == RestartMode::Never {
                 to_drop.push(next.clone());
-                supervisee.stop();
-                if supervisee.status() != SuperviseeStatus::Dead {
+                if supervisee.stop().is_shutting_down() {
                     self.cascade = Cascade::Stopping {
                         current: next,
                         pending,
@@ -341,8 +350,7 @@ impl<'a> RestForOneSupervisor<'a> {
             }
 
             to_restart.push(next.clone());
-            supervisee.stop();
-            if supervisee.status() != SuperviseeStatus::Dead {
+            if supervisee.stop().is_shutting_down() {
                 self.cascade = Cascade::Stopping {
                     current: next,
                     pending,
@@ -390,10 +398,6 @@ impl<'a> RestForOneSupervisor<'a> {
 
     fn shutdown(&mut self) -> ControlFlow<()> {
         shared::shutdown(self.inner, &mut self.exiting)
-    }
-
-    fn add_spec(&mut self, spec: ChildSpec) -> Result<(), DuplicatePidError> {
-        shared::add_spec(self.inner, spec)
     }
 
     fn remove_spec(&mut self, pid: &Pid) -> Option<Supervisee> {

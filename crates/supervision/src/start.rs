@@ -35,16 +35,16 @@ impl<B: Blueprint> Start for B {
 }
 
 #[derive(Debug, Clone)]
-pub struct DynStarter(Arc<dyn _Spawnable + Send + Sync + 'static>);
+pub struct DynStarter(Arc<dyn Spawnable + Send + Sync + 'static>);
 
-trait _Spawnable: Debug {
+trait Spawnable: Debug {
     fn spawn_on_dyn<'a>(
         &'a self,
         data: &'a StrongAddress,
     ) -> BoxFuture<'a, Result<Child, StartOnError>>;
 }
 
-impl<R: Blueprint> _Spawnable for R {
+impl<R: Blueprint> Spawnable for R {
     fn spawn_on_dyn<'a>(
         &'a self,
         data: &'a StrongAddress,

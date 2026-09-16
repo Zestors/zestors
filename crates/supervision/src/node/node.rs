@@ -62,7 +62,7 @@ impl Node {
 }
 
 impl NodeActor {
-    pub async fn run(mut self) {
+    async fn run(mut self) {
         loop {
             let supervisor_exit = tokio::select! {
                 res = &mut self.supervisor_child => res,

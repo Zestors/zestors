@@ -9,7 +9,7 @@ pub(super) struct OneForOneSupervisor<'a> {
 }
 
 impl<'a> OneForOneSupervisor<'a> {
-    pub fn new(inner: &'a mut SupervisorInner) -> Self {
+    pub(super) fn new(inner: &'a mut SupervisorInner) -> Self {
         Self {
             inner,
             initializing: IndexSet::new(),
@@ -17,7 +17,7 @@ impl<'a> OneForOneSupervisor<'a> {
         }
     }
 
-    pub async fn run(&mut self) -> Result<(), Report> {
+    pub(super) async fn run(&mut self) -> Result<(), Report> {
         let start_result = self.inner.supervisees.start_all();
         self.initializing = self.inner.supervisees.pids().cloned().collect();
 
@@ -67,7 +67,9 @@ impl<'a> OneForOneSupervisor<'a> {
                         msg: DeregisterChild(pid),
                         request,
                     }) => {
-                        request.reply(self.remove_spec(&pid)).ok();
+                        request
+                            .reply(self.remove_spec(&pid).map(|s| s.get_description()))
+                            .ok();
                     }
                 },
             },
@@ -84,14 +86,22 @@ impl<'a> OneForOneSupervisor<'a> {
             },
 
             InnerNext::Supervisee(SuperviseeNext { pid, item }) => match item {
-                SuperviseeItem::StartError(error) => {
-                    self.handle_exit(&pid, ExitReason::Start(error))?;
+                SuperviseeItem::Started(Ok(())) => {}
+                SuperviseeItem::Started(Err(error)) => {
+                    tracing::warn!(%error, "Supervisee failed to start");
+                    self.handle_exit(&pid, ExitReason::Start)?;
+                }
+                SuperviseeItem::Initialized(Err(status)) => {
+                    tracing::warn!(%status, "Supervisee exited before finishing initialization");
+                    self.handle_exit(&pid, ExitReason::Start)?;
                 }
                 SuperviseeItem::Exit(exit) => {
+                    if let SuperviseeExit::JoinError(e) = &exit {
+                        tracing::warn!(%e, "Supervisee exited with a join error");
+                    }
                     self.handle_exit(&pid, ExitReason::Exit(exit))?;
                 }
-                SuperviseeItem::Spawned => {}
-                SuperviseeItem::Initialized => {
+                SuperviseeItem::Initialized(Ok(())) => {
                     self.handle_initialized(&pid);
                 }
             },

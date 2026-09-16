@@ -1,6 +1,9 @@
 use crate::_prelude::*;
 use crate::ChildSpec;
-use futures::{Stream, future};
+use futures::{
+    Stream,
+    future::{self, BoxFuture},
+};
 use rootcause::Report;
 use std::{
     fmt::Debug,
@@ -9,19 +12,19 @@ use std::{
 };
 use tokio::time::{error::Elapsed, timeout};
 use zestors_runtime::{
-    ActorRef, ActorStatus, Channel, Child, Dyn, ExitingChild, Pid,
+    ActorRef, Channel, Child, Dyn, ExitStatus, ExitingChild, Pid,
     errors::{JoinError, StartOnError},
 };
 
 #[derive(Debug)]
-pub struct Supervisee {
+pub(crate) struct Supervisee {
     spec: ChildSpec,
     state: SuperviseeState,
     restarter: RestartLimiter,
 }
 
 impl Supervisee {
-    pub fn new(spec: ChildSpec) -> Self {
+    pub(crate) fn new(spec: ChildSpec) -> Self {
         Self {
             restarter: RestartLimiter::new(spec.cfg().intensity.clone()),
             spec,
@@ -29,7 +32,7 @@ impl Supervisee {
         }
     }
 
-    pub fn get_description(&self) -> ChildDescription {
+    pub(crate) fn get_description(&self) -> ChildDescription {
         ChildDescription {
             pid: self.pid().clone(),
             cfg: self.spec.cfg().clone(),
@@ -38,7 +41,7 @@ impl Supervisee {
 
     /// Whether this type of exit requires the child to be restarted.
     #[must_use]
-    pub fn requires_restart(&self, exit: &SuperviseeExit) -> bool {
+    pub(crate) fn requires_restart(&self, exit: &SuperviseeExit) -> bool {
         match (self.cfg().restart_mode, exit) {
             (RestartMode::Always, _) => true,
             (RestartMode::Never, _) => false,
@@ -51,15 +54,11 @@ impl Supervisee {
 
     /// Whether the restart-limiter allows the child to be restarted
     #[must_use]
-    pub fn acquire_restart_permit(&mut self) -> bool {
+    pub(crate) fn acquire_restart_permit(&mut self) -> bool {
         self.restarter.acquire_permit()
     }
 
-    pub fn status(&self) -> SuperviseeStatus {
-        self.state.status()
-    }
-
-    pub fn start(&mut self) -> Result<bool, SuperviseeIsShuttingDown> {
+    pub(crate) fn start(&mut self) -> Result<bool, SuperviseeIsShuttingDown> {
         self.state.map(|state| match state {
             // If the supervisee is idle or dead, we can start it.
             SuperviseeState::Dead { .. } => {
@@ -71,46 +70,80 @@ impl Supervisee {
                 (SuperviseeState::Starting { fut }, Ok(true))
             }
 
-            // If the supervisee is starting or alive, all is good
-            SuperviseeState::Starting { .. } | SuperviseeState::Alive { .. } => (state, Ok(false)),
+            // If the supervisee is starting, initializing, or alive, all is good
+            SuperviseeState::Starting { .. }
+            | SuperviseeState::Initializing { .. }
+            | SuperviseeState::Alive { .. } => (state, Ok(false)),
 
             // If the supervisee is shutting down, we cannot start it.
             SuperviseeState::ShuttingDown { .. } => (state, Err(SuperviseeIsShuttingDown)),
         })
     }
 
-    pub fn stop(&mut self) -> bool {
+    pub(crate) fn stop(&mut self) -> StopOutcome {
         self.state.map(|state| match state {
-            // If the supervisee is dead, idle, or shutting down, we don't need to do anything.
-            SuperviseeState::Dead { .. } | SuperviseeState::ShuttingDown { .. } => (state, false),
+            // If the supervisee is dead or idle, there's nothing to do.
+            SuperviseeState::Dead { .. } => (state, StopOutcome::Dead),
 
-            // If the supervisee is starting, we drop the future and mark it as dead.
+            // If the supervisee is starting, we drop the future and mark it as
+            // dead. This resolves synchronously: no exit event will follow.
             SuperviseeState::Starting { fut } => {
                 drop(fut);
-                (SuperviseeState::start_cancelled(), true)
+                (SuperviseeState::start_cancelled(), StopOutcome::Cancelled)
             }
 
-            // If the supervisee is alive, we initiate a shutdown.
-            SuperviseeState::Alive { child } => {
+            // If the supervisee is still initializing, the init-watch future
+            // no longer matters; initiate a shutdown same as if it were alive.
+            SuperviseeState::Initializing { child, .. } | SuperviseeState::Alive { child } => {
                 let child = child.into_shutdown(self.spec.cfg().abort_timeout);
-                (SuperviseeState::ShuttingDown { child }, true)
+                (
+                    SuperviseeState::ShuttingDown { child },
+                    StopOutcome::ShuttingDown,
+                )
             }
+
+            // Already shutting down; nothing new to do, but an exit event is
+            // still on its way.
+            SuperviseeState::ShuttingDown { child } => (
+                SuperviseeState::ShuttingDown { child },
+                StopOutcome::ShuttingDown,
+            ),
         })
     }
 
-    pub async fn supervise(&mut self) -> SuperviseeItem {
+    pub(crate) async fn supervise(&mut self) -> SuperviseeItem {
         match &mut self.state {
             SuperviseeState::Dead { .. } => future::pending().await,
 
             SuperviseeState::Starting { fut } => match fut.await {
                 Ok(child) => {
-                    self.state = SuperviseeState::Alive { child };
-                    SuperviseeItem::Spawned
+                    self.state = SuperviseeState::Initializing {
+                        fut: InitFuture::new(&child),
+                        child,
+                    };
+                    SuperviseeItem::Started(Ok(()))
                 }
 
-                Err(start_error) => {
+                Err(e) => {
                     self.state = SuperviseeState::start_error();
-                    SuperviseeItem::StartError(start_error)
+                    SuperviseeItem::Started(Err(e))
+                }
+            },
+
+            SuperviseeState::Initializing { fut, .. } => match fut.await {
+                Ok(()) => {
+                    let SuperviseeState::Initializing { child, .. } =
+                        std::mem::replace(&mut self.state, SuperviseeState::idle())
+                    else {
+                        unreachable!();
+                    };
+
+                    self.state = SuperviseeState::Alive { child };
+                    SuperviseeItem::Initialized(Ok(()))
+                }
+                Err(e) => {
+                    self.state = SuperviseeState::start_error();
+                    SuperviseeItem::Initialized(Err(e))
                 }
             },
 
@@ -167,21 +200,24 @@ impl ActorRef for Supervisee {
 }
 
 #[derive(Debug)]
-pub struct SuperviseeNext {
-    pub pid: Pid,
-    pub item: SuperviseeItem,
+pub(crate) struct SuperviseeNext {
+    pub(crate) pid: Pid,
+    pub(crate) item: SuperviseeItem,
 }
 
 #[derive(Debug)]
-pub enum SuperviseeItem {
-    StartError(StartSuperviseeError),
+pub(crate) enum SuperviseeItem {
+    Started(Result<(), StartSuperviseeError>),
+    Initialized(Result<(), ExitStatus>),
     Exit(SuperviseeExit),
-    Spawned,
-    Initialized,
+    // StartError(StartSuperviseeError),
+    // InitFailed(ExitStatus),
+    // Exit(SuperviseeExit),
+    // Initialized,
 }
 
 #[derive(Debug)]
-pub enum SuperviseeExit {
+pub(crate) enum SuperviseeExit {
     JoinError(JoinError),
     NormalExit,
     NormalShutdown,
@@ -200,16 +236,29 @@ enum DeadSuperviseeStatus {
 #[derive(Debug)]
 enum SuperviseeState {
     /// The supervisee is starting, and has not yet been spawned.
-    Starting { fut: StartFuture },
+    Starting {
+        fut: StartFuture,
+    },
+
+    Initializing {
+        fut: InitFuture,
+        child: Child,
+    },
 
     /// The supervisee has been spawned, and might be initialized.
-    Alive { child: Child },
+    Alive {
+        child: Child,
+    },
 
     /// The supervisee is exiting, and is in the process of shutting down.
-    ShuttingDown { child: ExitingChild },
+    ShuttingDown {
+        child: ExitingChild,
+    },
 
     /// The supervisee has exited, and is no longer running.
-    Dead { status: DeadSuperviseeStatus },
+    Dead {
+        status: DeadSuperviseeStatus,
+    },
 }
 
 impl SuperviseeState {
@@ -249,21 +298,7 @@ impl SuperviseeState {
         }
     }
 
-    pub fn status(&self) -> SuperviseeStatus {
-        match self {
-            SuperviseeState::Starting { .. } => SuperviseeStatus::Starting,
-            SuperviseeState::Alive { child } => match child.status() {
-                ActorStatus::Exited(_) => SuperviseeStatus::Dead,
-                ActorStatus::Initializing => SuperviseeStatus::Initializing,
-                ActorStatus::Suspended | ActorStatus::Running => SuperviseeStatus::Initialized,
-                ActorStatus::Stopping => SuperviseeStatus::ShuttingDown,
-            },
-            SuperviseeState::ShuttingDown { .. } => SuperviseeStatus::ShuttingDown,
-            SuperviseeState::Dead { .. } => SuperviseeStatus::Dead,
-        }
-    }
-
-    pub fn map<T>(&mut self, f: impl FnOnce(Self) -> (Self, T)) -> T {
+    fn map<T>(&mut self, f: impl FnOnce(Self) -> (Self, T)) -> T {
         let old_state = std::mem::replace(self, SuperviseeState::idle());
         let (new_state, result) = f(old_state);
         *self = new_state;
@@ -271,17 +306,30 @@ impl SuperviseeState {
     }
 }
 
+/// The result of calling [`Supervisee::stop`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SuperviseeStatus {
-    Starting,
-    Initializing,
-    Initialized,
-    ShuttingDown,
+pub(crate) enum StopOutcome {
+    /// Was already dead (or idle); nothing happened, and there's no exit
+    /// event to wait for.
     Dead,
+    /// Was still starting; the in-flight start was cancelled synchronously,
+    /// landing straight on `Dead`. There's no exit event to wait for either,
+    /// since nothing was ever spawned.
+    Cancelled,
+    /// Is now (or was already) shutting down; an exit event will eventually
+    /// follow.
+    ShuttingDown,
+}
+
+impl StopOutcome {
+    /// Whether an exit event should still be waited for.
+    pub(crate) fn is_shutting_down(self) -> bool {
+        matches!(self, StopOutcome::ShuttingDown)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum StartSuperviseeError {
+pub(crate) enum StartSuperviseeError {
     #[error("Concurrent inbox error")]
     ConcurrentInbox,
 
@@ -309,7 +357,7 @@ impl From<Elapsed> for StartSuperviseeError {
 
 #[derive(Debug, thiserror::Error)]
 #[error("Cannot start supervisee: Currently shutting down")]
-pub struct SuperviseeIsShuttingDown;
+pub(crate) struct SuperviseeIsShuttingDown;
 
 struct StartFuture(
     Pin<Box<dyn std::future::Future<Output = Result<Child, StartSuperviseeError>> + Send>>,
@@ -334,5 +382,30 @@ impl Future for StartFuture {
 impl Debug for StartFuture {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StartFuture").finish()
+    }
+}
+
+struct InitFuture(BoxFuture<'static, Result<(), ExitStatus>>);
+
+impl InitFuture {
+    fn new(child: &Child) -> Self {
+        let address = child.address().clone();
+        InitFuture(Box::pin(
+            async move { address.watch_initialization().await },
+        ))
+    }
+}
+
+impl Future for InitFuture {
+    type Output = Result<(), ExitStatus>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.0.as_mut().poll(cx)
+    }
+}
+
+impl Debug for InitFuture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InitFuture").finish()
     }
 }

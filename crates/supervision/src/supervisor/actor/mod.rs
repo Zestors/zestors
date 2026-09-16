@@ -98,31 +98,12 @@ impl SupervisorInner {
         matches!(self.inbox.status(), ActorStatus::Initializing)
     }
 
-    fn is_initialized(&self) -> bool {
-        matches!(
-            self.inbox.status(),
-            ActorStatus::Running | ActorStatus::Suspended
-        )
-    }
-
     fn is_exiting(&self) -> bool {
         matches!(self.inbox.status(), ActorStatus::Stopping)
     }
 
-    fn child_descriptions(&self) -> Vec<ChildDescription> {
-        self.supervisees.child_descriptions()
-    }
-
     fn health(&self) -> Health {
         HealthStatus::Healthy.into_health()
-    }
-
-    fn get_supervisee(&self, pid: &Pid) -> Option<&Supervisee> {
-        self.supervisees.get(pid)
-    }
-
-    fn get_supervisee_mut(&mut self, pid: &Pid) -> Option<&mut Supervisee> {
-        self.supervisees.get_mut(pid)
     }
 
     async fn next(&mut self) -> Option<InnerNext> {
@@ -171,28 +152,16 @@ enum InnerNext {
     Supervisee(SuperviseeNext),
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum SupervisorExitError {
-    #[error("Initialization failed")]
-    InitializationError,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum SupervisorStatus {
-    Initializing,
-    Running,
-    ShuttingDown,
-}
-
 enum ExitReason {
-    Start(StartSuperviseeError),
+    /// The supervisee failed to start; always requires a restart attempt.
+    Start,
     Exit(SuperviseeExit),
 }
 
 impl ExitReason {
     fn requires_restart(&self, supervisee: &Supervisee) -> bool {
         match self {
-            ExitReason::Start(_) => true,
+            ExitReason::Start => true,
             ExitReason::Exit(e) => supervisee.requires_restart(e),
         }
     }

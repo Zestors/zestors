@@ -1,14 +1,6 @@
 use crate::_prelude::*;
-use rootcause::Report;
 use std::collections::VecDeque;
 use tokio::time::Instant;
-use zestors_runtime::RegistryAddError;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct SupervisorConfig {
-    pub strategy: SupervisionStrategy,
-    pub restart: RestartIntensity,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SupervisionStrategy {
@@ -21,26 +13,6 @@ impl Default for SupervisionStrategy {
     fn default() -> Self {
         Self::OneForOne
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("Terminal child error: {id}, error: {error:?}")]
-pub struct RestartLimitReached {
-    pub id: Pid,
-    pub error: Option<Report>,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum SupervisorError {
-    #[error("Restart limit reached for child {0}")]
-    RestartLimit(#[from] RestartLimitReached),
-
-    #[error("Another process is already registered with the same pid")]
-    RegistryAddError(
-        #[source]
-        #[from]
-        RegistryAddError,
-    ),
 }
 
 #[derive(Debug, Clone, Default)]

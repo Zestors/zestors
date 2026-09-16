@@ -9,7 +9,7 @@ use super::*;
 pub struct RegisterChild(pub ChildSpec);
 
 #[derive(Message, Debug)]
-#[msg(path = "zestors_interface", reply = "Option<Supervisee>")]
+#[msg(path = "zestors_interface", reply = "Option<ChildDescription>")]
 pub struct DeregisterChild(pub Pid);
 
 #[derive(Interface, Debug)]
