@@ -17,12 +17,12 @@ pub enum ActorStatus {
     Suspended,
 
     /// The actor is in the process of shutting down. It will not accept new messages, but will finish processing any messages that are already in the queue.
-    Stopping,
+    Exiting,
 }
 
 impl ActorStatus {
     pub fn should_exit(&self) -> bool {
-        matches!(self, ActorStatus::Stopping | ActorStatus::Exited(_))
+        matches!(self, ActorStatus::Exiting | ActorStatus::Exited(_))
     }
 
     pub fn accepts_messages(&self) -> bool {
@@ -41,7 +41,7 @@ impl ActorStatus {
     }
 
     pub fn is_shutting_down(&self) -> bool {
-        matches!(self, ActorStatus::Stopping)
+        matches!(self, ActorStatus::Exiting)
     }
 
     pub fn is_dead(&self) -> bool {

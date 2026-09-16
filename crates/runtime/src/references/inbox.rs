@@ -44,7 +44,12 @@ impl<T: Interface> Inbox<T> {
     /// a [`Signal::Shutdown`] signal and has no more messages to process.
     pub async fn recv_event(&mut self) -> Option<InboxEvent<T>> {
         self.register_initialized();
-        self.channel().next_event().await
+        self.channel().next_event(false).await
+    }
+
+    pub async fn recv_event_always(&mut self) -> Option<InboxEvent<T>> {
+        self.register_initialized();
+        self.channel().next_event(true).await
     }
 
     /// Block until the next message becomes available. Once the actor has received a
@@ -54,7 +59,7 @@ impl<T: Interface> Inbox<T> {
         self.register_initialized();
 
         loop {
-            match self.channel().next_event().await {
+            match self.channel().next_event(false).await {
                 Some(ev) => {
                     if let InboxEvent::Message(msg) = ev {
                         return Some(msg);
@@ -67,7 +72,7 @@ impl<T: Interface> Inbox<T> {
 
     pub fn try_recv(&mut self) -> Option<InboxEvent<T>> {
         self.register_initialized();
-        self.channel().try_next()
+        self.channel().try_next_event()
     }
 
     pub async fn recv_signal(&mut self) -> Option<Signal> {
@@ -111,7 +116,7 @@ impl<T: Interface> Inbox<T> {
     }
 
     pub fn is_shutting_down(&self) -> bool {
-        self.status() == ActorStatus::Stopping
+        self.status() == ActorStatus::Exiting
     }
 
     async fn wait_resume(&mut self) {

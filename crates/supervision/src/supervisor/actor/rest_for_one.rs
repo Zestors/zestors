@@ -16,11 +16,11 @@ pub(super) struct RestForOneSupervisor<'a> {
 enum Cascade {
     Idle,
 
-    /// Stopping siblings after the trigger, one at a time. `current` is the
+    /// Exiting siblings after the trigger, one at a time. `current` is the
     /// one we're waiting to hear an exit from; `pending` holds the rest not
     /// yet told to stop, next-to-process at the back (i.e. reverse start
     /// order).
-    Stopping {
+    Exiting {
         current: Pid,
         pending: Vec<Pid>,
         /// Accumulated in the order stopped (reverse start order); reversed
@@ -43,14 +43,17 @@ enum Cascade {
     /// cascade's stop phase — just covering everyone, and never followed by
     /// a restart. `current` is the one we're waiting to hear an exit from;
     /// `pending` holds the rest, next up at the back.
-    ShuttingDown { current: Pid, pending: Vec<Pid> },
+    ShuttingDown {
+        current: Pid,
+        pending: Vec<Pid>,
+    },
 }
 
 impl Cascade {
     fn current(&self) -> Option<&Pid> {
         match self {
             Cascade::Idle => None,
-            Cascade::Stopping { current, .. }
+            Cascade::Exiting { current, .. }
             | Cascade::Restarting { current, .. }
             | Cascade::ShuttingDown { current, .. } => Some(current),
         }
@@ -61,7 +64,7 @@ impl Cascade {
     /// its turn comes up).
     fn pending_contains(&self, pid: &Pid) -> bool {
         match self {
-            Cascade::Stopping { pending, .. } | Cascade::ShuttingDown { pending, .. } => {
+            Cascade::Exiting { pending, .. } | Cascade::ShuttingDown { pending, .. } => {
                 pending.contains(pid)
             }
             Cascade::Idle | Cascade::Restarting { .. } => false,
@@ -206,7 +209,7 @@ impl<'a> RestForOneSupervisor<'a> {
         match std::mem::replace(&mut self.cascade, Cascade::Idle) {
             Cascade::Idle => self.start_cascade(pid),
 
-            Cascade::Stopping {
+            Cascade::Exiting {
                 current,
                 pending,
                 to_restart,
@@ -238,7 +241,7 @@ impl<'a> RestForOneSupervisor<'a> {
     /// Handles an exit event for whichever pid the cascade is currently
     /// waiting on.
     ///
-    /// During `Stopping` or `ShuttingDown`, this is the expected
+    /// During `Exiting` or `ShuttingDown`, this is the expected
     /// confirmation that a deliberately-stopped sibling has exited, so we
     /// just advance.
     ///
@@ -250,11 +253,11 @@ impl<'a> RestForOneSupervisor<'a> {
     /// needs a restart and has budget for one.
     fn handle_cascade_current_exit(&mut self, pid: &Pid, reason: ExitReason) -> ControlFlow<()> {
         if !matches!(self.cascade, Cascade::Restarting { .. }) {
-            // `current()` is only ever `Some` during `Stopping`,
+            // `current()` is only ever `Some` during `Exiting`,
             // `ShuttingDown`, or `Restarting`; we just ruled out the latter.
             debug_assert!(matches!(
                 self.cascade,
-                Cascade::Stopping { .. } | Cascade::ShuttingDown { .. }
+                Cascade::Exiting { .. } | Cascade::ShuttingDown { .. }
             ));
             return self.advance_cascade();
         }
@@ -353,7 +356,7 @@ impl<'a> RestForOneSupervisor<'a> {
 
         to_restart.push(trigger);
 
-        self.cascade = Cascade::Stopping {
+        self.cascade = Cascade::Exiting {
             current,
             pending,
             to_restart,
@@ -368,7 +371,7 @@ impl<'a> RestForOneSupervisor<'a> {
     fn advance_cascade(&mut self) -> ControlFlow<()> {
         match std::mem::replace(&mut self.cascade, Cascade::Idle) {
             Cascade::Idle => ControlFlow::Continue(()),
-            Cascade::Stopping {
+            Cascade::Exiting {
                 pending,
                 to_restart,
                 to_drop,
@@ -404,7 +407,7 @@ impl<'a> RestForOneSupervisor<'a> {
             if supervisee.cfg().restart_mode == RestartMode::Never {
                 to_drop.push(next.clone());
                 if supervisee.stop().is_shutting_down() {
-                    self.cascade = Cascade::Stopping {
+                    self.cascade = Cascade::Exiting {
                         current: next,
                         pending,
                         to_restart,
@@ -421,7 +424,7 @@ impl<'a> RestForOneSupervisor<'a> {
 
             to_restart.push(next.clone());
             if supervisee.stop().is_shutting_down() {
-                self.cascade = Cascade::Stopping {
+                self.cascade = Cascade::Exiting {
                     current: next,
                     pending,
                     to_restart,
@@ -511,9 +514,9 @@ impl<'a> RestForOneSupervisor<'a> {
     }
 
     fn remove_spec(&mut self, pid: &Pid) -> Option<Supervisee> {
-        let supervisee =
-            self.inner
-                .remove_spec(&mut self.initializing, &mut IndexSet::new(), pid);
+        let supervisee = self
+            .inner
+            .remove_spec(&mut self.initializing, &mut IndexSet::new(), pid);
 
         if supervisee.is_some() && self.cascade.current() == Some(pid) {
             // The pid our cascade was waiting on just got yanked out from

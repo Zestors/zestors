@@ -9,11 +9,7 @@ use futures::{StreamExt, stream};
 use indexmap::IndexMap;
 use rootcause::report;
 use std::time::Duration;
-use zestors_runtime::{
-    Registry,
-    prelude::*,
-    {ActorStatus, ChannelSnapshot, Context},
-};
+use zestors_runtime::{ActorStatus, CastOptions, ChannelSnapshot, Context, Registry, prelude::*};
 use zestors_supervision::{ChildConfig, ChildDescription, GetChildren, GetHealth, Health, Node};
 
 impl ApiServer {
@@ -60,7 +56,7 @@ async fn get_tree(pid: Option<Pid>, include_debug: Option<bool>) -> ApiResult {
 }
 
 /// Returns all processes in the tree, with their actor-status and child-configuration
-#[route(GET "/processes" )]
+#[route(GET "/processes")]
 #[axum::debug_handler]
 async fn get_processes(
     State(state): State<ApiServer>,
@@ -109,7 +105,11 @@ async fn get_processes(
 }
 
 async fn get_children(address: &Address<impl Context>) -> rootcause::Result<Vec<ChildDescription>> {
-    Ok(timeout(Duration::from_millis(50), address.call_dyn(GetChildren)).await??)
+    Ok(timeout(
+        Duration::from_millis(50),
+        address.call_dyn_with(GetChildren, CastOptions::new().ignore_exiting(true)),
+    )
+    .await??)
 }
 
 #[route(GET "/snapshots" with ApiServer)]
@@ -135,7 +135,12 @@ async fn get_health(Json(pids): Json<Vec<Pid>>) -> ApiResult<Json<Vec<Option<Hea
             return None;
         };
 
-        match timeout(Duration::from_millis(50), address.call_dyn(GetHealth)).await {
+        match timeout(
+            Duration::from_millis(50),
+            address.call_dyn_with(GetHealth, CastOptions::new().ignore_exiting(true)),
+        )
+        .await
+        {
             Ok(Ok(health)) => Some(health),
             _ => None,
         }

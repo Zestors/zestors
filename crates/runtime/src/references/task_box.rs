@@ -44,7 +44,7 @@ impl TaskBox {
     }
 
     pub fn is_shutting_down(&self) -> bool {
-        self.status() == ActorStatus::Stopping
+        self.status() == ActorStatus::Exiting
     }
 
     pub async fn run_until_shutdown<O>(

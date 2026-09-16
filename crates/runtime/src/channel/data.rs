@@ -116,7 +116,7 @@ impl<C: Context> Channel<C> {
         // Spawn is only valid if the actor is dead.
         self.update_status(|status| match status {
             ActorStatus::Exited(_) => (Some(ActorStatus::Initializing), Ok(())),
-            ActorStatus::Stopping
+            ActorStatus::Exiting
             | ActorStatus::Initializing
             | ActorStatus::Running
             | ActorStatus::Suspended => (
@@ -140,7 +140,7 @@ impl<C: Context> Channel<C> {
         // Exit is always valid, but doesn't always do something.
         let updated = self.update_status(|status| match status {
             ActorStatus::Exited(_) => (None, false),
-            ActorStatus::Stopping
+            ActorStatus::Exiting
             | ActorStatus::Initializing
             | ActorStatus::Running
             | ActorStatus::Suspended => (
@@ -172,7 +172,7 @@ impl<C: Context> Channel<C> {
 
     pub(crate) fn register_initialized(&self) -> Result<bool, InvalidStatusUpdate> {
         let updated = self.update_status(|status| match status {
-            ActorStatus::Stopping | ActorStatus::Exited(_) => (
+            ActorStatus::Exiting | ActorStatus::Exited(_) => (
                 None,
                 Err(InvalidStatusUpdate::new(status, ActorStatus::Running)),
             ),
@@ -191,7 +191,7 @@ impl<C: Context> Channel<C> {
 
     pub(crate) fn register_suspended(&self) -> Result<bool, InvalidStatusUpdate> {
         let updated = self.update_status(|status| match status {
-            ActorStatus::Stopping | ActorStatus::Exited(_) | ActorStatus::Initializing => (
+            ActorStatus::Exiting | ActorStatus::Exited(_) | ActorStatus::Initializing => (
                 None,
                 Err(InvalidStatusUpdate::new(status, ActorStatus::Suspended)),
             ),
@@ -209,7 +209,7 @@ impl<C: Context> Channel<C> {
 
     pub(crate) fn register_resumed(&self) -> Result<bool, InvalidStatusUpdate> {
         let updated = self.update_status(|status| match status {
-            ActorStatus::Stopping | ActorStatus::Exited(_) | ActorStatus::Initializing => (
+            ActorStatus::Exiting | ActorStatus::Exited(_) | ActorStatus::Initializing => (
                 None,
                 Err(InvalidStatusUpdate::new(status, ActorStatus::Running)),
             ),
@@ -229,11 +229,11 @@ impl<C: Context> Channel<C> {
         let updated = self.update_status(|status| match status {
             ActorStatus::Exited(_) => (
                 None,
-                Err(InvalidStatusUpdate::new(status, ActorStatus::Stopping)),
+                Err(InvalidStatusUpdate::new(status, ActorStatus::Exiting)),
             ),
-            ActorStatus::Stopping => (None, Ok(false)),
+            ActorStatus::Exiting => (None, Ok(false)),
             ActorStatus::Initializing | ActorStatus::Running | ActorStatus::Suspended => {
-                (Some(ActorStatus::Stopping), Ok(true))
+                (Some(ActorStatus::Exiting), Ok(true))
             }
         })?;
 
@@ -292,10 +292,7 @@ impl<C: Context> Channel<C> {
     }
 
     fn _signal(&self, signal: SignalInterface) -> bool {
-        if matches!(
-            self.status(),
-            ActorStatus::Exited(_) | ActorStatus::Stopping
-        ) {
+        if matches!(self.status(), ActorStatus::Exited(_) | ActorStatus::Exiting) {
             return false;
         }
 
@@ -422,7 +419,7 @@ impl<I: Interface> Channel<I> {
                 Some(Signal::Shutdown)
             }
             SignalInterface::Suspend(_) => {
-                if self.status() == ActorStatus::Stopping {
+                if self.status() == ActorStatus::Exiting {
                     tracing::warn!("Actor is exiting, cannot suspend");
                     None
                 } else {
@@ -446,10 +443,14 @@ impl<I: Interface> Channel<I> {
         }
     }
 
-    pub(crate) async fn next_event(&self) -> Option<InboxEvent<I>> {
+    pub(crate) async fn next_event(&self, while_exiting: bool) -> Option<InboxEvent<I>> {
         match self.status() {
             ActorStatus::Suspended => self.next_signal().await.map(InboxEvent::Signal),
-            ActorStatus::Exited(_) | ActorStatus::Stopping if self.msgs_is_empty() => None,
+
+            ActorStatus::Exited(_) if self.msgs_is_empty() => None,
+
+            ActorStatus::Exiting if self.msgs_is_empty() && !while_exiting => None,
+
             _ => {
                 select! {
                     biased;
@@ -462,10 +463,11 @@ impl<I: Interface> Channel<I> {
         }
     }
 
-    pub(crate) fn try_next(&self) -> Option<InboxEvent<I>> {
+    pub(crate) fn try_next_event(&self) -> Option<InboxEvent<I>> {
         match self.status() {
             ActorStatus::Suspended => self.pop_signal().map(InboxEvent::Signal),
-            ActorStatus::Exited(_) | ActorStatus::Stopping if self.msgs_is_empty() => None,
+            ActorStatus::Exited(_) if self.msgs_is_empty() => None,
+            ActorStatus::Exiting if self.msgs_is_empty() => None,
             _ => {
                 if let Some(signal) = self.pop_signal() {
                     Some(InboxEvent::Signal(signal))
@@ -505,10 +507,7 @@ impl ChannelInner<dyn DynamicQueue> {
     }
 
     pub fn signal(&self, signal: SignalInterface) -> bool {
-        if matches!(
-            self.status(),
-            ActorStatus::Exited(_) | ActorStatus::Stopping
-        ) {
+        if matches!(self.status(), ActorStatus::Exited(_) | ActorStatus::Exiting) {
             return false;
         }
 

@@ -5,7 +5,7 @@ use thiserror::Error;
 use zestors_interface::ReceiptError;
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, Hash)]
-pub enum TryCastError<T> {
+pub enum CastNowError<T> {
     #[error("Channel is closed")]
     Closed(T),
 
@@ -13,11 +13,22 @@ pub enum TryCastError<T> {
     Full(T),
 }
 
-impl<T> TryCastError<T> {
+impl<T> CastNowError<T> {
     pub fn into_inner(self) -> T {
         match self {
-            TryCastError::Closed(t) => t,
-            TryCastError::Full(t) => t,
+            CastNowError::Closed(t) => t,
+            CastNowError::Full(t) => t,
+        }
+    }
+
+    pub fn into_cast_error_dbg_assert(self) -> CastError<T> {
+        match self {
+            CastNowError::Closed(t) => CastError(t),
+            CastNowError::Full(t) => {
+                debug_assert!(false, "Cannot convert CastNowError::Full into CastError");
+                tracing::error!("Cannot convert CastNowError::Full into CastError");
+                CastError(t)
+            }
         }
     }
 }
@@ -27,7 +38,7 @@ impl<T> TryCastError<T> {
 pub struct CastError<T>(pub T);
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, Hash)]
-pub enum CastCheckedError<T> {
+pub enum CastDynError<T> {
     #[error("Channel is closed")]
     Closed(T),
 
@@ -35,17 +46,17 @@ pub enum CastCheckedError<T> {
     NotAccepted(T),
 }
 
-impl<T> CastCheckedError<T> {
+impl<T> CastDynError<T> {
     pub fn into_inner(self) -> T {
         match self {
-            CastCheckedError::Closed(t) => t,
-            CastCheckedError::NotAccepted(t) => t,
+            CastDynError::Closed(t) => t,
+            CastDynError::NotAccepted(t) => t,
         }
     }
 }
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, Hash)]
-pub enum TryCastCheckedError<T> {
+pub enum CastNowDynError<T> {
     #[error("Channel is closed")]
     Closed(T),
 
@@ -60,19 +71,34 @@ pub enum TryCastCheckedError<T> {
 #[error("Message type not accepted by channel")]
 pub struct NotAccepted<T>(pub T);
 
-impl<T> TryCastCheckedError<T> {
+impl<T> CastNowDynError<T> {
     pub fn into_inner(self) -> T {
         match self {
-            TryCastCheckedError::Closed(t) => t,
-            TryCastCheckedError::Full(t) => t,
-            TryCastCheckedError::NotAccepted(t) => t,
+            CastNowDynError::Closed(t) => t,
+            CastNowDynError::Full(t) => t,
+            CastNowDynError::NotAccepted(t) => t,
+        }
+    }
+
+    pub(crate) fn into_cast_error_dbg_assert(self) -> CastDynError<T> {
+        match self {
+            CastNowDynError::Closed(t) => CastDynError::Closed(t),
+            CastNowDynError::NotAccepted(t) => CastDynError::NotAccepted(t),
+            CastNowDynError::Full(t) => {
+                debug_assert!(
+                    false,
+                    "Cannot convert CastNowDynError::Full into CastDynError"
+                );
+                tracing::error!("Cannot convert CastNowDynError::Full into CastDynError");
+                CastDynError::NotAccepted(t)
+            }
         }
     }
 }
 
-impl<T> From<CastError<T>> for TryCastError<T> {
+impl<T> From<CastError<T>> for CastNowError<T> {
     fn from(err: CastError<T>) -> Self {
-        TryCastError::Closed(err.0)
+        CastNowError::Closed(err.0)
     }
 }
 
@@ -109,11 +135,11 @@ pub enum CallCheckedError<M> {
     NoResponse,
 }
 
-impl<M> From<CastCheckedError<M>> for CallCheckedError<M> {
-    fn from(err: CastCheckedError<M>) -> Self {
+impl<M> From<CastDynError<M>> for CallCheckedError<M> {
+    fn from(err: CastDynError<M>) -> Self {
         match err {
-            CastCheckedError::Closed(m) => CallCheckedError::Closed(m),
-            CastCheckedError::NotAccepted(m) => CallCheckedError::NotAccepted(m),
+            CastDynError::Closed(m) => CallCheckedError::Closed(m),
+            CastDynError::NotAccepted(m) => CallCheckedError::NotAccepted(m),
         }
     }
 }
@@ -139,51 +165,51 @@ impl<M> From<CallError<M>> for CallCheckedError<M> {
     }
 }
 
-impl<T> From<PushError<T>> for TryCastError<T> {
+impl<T> From<PushError<T>> for CastNowError<T> {
     fn from(err: PushError<T>) -> Self {
         match err {
-            PushError::Closed(t) => TryCastError::Closed(t),
-            PushError::Full(t) => TryCastError::Full(t),
+            PushError::Closed(t) => CastNowError::Closed(t),
+            PushError::Full(t) => CastNowError::Full(t),
         }
     }
 }
 
-impl<T> From<CastCheckedError<T>> for TryCastCheckedError<T> {
-    fn from(err: CastCheckedError<T>) -> Self {
+impl<T> From<CastDynError<T>> for CastNowDynError<T> {
+    fn from(err: CastDynError<T>) -> Self {
         match err {
-            CastCheckedError::Closed(t) => TryCastCheckedError::Closed(t),
-            CastCheckedError::NotAccepted(t) => TryCastCheckedError::NotAccepted(t),
+            CastDynError::Closed(t) => CastNowDynError::Closed(t),
+            CastDynError::NotAccepted(t) => CastNowDynError::NotAccepted(t),
         }
     }
 }
 
-impl<T> From<PushError<T>> for TryCastCheckedError<T> {
+impl<T> From<PushError<T>> for CastNowDynError<T> {
     fn from(err: PushError<T>) -> Self {
         match err {
-            PushError::Closed(t) => TryCastCheckedError::Closed(t),
-            PushError::Full(t) => TryCastCheckedError::Full(t),
+            PushError::Closed(t) => CastNowDynError::Closed(t),
+            PushError::Full(t) => CastNowDynError::Full(t),
         }
     }
 }
 
-impl<T> From<TryCastError<T>> for TryCastCheckedError<T> {
-    fn from(err: TryCastError<T>) -> Self {
+impl<T> From<CastNowError<T>> for CastNowDynError<T> {
+    fn from(err: CastNowError<T>) -> Self {
         match err {
-            TryCastError::Closed(t) => TryCastCheckedError::Closed(t),
-            TryCastError::Full(t) => TryCastCheckedError::Full(t),
+            CastNowError::Closed(t) => CastNowDynError::Closed(t),
+            CastNowError::Full(t) => CastNowDynError::Full(t),
         }
     }
 }
 
-impl<T> From<NotAccepted<T>> for TryCastCheckedError<T> {
+impl<T> From<NotAccepted<T>> for CastNowDynError<T> {
     fn from(err: NotAccepted<T>) -> Self {
-        TryCastCheckedError::NotAccepted(err.0)
+        CastNowDynError::NotAccepted(err.0)
     }
 }
 
-impl<T> From<NotAccepted<T>> for CastCheckedError<T> {
+impl<T> From<NotAccepted<T>> for CastDynError<T> {
     fn from(err: NotAccepted<T>) -> Self {
-        CastCheckedError::NotAccepted(err.0)
+        CastDynError::NotAccepted(err.0)
     }
 }
 

@@ -71,6 +71,40 @@ impl Actor for TestActor {
     }
 }
 
+/// An actor that takes a configurable amount of time to actually exit once
+/// asked to shut down, so tests can observe a supervisor's state while one
+/// of its supervisees is still alive but mid-shutdown.
+pub struct SlowShutdownActor {
+    delay: Duration,
+}
+
+impl Actor for SlowShutdownActor {
+    type Interface = TestInterface;
+    type Exit = ();
+
+    async fn run(self, mut inbox: Inbox<Self::Interface>) -> Result<(), Report> {
+        loop {
+            match inbox.recv_event().await {
+                Some(InboxEvent::Signal(signal)) if signal.is_shutdown() => {
+                    tokio::time::sleep(self.delay).await;
+                    return Ok(());
+                }
+                Some(_) => {}
+                None => return Ok(()),
+            }
+        }
+    }
+}
+
+/// Builds a [`SlowShutdownActor`] child (random pid) that sleeps for `delay`
+/// before actually exiting once told to stop.
+pub fn slow_shutdown_child(delay: Duration) -> ChildSpec {
+    blueprint_fn(move || SlowShutdownActor { delay })
+        .with_rand_pid()
+        .split()
+        .0
+}
+
 /// Builds a fresh [`TestActor`] child (random pid, short timeouts so a
 /// misbehaving test fails fast instead of hanging), returning its spec (to
 /// hand to a [`SupervisorBlueprint`]), its address (to send it [`Crash`] /

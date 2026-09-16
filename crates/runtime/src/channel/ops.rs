@@ -25,28 +25,43 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     fn cast_dyn<M: Message>(
         &self,
         msg: M,
-    ) -> impl Future<Output = Result<M::Receipt, CastCheckedError<M>>> + Send {
-        let handle = self.channel();
-
-        async {
-            handle.delay_for_backpressure().await;
-            handle.call_now_dyn(msg)
-        }
+    ) -> impl Future<Output = Result<M::Receipt, CastDynError<M>>> + Send {
+        self.cast_dyn_with(msg, Default::default())
     }
 
-    /// Same as [`Sends::try_send`], but checks whether the message type is accepted by the channel.
-    fn try_cast_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, TryCastCheckedError<M>> {
-        if self.reached_backpressure() {
-            return Err(TryCastCheckedError::Full(msg));
-        }
+    /// Same as [`Sends::send`], but checks whether the message type is accepted by the channel.
+    fn cast_dyn_with<M: Message>(
+        &self,
+        msg: M,
+        mut options: CastOptions,
+    ) -> impl Future<Output = Result<M::Receipt, CastDynError<M>>> + Send {
+        let handle = self.channel();
 
-        self.call_now_dyn(msg).map_err(Into::into)
+        async move {
+            if !options.ignore_backpressure {
+                handle.delay_for_backpressure().await;
+                options.ignore_backpressure = true;
+            }
+
+            handle
+                .cast_now_dyn_with(msg, options)
+                .map_err(|e| e.into_cast_error_dbg_assert())
+        }
     }
 
     /// Same as [`Sends::send_now`], but checks whether the message type is accepted by the channel.
-    fn call_now_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, CastCheckedError<M>> {
-        if !self.status().accepts_messages() {
-            return Err(CastCheckedError::Closed(msg));
+    fn cast_now_dyn_with<M: Message>(
+        &self,
+        msg: M,
+        options: CastOptions,
+    ) -> Result<M::Receipt, CastNowDynError<M>> {
+        if !options.ignore_backpressure && self.reached_backpressure() {
+            return Err(CastNowDynError::Full(msg));
+        }
+
+        let status = self.status();
+        if !status.accepts_messages() && !(options.ignore_exiting && status.is_shutting_down()) {
+            return Err(CastNowDynError::Closed(msg));
         }
 
         let output = self.channel().try_push_msg(msg)?;
@@ -58,8 +73,16 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         &self,
         msg: M,
     ) -> impl Future<Output = Result<M::Output, CallCheckedError<M>>> + Send {
+        self.call_dyn_with(msg, Default::default())
+    }
+
+    fn call_dyn_with<M: Message>(
+        &self,
+        msg: M,
+        options: CastOptions,
+    ) -> impl Future<Output = Result<M::Output, CallCheckedError<M>>> + Send {
         let handle = self.channel();
-        async { Ok(handle.cast_dyn(msg).await?.wait().await?) }
+        async move { Ok(handle.cast_dyn_with(msg, options).await?.wait().await?) }
     }
 
     fn pid(&self) -> &Pid {
@@ -278,4 +301,35 @@ impl<T: ActorRef + ?Sized> ActorOpsExtPriv for T {}
 mod sealed {
     pub trait Sealed {}
     impl<T: super::ActorRef> Sealed for T {}
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CastOptions {
+    pub ignore_exiting: bool,
+    pub ignore_backpressure: bool,
+}
+
+impl Default for CastOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CastOptions {
+    pub fn new() -> Self {
+        Self {
+            ignore_exiting: false,
+            ignore_backpressure: false,
+        }
+    }
+
+    pub fn ignore_exiting(mut self, ignore: bool) -> Self {
+        self.ignore_exiting = ignore;
+        self
+    }
+
+    pub fn ignore_backpressure(mut self, ignore: bool) -> Self {
+        self.ignore_backpressure = ignore;
+        self
+    }
 }

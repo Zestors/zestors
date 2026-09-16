@@ -100,7 +100,7 @@ impl SupervisorInner {
     }
 
     fn is_exiting(&self) -> bool {
-        matches!(self.inbox.status(), ActorStatus::Stopping)
+        matches!(self.inbox.status(), ActorStatus::Exiting)
     }
 
     fn health(&self) -> Health {
@@ -111,7 +111,7 @@ impl SupervisorInner {
         tokio::select! {
             biased;
 
-            Some(ev) = self.inbox.recv_event() => {
+            Some(ev) = self.inbox.recv_event_always() => {
                 Some(InnerNext::Inbox(ev))
             }
 
@@ -147,7 +147,7 @@ impl SupervisorInner {
     }
 
     /// Shared by `one_for_one` and `one_for_all`: pulls this supervisor's own
-    /// inbox into `Stopping` and stops every currently-alive supervisee all
+    /// inbox into `Exiting` and stops every currently-alive supervisee all
     /// at once, returning `Break` once there's nothing left to wait for.
     /// `rest_for_one` doesn't use this — its children can depend on each
     /// other, so it tears them down one at a time instead (see
@@ -164,7 +164,7 @@ impl SupervisorInner {
         }
     }
 
-    /// Pulls this supervisor's own inbox into `Stopping`, so e.g. `add_spec`
+    /// Pulls this supervisor's own inbox into `Exiting`, so e.g. `add_spec`
     /// starts rejecting new children and external watchers see it exiting.
     pub(super) fn register_stopping(&mut self) {
         self.inbox.register_stopping();
