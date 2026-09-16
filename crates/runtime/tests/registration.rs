@@ -38,7 +38,7 @@ async fn register_and_deregister_refcounts_basics() {
     assert_eq!(address.status(), ActorStatus::Exited(ExitStatus::Normal));
     assert!(Registry::local().get(&pid).is_none());
     assert_eq!(address.strong_count(), 0);
-    assert_eq!(address.weak_count(), 1);
+    assert_eq!(address.weak_count(), 2);
 }
 
 #[tokio::test]

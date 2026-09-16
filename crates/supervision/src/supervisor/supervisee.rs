@@ -8,7 +8,7 @@ use rootcause::Report;
 use std::{
     fmt::Debug,
     pin::{Pin, pin},
-    task::{Context, Poll},
+    task::{Context, Poll, Waker},
 };
 use tokio::time::{error::Elapsed, timeout};
 use zestors_runtime::{
@@ -21,6 +21,14 @@ pub(crate) struct Supervisee {
     spec: ChildSpec,
     state: SuperviseeState,
     restarter: RestartLimiter,
+    /// The waker from this supervisee's most recent poll. `start`/`stop`
+    /// mutate `state` from outside of a poll (e.g. in response to a
+    /// sibling's exit), which on its own doesn't get this supervisee's
+    /// stream re-polled: `StreamUnordered` only re-enqueues a stream when
+    /// something wakes it, and once a `Dead` poll returns `Pending` via
+    /// `future::pending()`, nothing ever will on its own. Waking here after
+    /// every external mutation is what gets the new state actually observed.
+    waker: Option<Waker>,
 }
 
 impl Supervisee {
@@ -29,6 +37,13 @@ impl Supervisee {
             restarter: RestartLimiter::new(spec.cfg().intensity.clone()),
             spec,
             state: SuperviseeState::idle(),
+            waker: None,
+        }
+    }
+
+    fn wake(&self) {
+        if let Some(waker) = &self.waker {
+            waker.wake_by_ref();
         }
     }
 
@@ -59,7 +74,7 @@ impl Supervisee {
     }
 
     pub(crate) fn start(&mut self) -> Result<bool, SuperviseeIsShuttingDown> {
-        self.state.map(|state| match state {
+        let result = self.state.map(|state| match state {
             // If the supervisee is idle or dead, we can start it.
             SuperviseeState::Dead { .. } => {
                 let spec = self.spec.clone();
@@ -77,11 +92,18 @@ impl Supervisee {
 
             // If the supervisee is shutting down, we cannot start it.
             SuperviseeState::ShuttingDown { .. } => (state, Err(SuperviseeIsShuttingDown)),
-        })
+        });
+
+        // This state change happens outside of a poll, so nothing re-polls
+        // this supervisee's stream on its own; wake it explicitly (see
+        // `waker`'s doc comment).
+        self.wake();
+
+        result
     }
 
     pub(crate) fn stop(&mut self) -> StopOutcome {
-        self.state.map(|state| match state {
+        let outcome = self.state.map(|state| match state {
             // If the supervisee is dead or idle, there's nothing to do.
             SuperviseeState::Dead { .. } => (state, StopOutcome::Dead),
 
@@ -108,7 +130,13 @@ impl Supervisee {
                 SuperviseeState::ShuttingDown { child },
                 StopOutcome::ShuttingDown,
             ),
-        })
+        });
+
+        // See `waker`'s doc comment: this state change happens outside of a
+        // poll, so it needs an explicit wake to actually be observed.
+        self.wake();
+
+        outcome
     }
 
     pub(crate) async fn supervise(&mut self) -> SuperviseeItem {
@@ -180,6 +208,8 @@ impl Stream for Supervisee {
     type Item = SuperviseeNext;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.waker = Some(cx.waker().clone());
+
         let item = pin!(self.as_mut().supervise()).poll(cx);
 
         item.map(|item| {

@@ -19,3 +19,6 @@ type-sets.workspace = true
 serde.workspace = true
 smol_str.workspace = true
 jiff.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

@@ -139,8 +139,11 @@ impl<C: Context> Channel<C> {
     pub(crate) fn register_exited(&self, reason: Result<(), ExitError>) -> bool {
         // Exit is always valid, but doesn't always do something.
         let updated = self.update_status(|status| match status {
-            ActorStatus::Stopping | ActorStatus::Exited(_) => (None, false),
-            ActorStatus::Initializing | ActorStatus::Running | ActorStatus::Suspended => (
+            ActorStatus::Exited(_) => (None, false),
+            ActorStatus::Stopping
+            | ActorStatus::Initializing
+            | ActorStatus::Running
+            | ActorStatus::Suspended => (
                 Some(ActorStatus::Exited(ExitStatus::from_result(reason.clone()))),
                 true,
             ),
