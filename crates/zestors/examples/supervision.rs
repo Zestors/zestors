@@ -207,7 +207,7 @@ async fn main() -> Result<(), Report> {
 
     let root_address = node.root_supervisor().address().clone();
 
-    tokio::spawn(node.run()).await?;
+    tokio::spawn(node.run()).await??;
 
     root_address.watch_init().await?;
 

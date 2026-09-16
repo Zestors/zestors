@@ -8,7 +8,7 @@ members = [
   "crates/api-server",
   "crates/supervision",
   "crates/actor",
-  "crates/interface",
+  "crates/interface", "crates/axum",
 ]
 
 [workspace.dependencies]

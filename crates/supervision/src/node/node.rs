@@ -1,5 +1,33 @@
 use crate::_prelude::*;
 use std::time::Duration;
+use zestors_runtime::errors::{JoinError, ShutdownAbortError, StartOnError};
+
+#[derive(Debug, thiserror::Error)]
+pub enum NodeError {
+    #[error("Failed to start root supervisor: {0}")]
+    StartFailed(#[source] StartOnError),
+
+    #[error("Root-Supervisor exited with error: {0}")]
+    SupervisorExited(#[source] JoinError),
+
+    #[error("Root-Supervisor failed to exit gracefully within timeout: {0}")]
+    ShutdownFailed(#[source] ShutdownAbortError),
+
+    #[error("Forced shutdown: received a second shutdown signal while waiting for graceful exit")]
+    ForcedShutdown,
+}
+
+impl NodeError {
+    /// The process exit code this error should be reported with.
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            NodeError::ForcedShutdown => 130,
+            NodeError::StartFailed(_)
+            | NodeError::SupervisorExited(_)
+            | NodeError::ShutdownFailed(_) => 1,
+        }
+    }
+}
 
 pub struct Node {
     restart_intensity: RestartIntensity,
@@ -25,19 +53,16 @@ impl Node {
         self
     }
 
-    pub async fn run(self) -> i32 {
+    pub async fn run(self) -> Result<(), NodeError> {
         let Self {
             restart_intensity,
             supervisor_spec,
         } = self;
 
-        let supervisor_child = match supervisor_spec.start().await {
-            Ok(child) => child,
-            Err(err) => {
-                tracing::error!("Failed to start supervisor: {:?}", err);
-                return 1;
-            }
-        };
+        let supervisor_child = supervisor_spec.start().await.map_err(|err| {
+            tracing::error!("Failed to start supervisor: {:?}", err);
+            NodeError::StartFailed(err)
+        })?;
 
         NodeActor {
             supervisor_child,
@@ -54,7 +79,7 @@ impl Node {
 }
 
 impl NodeActor {
-    async fn run(mut self) -> i32 {
+    async fn run(mut self) -> Result<(), NodeError> {
         loop {
             let supervisor_exit = tokio::select! {
                 res = &mut self.supervisor_child => res,
@@ -68,19 +93,23 @@ impl NodeActor {
                 Ok(()) => {
                     tracing::info!("Root-Supervisor exited gracefully. Shutting down node.");
                     tokio::time::sleep(Duration::from_secs(1)).await;
-                    return 0;
+                    return Ok(());
                 }
                 Err(err) => {
                     if !self.restart_limiter.acquire_permit() {
                         tracing::error!("Root-Supervisor exited with error: {:?}", err);
                         tokio::time::sleep(Duration::from_secs(1)).await;
-                        return 1;
+                        return Err(NodeError::SupervisorExited(err));
                     } else {
                         tracing::warn!(
                             "Root-Supervisor exited with error: {:?}. Restarting...",
                             err
                         );
-                        let new_supervisor_child = self.supervisor_spec.start().await.unwrap();
+                        let new_supervisor_child = self
+                            .supervisor_spec
+                            .start()
+                            .await
+                            .map_err(NodeError::StartFailed)?;
                         self.supervisor_child = new_supervisor_child;
                     }
                 }
@@ -88,7 +117,7 @@ impl NodeActor {
         }
     }
 
-    async fn exit_gracefully(self) -> i32 {
+    async fn exit_gracefully(self) -> Result<(), NodeError> {
         let timeout = self.supervisor_spec.cfg().abort_timeout;
 
         tokio::select! {
@@ -96,18 +125,18 @@ impl NodeActor {
                 match exit {
                     Ok(()) => {
                         tracing::info!("Root-Supervisor exited gracefully. Shutting down node.");
-                        return 0;
+                        Ok(())
                     }
                     Err(err) => {
                         tracing::error!("Root-Supervisor failed to exit gracefully within timeout: {:?}", err);
                         tokio::time::sleep(Duration::from_secs(3)).await;
-                        return 1;
+                        Err(NodeError::ShutdownFailed(err))
                     }
                 }
             }
             _ = wait_for_shutdown_signal() => {
                 tracing::warn!("Received second shutdown signal. Forcing immediate termination.");
-                return 130;
+                Err(NodeError::ForcedShutdown)
             }
         }
     }
