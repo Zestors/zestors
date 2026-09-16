@@ -271,7 +271,7 @@ fn _derive_message(input: TokenStream, base: &str) -> TokenStream {
             impl #impl_generics #base_path::Message for #name #ty_generics #where_clause
             {
                 type Output = #reply_type;
-                type Receipt = #base_path::Response<#reply_type>;
+                type Receipt = #base_path::Reply<#reply_type>;
                 type Resolver = #base_path::Request<#reply_type>;
             }
         )

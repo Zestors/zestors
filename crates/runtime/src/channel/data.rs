@@ -440,7 +440,7 @@ impl<I: Interface> Channel<I> {
                 }
             }
             SignalInterface::Ping(envelope) => {
-                let _ = envelope.request.reply(());
+                let _ = envelope.req.reply(());
                 None
             }
         }

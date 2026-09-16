@@ -10,7 +10,7 @@
 pub mod prelude {
     pub use crate::{
         Envelope, Interface, Message,
-        oneshot::{Request, Response},
+        oneshot::{Reply, Request},
     };
 }
 

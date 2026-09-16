@@ -58,7 +58,8 @@ impl Actor for TestActor {
                     return Err(report!("simulated crash"));
                 }
                 Some(InboxEvent::Message(TestInterface::Generation(Envelope {
-                    request, ..
+                    req: request,
+                    ..
                 }))) => {
                     request.reply(self.generation.load(Ordering::SeqCst)).ok();
                 }

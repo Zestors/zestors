@@ -18,10 +18,10 @@ use std::{convert::Infallible, fmt::Debug};
 /// It can easily be [derived](derive@Message) as well.
 pub trait Message: Send + 'static + Sized {
     /// The receipt associated with this message, that is returned after sending.
-    type Receipt: Receipt<Output = Self::Output, Resolver = Self::Resolver>;
+    type Receipt: Receipt<Output = Self::Output, Responder = Self::Resolver>;
 
     /// The resolver used to resolve the receipt given to the sender.
-    type Resolver: Resolver<Receipt = Self::Receipt>;
+    type Resolver: Responder<Receipt = Self::Receipt>;
 
     /// The output of the receipt after being resolved.
     type Output: Send + 'static;
@@ -33,7 +33,7 @@ pub trait Receipt: Debug + Send + Sized + Sealed {
     type Output: Send + 'static;
 
     /// The resolver used to resolve this receipt.
-    type Resolver: Resolver;
+    type Responder: Responder;
 
     /// Waits for the message's outcome.
     fn wait(self) -> impl Future<Output = Result<Self::Output, ReceiptError>> + Send;
@@ -45,7 +45,7 @@ pub trait Receipt: Debug + Send + Sized + Sealed {
 }
 
 /// The value passed along with a [`Message`], used to resolve a [`Receipt`]
-pub trait Resolver: Debug + Send + Sized + Sealed {
+pub trait Responder: Debug + Send + Sized + Sealed {
     /// The receipt associated with this resolver.
     type Receipt: Receipt;
 
@@ -55,14 +55,14 @@ pub trait Resolver: Debug + Send + Sized + Sealed {
 
 impl Receipt for () {
     type Output = ();
-    type Resolver = ();
+    type Responder = ();
 
     async fn wait(self) -> Result<(), ReceiptError> {
         Ok(())
     }
 }
 
-impl Resolver for () {
+impl Responder for () {
     type Receipt = ();
 
     fn new() -> (Self, Self::Receipt) {
@@ -70,20 +70,20 @@ impl Resolver for () {
     }
 }
 
-impl<T: Send + 'static> Receipt for Response<T> {
-    type Output = T;
-    type Resolver = Request<T>;
-
-    async fn wait(self) -> Result<Self::Output, ReceiptError> {
-        self.await
-    }
-}
-
-impl<T: Send + 'static> Resolver for Request<T> {
-    type Receipt = Response<T>;
+impl<T: Send + 'static> Responder for Request<T> {
+    type Receipt = Reply<T>;
 
     fn new() -> (Self, Self::Receipt) {
         Self::new()
+    }
+}
+
+impl<T: Send + 'static> Receipt for Reply<T> {
+    type Output = T;
+    type Responder = Request<T>;
+
+    async fn wait(self) -> Result<Self::Output, ReceiptError> {
+        self.await
     }
 }
 
@@ -92,7 +92,7 @@ mod sealed {
 
     impl Sealed for () {}
     impl<T> Sealed for super::Request<T> {}
-    impl<T> Sealed for super::Response<T> {}
+    impl<T> Sealed for super::Reply<T> {}
 }
 
 //------------------------------------------------------------------------------------------------

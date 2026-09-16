@@ -20,9 +20,9 @@ impl<T> Request<T> {
         self.0.is_closed()
     }
 
-    pub fn new() -> (Request<T>, Response<T>) {
+    pub fn new() -> (Request<T>, Reply<T>) {
         let (tx, rx) = oneshot::channel();
-        (Request(tx), Response(rx))
+        (Request(tx), Reply(rx))
     }
 }
 
@@ -34,9 +34,9 @@ impl<M> Debug for Request<M> {
 
 /// A response that can be awaited to receive the reply.
 #[must_use = "Response should be awaited to receive the message"]
-pub struct Response<M>(oneshot::Receiver<M>);
+pub struct Reply<M>(oneshot::Receiver<M>);
 
-impl<M> Response<M> {
+impl<M> Reply<M> {
     /// Attempt to take the message out, if it exists.
     pub fn try_recv(&mut self) -> Result<Option<M>, ReceiptError> {
         match self.0.try_recv() {
@@ -57,9 +57,9 @@ impl<M> Response<M> {
     }
 }
 
-impl<M> Unpin for Response<M> {}
+impl<M> Unpin for Reply<M> {}
 
-impl<M> Future for Response<M> {
+impl<M> Future for Reply<M> {
     type Output = Result<M, ReceiptError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -67,7 +67,7 @@ impl<M> Future for Response<M> {
     }
 }
 
-impl<M> Debug for Response<M> {
+impl<M> Debug for Reply<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Rx").finish()
     }

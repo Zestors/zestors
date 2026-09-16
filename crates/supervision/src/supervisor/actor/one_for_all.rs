@@ -71,13 +71,13 @@ impl<'a> OneForAllSupervisor<'a> {
                     }
                     SupervisorInterface::Register(Envelope {
                         msg: RegisterChild(spec),
-                        request,
+                        req: request,
                     }) => {
                         request.reply(self.inner.add_spec(spec)).ok();
                     }
                     SupervisorInterface::Deregister(Envelope {
                         msg: DeregisterChild(pid),
-                        request,
+                        req: request,
                     }) => {
                         request
                             .reply(self.remove_spec(&pid).map(|s| s.get_description()))

@@ -8,17 +8,17 @@ pub struct Envelope<M: Message> {
     pub msg: M,
 
     /// The resolver handle used by the receiver to resolve the message's outcome.
-    pub request: M::Resolver,
+    pub req: M::Resolver,
 }
 
 impl<M: Message> Envelope<M> {
     /// Creates an envelope containing a message and its resolver.
-    pub fn new(msg: M, request: M::Resolver) -> Self {
-        Self { msg, request }
+    pub fn new(msg: M, req: M::Resolver) -> Self {
+        Self { msg, req }
     }
 
     pub fn new_pair(msg: M) -> (Self, M::Receipt) {
-        let (resolver, receipt) = <M::Resolver as Resolver>::new();
+        let (resolver, receipt) = <M::Resolver as Responder>::new();
         (Self::new(msg, resolver), receipt)
     }
 
@@ -26,7 +26,7 @@ impl<M: Message> Envelope<M> {
     where
         M: Message<Resolver = Request<T>>,
     {
-        self.request.reply(reply)
+        self.req.reply(reply)
     }
 }
 

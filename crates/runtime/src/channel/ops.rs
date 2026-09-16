@@ -3,7 +3,7 @@ use crate::signals;
 use jiff::{SignedDuration, Timestamp, Zoned, tz::TimeZone};
 use std::{any::TypeId, future::Future};
 use tokio::time::Instant;
-use zestors_interface::{Request, Response};
+use zestors_interface::{Reply, Request};
 
 /// A trait that provides access to the [`ActorHandle`] of an actor.
 ///
@@ -182,7 +182,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.data().signal(interface)
     }
 
-    fn ping(&self) -> Response<()> {
+    fn ping(&self) -> Reply<()> {
         let (tx, rx) = Request::new();
 
         self.channel()
