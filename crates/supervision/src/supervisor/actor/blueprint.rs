@@ -1,8 +1,6 @@
-use std::sync::Arc;
-
 use crate::{_prelude::*, supervisor::actor::SuperviseeMap};
 use indexmap::IndexMap;
-use zestors_runtime::prelude::*;
+use std::sync::Arc;
 
 pub struct SupervisorBlueprint {
     supervisees: IndexMap<Pid, ChildSpec>,
@@ -29,9 +27,9 @@ impl SupervisorBlueprint {
         Self::new().with_strategy(SupervisionStrategy::OneForAll)
     }
 
-    // pub fn rest_for_one() -> Self {
-    //     Self::new().with_strategy(SupervisionStrategy::RestForOne)
-    // }
+    pub fn rest_for_one() -> Self {
+        Self::new().with_strategy(SupervisionStrategy::RestForOne)
+    }
 
     pub fn with_strategy(mut self, strategy: SupervisionStrategy) -> Self {
         self.strategy = strategy;

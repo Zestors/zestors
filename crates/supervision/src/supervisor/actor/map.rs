@@ -25,6 +25,28 @@ impl SuperviseeMap {
         this
     }
 
+    pub fn first_mut(&mut self) -> Option<&mut Supervisee> {
+        let token = self.mapping.values().find_map(|token| *token);
+        token.map(|token| self.supervisees.get_mut(token).unwrap())
+    }
+
+    pub fn next_mut<'a>(&'a mut self, pid: &Pid) -> Option<&'a mut Supervisee> {
+        let idx = self.mapping.get_index_of(pid)?;
+        let (_pid, token) = self.mapping.get_index_mut(idx + 1)?;
+        let token = (*token)?;
+        self.supervisees.get_mut(token)
+    }
+
+    pub fn prev_mut<'a>(&'a mut self, pid: &Pid) -> Option<&'a mut Supervisee> {
+        let idx = self.mapping.get_index_of(pid)?;
+        if idx == 0 {
+            return None;
+        }
+        let (_pid, token) = self.mapping.get_index_mut(idx - 1)?;
+        let token = (*token)?;
+        self.supervisees.get_mut(token)
+    }
+
     pub fn start_all(&mut self) -> Result<(), (Pid, SuperviseeIsShuttingDown)> {
         for (pid, token) in self.mapping.iter() {
             if let Some(token) = token {
@@ -36,6 +58,10 @@ impl SuperviseeMap {
         }
 
         Ok(())
+    }
+
+    fn get_token(&self, pid: &Pid) -> Option<usize> {
+        self.mapping.get(pid).cloned().flatten()
     }
 
     #[must_use]
@@ -64,7 +90,7 @@ impl SuperviseeMap {
     ) -> Result<Vec<Pid>, RestartLimitReached> {
         pids.into_iter()
             .filter_map(|pid| {
-                let Some(token) = self.mapping.get(&pid).cloned().flatten() else {
+                let Some(token) = self.get_token(&pid) else {
                     return None;
                 };
 
@@ -83,13 +109,22 @@ impl SuperviseeMap {
             .collect()
     }
 
-    pub fn stop_all(&mut self) {
-        for (_pid, token) in self.mapping.iter() {
-            if let Some(token) = token {
-                let supervisee = self.supervisees.get_mut(*token).expect("Should exist");
+    /// Stops every supervisee, returning the ones that are still alive
+    /// afterward (and thus still owe an exit event to wait for). A
+    /// supervisee stopped while `Starting` is cancelled synchronously and
+    /// lands directly on `Dead` with no further event, so its aliveness has
+    /// to be checked *after* calling `stop`, not inferred from `stop`'s own
+    /// return value.
+    #[must_use]
+    pub fn stop_all(&mut self) -> Vec<Pid> {
+        self.mapping
+            .iter()
+            .filter_map(|(pid, token)| {
+                let supervisee = self.supervisees.get_mut((*token)?).expect("Should exist");
                 supervisee.stop();
-            }
-        }
+                (supervisee.status() != SuperviseeStatus::Dead).then(|| pid.clone())
+            })
+            .collect()
     }
 
     fn supervisees(&self) -> impl Iterator<Item = &Supervisee> {
@@ -112,13 +147,13 @@ impl SuperviseeMap {
             .collect()
     }
 
-    pub fn get(&self, pid: &Pid) -> Option<&Supervisee> {
+    pub fn get<'a>(&'a self, pid: &Pid) -> Option<&'a Supervisee> {
         self.mapping
             .get(pid)
             .and_then(|token| token.map(|token| self.supervisees.get(token).unwrap()))
     }
 
-    pub fn get_mut(&mut self, pid: &Pid) -> Option<&mut Supervisee> {
+    pub fn get_mut<'a>(&'a mut self, pid: &Pid) -> Option<&'a mut Supervisee> {
         self.mapping
             .get(pid)
             .and_then(|token| token.map(|token| self.supervisees.get_mut(token).unwrap()))

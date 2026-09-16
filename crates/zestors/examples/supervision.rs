@@ -146,10 +146,6 @@ async fn main() -> Result<(), Report> {
         .with_pid("SupervisorB")?
         .split();
 
-    let (api_server_spec, _addr) = ApiServer::blueprint("127.0.0.1:8080".parse().unwrap())
-        .with_pid("ApiServer")?
-        .split();
-
     let (dyn_actor_spec, _addr) = actor_fn(async |_: Inbox<MyInterface>| Ok(()))
         .with_pid("DynActor")?
         .split();
@@ -185,7 +181,9 @@ async fn main() -> Result<(), Report> {
         .with_children([
             super_spec_a,
             super_spec_b,
-            api_server_spec,
+            ApiServer::blueprint("127.0.0.1:8080".parse().unwrap())
+                .with_pid("ApiServer")?
+                .into(),
             dyn_actor_spec,
             task_spec,
             blueprint_fn(|| actor_fn(async |_: Inbox<MyInterface>| Ok(())))

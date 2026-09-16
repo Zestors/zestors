@@ -3,7 +3,13 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::_prelude::*;
+use crate::{
+    _prelude::*,
+    supervisor::actor::{
+        one_for_all::OneForAllSupervisor, one_for_one::OneForOneSupervisor,
+        rest_for_one::RestForOneSupervisor,
+    },
+};
 use futures::{Stream, StreamExt};
 use indexmap::{IndexMap, IndexSet};
 use rootcause::{Report, prelude::ResultExt as _, report};
@@ -21,7 +27,13 @@ impl Actor for Supervisor {
     type Exit = ();
 
     async fn run(self, inbox: Inbox<Self::Interface>) -> Result<Self::Exit, Report> {
-        SupervisorActor::new(self, inbox).run().await
+        SupervisorInner {
+            supervisees: self.supervisees,
+            inbox,
+            source: self.source,
+        }
+        .run(self.strategy)
+        .await
     }
 }
 
@@ -45,31 +57,14 @@ impl Supervisor {
     }
 }
 
-struct SupervisorActor {
+struct SupervisorInner {
     supervisees: SuperviseeMap,
     inbox: Inbox<SupervisorInterface>,
     source: Option<Arc<dyn SupervisorSource>>,
-    restarter: RestartLimiter,
-    strategy: SupervisionStrategy,
-    /// The processes that are still initializing
-    initializing: IndexSet<Pid>,
-    exiting: IndexSet<Pid>,
 }
 
-impl SupervisorActor {
-    fn new(supervisor: Supervisor, inbox: Inbox<SupervisorInterface>) -> Self {
-        Self {
-            supervisees: supervisor.supervisees,
-            source: supervisor.source,
-            inbox,
-            restarter: RestartLimiter::new(supervisor.restart_intensity),
-            strategy: supervisor.strategy,
-            initializing: IndexSet::new(),
-            exiting: IndexSet::new(),
-        }
-    }
-
-    async fn start(&mut self) -> Result<(), Report> {
+impl SupervisorInner {
+    async fn run(&mut self, strategy: SupervisionStrategy) -> Result<(), Report> {
         self.inbox.set_manual_init();
 
         if let Some(source) = &self.source {
@@ -84,185 +79,19 @@ impl SupervisorActor {
             }
         }
 
-        self.supervisees
-            .start_all()
-            .map_err(|(pid, e)| report!(e).attach(pid))?;
-
-        self.initializing = self.supervisees.pids().cloned().collect();
-
-        Ok(())
-    }
-
-    async fn run(&mut self) -> Result<(), Report> {
-        self.start().await?;
-
-        while let Some(next) = self.next().await {
-            let flow = match next {
-                InnerNext::Inbox(InboxEvent::Message(msg)) => self.handle_msg(msg),
-                InnerNext::Inbox(InboxEvent::Signal(signal)) => self.handle_signal(signal),
-                InnerNext::Source(ev) => self.handle_source_event(ev),
-                InnerNext::Supervisee(ev) => self.handle_supervisee_event(ev),
-            };
-
-            match flow {
-                Flow::Continue => continue,
-                Flow::ExitNormal => return Ok(()),
+        match strategy {
+            SupervisionStrategy::OneForOne => {
+                OneForOneSupervisor::new(self).run().await?;
+            }
+            SupervisionStrategy::OneForAll => {
+                OneForAllSupervisor::new(self).run().await?;
+            }
+            SupervisionStrategy::RestForOne => {
+                RestForOneSupervisor::new(self).run().await?;
             }
         }
 
         Ok(())
-    }
-
-    fn handle_supervisee_event(&mut self, SuperviseeNext { pid, item }: SuperviseeNext) -> Flow {
-        match item {
-            SuperviseeItem::StartError(_e) => {
-                self.initializing.swap_remove(&pid);
-                self.trigger_child_restart(pid);
-            }
-
-            SuperviseeItem::Exit(exit) => {
-                if self.exiting.swap_remove(&pid) && self.exiting.is_empty() {
-                    if self.is_exiting() {
-                        return Flow::ExitNormal;
-                    } else {
-                        let restarting = self.supervisees.restart_all();
-                        self.initializing.extend(restarting);
-                    }
-                }
-
-                let supervisee = self.get_supervisee(&pid).expect("Should exist");
-
-                if supervisee.requires_restart(&exit) {
-                    self.trigger_child_restart(pid);
-                } else {
-                    self.remove_pid(&pid);
-                }
-            }
-
-            SuperviseeItem::Spawned => {}
-
-            SuperviseeItem::Initialized => {
-                if self.initializing.swap_remove(&pid)
-                    && self.is_initializing()
-                    && self.initializing.is_empty()
-                {
-                    self.inbox.register_initialized();
-                }
-            }
-        };
-
-        Flow::Continue
-    }
-
-    fn trigger_child_restart(&mut self, pid: Pid) {
-        if self.is_exiting() {
-            return;
-        }
-
-        let supervisee = self.get_supervisee(&pid).unwrap();
-
-        // If the supervisee is no longer dead, it was already fixed by
-        // another restart-event
-        if !matches!(supervisee.status(), SuperviseeStatus::Dead) {
-            return;
-        }
-
-        let pids = match self.strategy {
-            SupervisionStrategy::OneForOne => vec![pid],
-            SupervisionStrategy::OneForAll => self.supervisees.pids().cloned().collect(),
-        };
-
-        let exiting_pids = match self.supervisees.stop_pids(pids) {
-            Ok(pids) => pids,
-            Err(_e) => {
-                self.shutdown();
-                return;
-            }
-        };
-
-        self.exiting.extend(exiting_pids)
-    }
-
-    fn handle_signal(&mut self, signal: Signal) -> Flow {
-        match signal {
-            Signal::Shutdown => {
-                self.shutdown();
-            }
-            Signal::Suspend | Signal::Resume => (),
-        };
-
-        Flow::Continue
-    }
-
-    fn handle_msg(&mut self, msg: SupervisorInterface) -> Flow {
-        match msg {
-            SupervisorInterface::Children(envelope) => {
-                envelope.reply(self.child_descriptions()).ok();
-            }
-            SupervisorInterface::Health(envelope) => {
-                envelope.reply(self.health()).ok();
-            }
-            SupervisorInterface::Register(Envelope { msg, request }) => {
-                let res = self.add_spec(msg.0);
-                request.reply(res).ok();
-            }
-            SupervisorInterface::Deregister(Envelope { msg, request }) => {
-                let supervisee = self.remove_pid(&msg.0);
-                request.reply(supervisee).ok();
-            }
-        };
-
-        Flow::Continue
-    }
-
-    fn handle_source_event(&mut self, ev: SupervisorSourceEvent) -> Flow {
-        match ev {
-            SupervisorSourceEvent::Added(spec) => {
-                if let Err(error) = self.add_spec(spec) {
-                    tracing::error!(%error, "Failed to add spec from source. Already registered");
-                }
-            }
-
-            SupervisorSourceEvent::Removed(pid) => {
-                let _supervisee = self.remove_pid(&pid);
-            }
-        };
-
-        Flow::Continue
-    }
-
-    fn add_spec(&mut self, spec: ChildSpec) -> Result<(), DuplicatePidError> {
-        let supervisee = Supervisee::new(spec);
-        let pid = supervisee.pid().clone();
-        self.supervisees.add(supervisee)?;
-
-        if !self.is_exiting() {
-            self.supervisees.get_mut(&pid).unwrap().start().unwrap();
-            self.initializing.insert(pid);
-        }
-
-        Ok(())
-    }
-
-    fn remove_pid(&mut self, pid: &Pid) -> Option<Supervisee> {
-        let supervisee = self.supervisees.remove(&pid);
-
-        if supervisee.is_some() {
-            self.initializing.swap_remove(pid);
-        }
-
-        supervisee
-    }
-
-    fn shutdown(&mut self) {
-        self.exiting.extend(
-            self.supervisees
-                .addresses()
-                .filter(|a| !a.is_dead())
-                .map(|a| a.pid().clone()),
-        );
-
-        self.supervisees.stop_all();
     }
 
     fn is_initializing(&self) -> bool {
@@ -316,17 +145,30 @@ impl SupervisorActor {
             }
         }
     }
+
+    fn add_spec(&mut self, spec: ChildSpec) -> Result<(), DuplicatePidError> {
+        if self.is_exiting() {
+            tracing::warn!("Attempted to add a child spec while supervisor is exiting");
+            return Ok(());
+        }
+
+        let supervisee = Supervisee::new(spec);
+        let pid = supervisee.pid().clone();
+        self.supervisees.add(supervisee)?;
+        self.supervisees
+            .get_mut(&pid)
+            .expect("Just inserted")
+            .start()
+            .expect("Supervisee should not be shutting down.");
+
+        Ok(())
+    }
 }
 
 enum InnerNext {
     Inbox(InboxEvent<SupervisorInterface>),
     Source(SupervisorSourceEvent),
     Supervisee(SuperviseeNext),
-}
-
-enum Flow {
-    Continue,
-    ExitNormal,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -342,7 +184,25 @@ enum SupervisorStatus {
     ShuttingDown,
 }
 
+enum ExitReason {
+    Start(StartSuperviseeError),
+    Exit(SuperviseeExit),
+}
+
+impl ExitReason {
+    fn requires_restart(&self, supervisee: &Supervisee) -> bool {
+        match self {
+            ExitReason::Start(_) => true,
+            ExitReason::Exit(e) => supervisee.requires_restart(e),
+        }
+    }
+}
+
 mod map;
+mod one_for_all;
+mod one_for_one;
+mod rest_for_one;
+mod shared;
 use map::SuperviseeMap;
 
 mod interface;

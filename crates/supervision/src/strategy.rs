@@ -14,7 +14,7 @@ pub(crate) struct SupervisorConfig {
 pub enum SupervisionStrategy {
     OneForOne,
     OneForAll,
-    // RestForOne,
+    RestForOne,
 }
 
 impl Default for SupervisionStrategy {
