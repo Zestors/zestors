@@ -1,7 +1,7 @@
 use crate::*;
 use std::convert::Infallible;
 
-/// A reference to a [`Channel`] that can be used to receive messages and signals from the channel.
+/// A reference to an actor's channel that can be used to receive messages and signals from it.
 ///
 /// This is a strong reference ([`StrongAddress`]) to the channel, which means that it will keep
 /// the channel alive as long as it exists.
@@ -9,7 +9,7 @@ use std::convert::Infallible;
 /// See the [`Inbox::recv_event`] method for receiving messages and signals from the channel.
 #[derive(Debug)]
 pub struct Inbox<T: Interface> {
-    channel: StrongAddress<T>,
+    address: StrongAddress<T>,
     init: InitState,
 }
 
@@ -36,13 +36,13 @@ impl Inbox<Infallible> {
 }
 
 impl<T: Interface> Inbox<T> {
-    pub(crate) fn try_new(channel: StrongAddress<T>) -> Result<Self, ConcurrentInboxError> {
-        if !channel.status().is_dead() {
+    pub(crate) fn try_new(address: StrongAddress<T>) -> Result<Self, ConcurrentInboxError> {
+        if !address.status().is_dead() {
             return Err(ConcurrentInboxError);
         }
 
         let inbox = Self {
-            channel,
+            address,
             init: InitState::Auto,
         };
 
@@ -53,7 +53,7 @@ impl<T: Interface> Inbox<T> {
     /// a [`Signal::Shutdown`] signal and has no more messages to process.
     pub async fn recv_event(&mut self) -> Option<InboxEvent<T>> {
         self.maybe_auto_init();
-        self.channel().next_event(false).await
+        self.as_address().next_event(false).await
     }
 
     /// Same as [`Inbox::recv_event`], but keeps returning signals (as
@@ -61,7 +61,7 @@ impl<T: Interface> Inbox<T> {
     /// instead of returning `None` once the inbox is empty.
     pub async fn recv_event_always(&mut self) -> Option<InboxEvent<T>> {
         self.maybe_auto_init();
-        self.channel().next_event(true).await
+        self.as_address().next_event(true).await
     }
 
     /// Block until the next message becomes available. Once the actor has received a
@@ -71,7 +71,7 @@ impl<T: Interface> Inbox<T> {
         self.maybe_auto_init();
 
         loop {
-            match self.channel().next_event(false).await {
+            match self.as_address().next_event(false).await {
                 Some(ev) => {
                     if let InboxEvent::Message(msg) = ev {
                         return Some(msg);
@@ -86,13 +86,13 @@ impl<T: Interface> Inbox<T> {
     /// if no message or signal is currently available.
     pub fn try_recv(&mut self) -> Option<InboxEvent<T>> {
         self.maybe_auto_init();
-        self.channel().try_next_event()
+        self.as_address().try_next_event()
     }
 
     /// Block until the next signal becomes available, ignoring any queued messages.
     pub async fn recv_signal(&mut self) -> Option<Signal> {
         self.maybe_auto_init();
-        self.channel().next_signal().await
+        self.as_address().next_signal().await
     }
 
     fn init_completed(&self) -> bool {
@@ -156,14 +156,14 @@ impl<T: Interface> Inbox<T> {
         }
 
         self.init = InitState::Completed;
-        self.channel().register_initialized().unwrap_or(false)
+        self.as_address().register_initialized().unwrap_or(false)
     }
 
     /// Transitions the channel to [`ActorStatus::Exiting`], as if a
     /// [`Signal::Shutdown`] had been received. Returns `false` if the channel
     /// was already exiting or dead.
     pub fn register_exiting(&mut self) -> bool {
-        self.channel().register_exiting().unwrap_or(false)
+        self.as_address().register_exiting().unwrap_or(false)
     }
 
     async fn wait_resume(&mut self) {
@@ -218,14 +218,14 @@ impl<T: Interface> Inbox<T> {
 impl<T: Interface> ActorRef for Inbox<T> {
     type Ctx = T;
 
-    fn channel(&self) -> &Channel<Self::Ctx> {
-        &self.channel.channel()
+    fn as_address(&self) -> &Address<Self::Ctx> {
+        self.address.as_address()
     }
 }
 
 impl<T: Interface> Drop for Inbox<T> {
     fn drop(&mut self) {
-        self.channel().drain_messages_and_signals();
+        self.as_address().drain_messages_and_signals();
     }
 }
 

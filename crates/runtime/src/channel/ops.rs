@@ -5,7 +5,7 @@ use std::{any::TypeId, future::Future};
 use tokio::time::Instant;
 use zestors_interface::{Reply, Request};
 
-/// A trait that provides access to the [`Channel`] of an actor.
+/// A trait that provides access to the [`Address`] of an actor.
 ///
 /// Implement this trait, and [`ActorOps`] is automatically implemented for your
 /// type.
@@ -13,11 +13,13 @@ pub trait ActorRef {
     /// The [`Context`] of the associated actor.
     type Ctx: Context;
 
-    /// Returns a reference to the [`Channel`] of the associated actor.
-    fn channel(&self) -> &Channel<Self::Ctx>;
+    /// Returns a reference to the [`Address`] of the associated actor. See
+    /// [`ActorOps::address`] for the same thing, re-exposed on the trait
+    /// that's part of the [`prelude`](crate::prelude).
+    fn as_address(&self) -> &Address<Self::Ctx>;
 }
 
-/// The core trait for interacting with actors through their [`Channel`].
+/// The core trait for interacting with actors through their [`Address`].
 /// This trait is sealed, and is implemented automatically for any type that
 /// implements [`ActorRef`].
 pub trait ActorOps: ActorRef + sealed::Sealed {
@@ -39,7 +41,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         msg: M,
         mut options: CastOptions,
     ) -> impl Future<Output = Result<M::Receipt, CastDynError<M>>> + Send {
-        let handle = self.channel();
+        let handle = self.as_address();
 
         async move {
             if !options.ignore_backpressure {
@@ -76,8 +78,8 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
             return Err(TryCastDynError::Closed(msg));
         }
 
-        let output = self.channel().try_push_msg(msg)?;
-        self.channel().msg_notify_one();
+        let output = self.as_address().try_push_msg(msg)?;
+        self.as_address().msg_notify_one();
         Ok(output)
     }
 
@@ -97,7 +99,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         msg: M,
         options: CastOptions,
     ) -> impl Future<Output = Result<M::Output, CallDynError<M>>> + Send {
-        let handle = self.channel();
+        let handle = self.as_address();
         async move { Ok(handle.cast_dyn_with(msg, options).await?.wait().await?) }
     }
 
@@ -226,7 +228,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// sending would incur a delay (via [`Cast::cast`]) or fail with
     /// [`TryCastError::Full`] (via [`Cast::try_cast`]).
     fn reached_backpressure(&self) -> bool {
-        let handle = self.channel();
+        let handle = self.as_address();
 
         handle
             .backpressure()
@@ -271,7 +273,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     fn ping(&self) -> Reply<()> {
         let (tx, rx) = Request::new();
 
-        self.channel()
+        self.as_address()
             .data()
             .signal(SignalInterface::Ping(Envelope::new(signals::Ping, tx)));
 
@@ -337,7 +339,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// This amount should only be used as an indication of the number of
     /// active references to the channel.
     fn ref_count(&self) -> usize {
-        self.channel().ref_count()
+        self.as_address().ref_count()
     }
 
     /// The amount of [`Address`]es in existence for this channel.
@@ -348,16 +350,17 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.ref_count().saturating_sub(self.strong_count())
     }
 
-    /// Returns a weak [`Address`] reference to the channel, borrowed from
-    /// `self`.
+    /// Returns a reference to the [`Address`] of the associated actor. Same
+    /// as [`ActorRef::as_address`], re-exposed here since [`ActorRef`] itself
+    /// is not part of the [`prelude`](crate::prelude).
     fn address(&self) -> &Address<Self::Ctx> {
-        Address::from_ref(self.channel())
+        self.as_address()
     }
 
     /// Attempts to obtain a [`StrongAddress`] to the channel, returning
     /// `None` if it is permanently dead (see [`ActorOps::is_permanently_dead`]).
     fn upgrade(&self) -> Option<StrongAddress<Self::Ctx>> {
-        StrongAddress::from_channel_ref(self.channel())
+        StrongAddress::from_address_ref(self.as_address())
     }
 }
 
@@ -389,8 +392,8 @@ impl Clock {
 }
 
 trait ChannelAccess: ActorRef {
-    fn data(&self) -> &ChannelInner<dyn DynamicQueue> {
-        self.channel().data()
+    fn data(&self) -> &Channel<dyn DynamicQueue> {
+        self.as_address().data()
     }
 }
 impl<T: ActorRef + ?Sized> ChannelAccess for T {}

@@ -1,7 +1,7 @@
 use crate::_prelude::*;
 use serde::{Deserialize, Serialize};
 use zestors_runtime::{
-    ActorRef, Channel,
+    ActorRef, Address,
     errors::{DuplicatePidError, StartOnError},
 };
 
@@ -121,8 +121,8 @@ impl<T: Start> ChildSpec<T> {
 impl<T: Start> ActorRef for ChildSpec<T> {
     type Ctx = T::Ctx;
 
-    fn channel(&self) -> &Channel<Self::Ctx> {
-        &self.channel.channel()
+    fn as_address(&self) -> &Address<Self::Ctx> {
+        self.channel.as_address()
     }
 }
 

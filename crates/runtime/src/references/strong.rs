@@ -3,7 +3,7 @@ use crate::registry::Registry;
 use jiff::Zoned;
 use std::{fmt::Debug, hash::Hash};
 
-/// A strong version of [`Address`], which allows the [`Channel`] to spawn
+/// A strong version of [`Address`], which allows the actor to spawn
 /// a new task after the previous one has exited. Once all strong references to a
 /// channel are dropped, the channel is permanently closed, and the address is
 /// removed from the [`Registry`].
@@ -12,7 +12,7 @@ use std::{fmt::Debug, hash::Hash};
 /// be upgraded to a `StrongAddress`.
 #[repr(transparent)]
 pub struct StrongAddress<C: Context = Dyn> {
-    channel: Channel<C>,
+    address: Address<C>,
 }
 
 impl<T: Context> StrongAddress<T> {
@@ -23,11 +23,11 @@ impl<T: Context> StrongAddress<T> {
         T: Interface,
     {
         let this = StrongAddress {
-            channel: Channel::new(pid, 1),
+            address: Address::new(pid, 1),
         };
 
         Registry::local()
-            .register(this.address().clone())
+            .register(this.address.clone())
             .map_err(|_e| DuplicatePidError {
                 pid: this.pid().clone(),
             })?;
@@ -35,29 +35,29 @@ impl<T: Context> StrongAddress<T> {
         Ok(this)
     }
 
-    pub(crate) fn from_channel_ref(handle: &Channel<T>) -> Option<Self> {
+    pub(crate) fn from_address_ref(handle: &Address<T>) -> Option<Self> {
         if handle.is_permanently_dead() {
             return None;
         }
         handle.incr_strong_count();
         Some(Self {
-            channel: handle._clone(),
+            address: handle._clone(),
         })
     }
 }
 
 impl<C: Context> Drop for StrongAddress<C> {
     fn drop(&mut self) {
-        self.channel.decr_strong_count();
+        self.address.decr_strong_count();
     }
 }
 
 impl<T: Context> Clone for StrongAddress<T> {
     fn clone(&self) -> Self {
-        self.channel().incr_strong_count();
+        self.address.incr_strong_count();
 
         StrongAddress {
-            channel: self.channel._clone(),
+            address: self.address._clone(),
         }
     }
 }
@@ -85,14 +85,14 @@ impl<C: Context> AsDyn for StrongAddress<C> {
 impl<C: Context> ActorRef for StrongAddress<C> {
     type Ctx = C;
 
-    fn channel(&self) -> &Channel<Self::Ctx> {
-        &self.channel
+    fn as_address(&self) -> &Address<Self::Ctx> {
+        &self.address
     }
 }
 
 impl<T: Context> Debug for StrongAddress<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        <Channel<T> as Debug>::fmt(&self.channel, f)
+        <Address<T> as Debug>::fmt(&self.address, f)
     }
 }
 

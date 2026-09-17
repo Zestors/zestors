@@ -12,7 +12,7 @@ use std::{
 };
 use tokio::time::{error::Elapsed, timeout};
 use zestors_runtime::{
-    ActorRef, Channel, Child, Dyn, ExitStatus, Pid, ShutdownChild,
+    ActorRef, Address, Child, Dyn, ExitStatus, Pid, ShutdownChild,
     errors::{JoinError, StartOnError},
 };
 
@@ -242,8 +242,8 @@ impl Stream for Supervisee {
 impl ActorRef for Supervisee {
     type Ctx = Dyn;
 
-    fn channel(&self) -> &Channel<Self::Ctx> {
-        self.spec.channel()
+    fn as_address(&self) -> &Address<Self::Ctx> {
+        self.spec.as_address()
     }
 }
 

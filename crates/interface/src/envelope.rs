@@ -18,7 +18,7 @@ impl<M: Message> Envelope<M> {
     }
 
     pub fn new_pair(msg: M) -> (Self, M::Receipt) {
-        let (resolver, receipt) = <M::Resolver as Responder>::new();
+        let (resolver, receipt) = <M::Resolver as Resolver>::new();
         (Self::new(msg, resolver), receipt)
     }
 

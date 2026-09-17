@@ -1,8 +1,8 @@
 use crate::{Actor, FullHandlerState, HandledBy, HandlerState};
 use futures::future::ready;
-use rootcause::{Report, report};
+use rootcause::{Report, prelude::ResultExt, report};
 use std::{convert::Infallible, fmt::Debug};
-use zestors_interface::{Envelope, Interface, Message};
+use zestors_interface::{Envelope, Interface, Message, Resolver};
 use zestors_runtime::prelude::*;
 
 /// A declarative and simple way to implement an [`Actor`], by providing a set of
@@ -153,6 +153,33 @@ pub trait Handle<M: Message>: Handler {
         env: Envelope<M>,
     ) -> impl Future<Output = Result<(), Report>> + Send;
 }
+
+// /// Defines how a [`Handler`] handles a specific [`Message`].
+// pub trait HandleSimple<M: Message>: Handler {
+//     /// Handles a message of type `M`.
+//     fn handle(
+//         &mut self,
+//         state: HandlerState<'_, Self>,
+//         msg: M,
+//     ) -> impl Future<Output = Result<<M::Resolver as Resolver>::Input, Report>> + Send;
+// }
+
+// impl<T: HandleSimple<M>, M: Message> Handle<M> for T {
+//     async fn handle(
+//         &mut self,
+//         state: HandlerState<'_, Self>,
+//         Envelope { msg, req }: Envelope<M>,
+//     ) -> Result<(), Report> {
+//         let response = T::handle(self, state, msg).await.attach(format!(
+//             "Failed to handle message of type {}",
+//             std::any::type_name::<M>()
+//         ))?;
+//         if let Err(e) = req.resolve(response) {
+//             tracing::warn!("Failed to resolve request: {e}");
+//         }
+//         Ok(())
+//     }
+// }
 
 impl<H: Handler> Handle<Infallible> for H {
     fn handle(

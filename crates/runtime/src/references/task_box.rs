@@ -61,7 +61,7 @@ impl TaskBox {
 impl ActorRef for TaskBox {
     type Ctx = Infallible;
 
-    fn channel(&self) -> &Channel<Self::Ctx> {
-        &self.inbox.channel()
+    fn as_address(&self) -> &Address<Self::Ctx> {
+        self.inbox.as_address()
     }
 }

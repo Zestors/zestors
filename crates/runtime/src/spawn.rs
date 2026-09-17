@@ -25,7 +25,7 @@ where
 {
     Ok(StrongAddress::create(pid)?
         .spawn_task(f)
-        .expect("Channel was just created. Must be valid"))
+        .expect("Address was just created. Must be valid"))
 }
 
 /// Same as [`spawn`], but spawns a process that cannot accept messages.
@@ -37,8 +37,8 @@ where
     spawn_task_with(Pid::rand(), f).expect("Pid is unique")
 }
 
-/// Spawns a process on a new [`Channel`] with the given [`Pid`], and registers
-/// it in the [`Registry`].
+/// Spawns a process on a new [`StrongAddress`] with the given [`Pid`], and
+/// registers it in the [`Registry`].
 ///
 /// Can fail if the pid is already registered.
 pub fn spawn_with<T, E, F>(
@@ -52,11 +52,11 @@ where
 {
     Ok(StrongAddress::create(pid)?
         .spawn(f)
-        .expect("Channel was just created. Must be valid"))
+        .expect("Address was just created. Must be valid"))
 }
 
-/// Spawns a process on a new [`Channel`] with a random [`Pid`], and registers
-/// it in the [`Registry`].
+/// Spawns a process on a new [`StrongAddress`] with a random [`Pid`], and
+/// registers it in the [`Registry`].
 pub fn spawn<T, E, F>(f: impl FnOnce(Inbox<T>) -> F) -> Child<E, T>
 where
     T: Interface,
@@ -95,7 +95,6 @@ impl<T: Context> StrongAddress<T> {
             let address = inbox.address().clone();
             let mut bomb = AbortBomb::new(address);
             bomb.address
-                .channel()
                 .register_spawned()
                 .expect("Transition must succeed, because inbox was just created");
             let spawn_future = AssertUnwindSafe(spawn_fn(inbox)).catch_unwind();
@@ -112,10 +111,9 @@ impl<T: Context> StrongAddress<T> {
                         let mapped_result = match spawn_result {
                             Ok(result) => {
                                 match &result {
-                                    Ok(_) => bomb.address.channel().register_exited(Ok(())),
+                                    Ok(_) => bomb.address.register_exited(Ok(())),
                                     Err(_) => bomb
                                         .address
-                                        .channel()
                                         .register_exited(Err(ExitError::UnhandledError)),
                                 };
 
@@ -123,9 +121,7 @@ impl<T: Context> StrongAddress<T> {
                             }
 
                             Err(boxed) => {
-                                bomb.address
-                                    .channel()
-                                    .register_exited(Err(ExitError::Panicked));
+                                bomb.address.register_exited(Err(ExitError::Panicked));
                                 std::panic::resume_unwind(boxed);
                             }
                         };
@@ -166,9 +162,7 @@ impl<T: Context> Drop for AbortBomb<T> {
             tracing::debug!("AbortBomb triggered");
 
             if !self.address.status().is_dead() {
-                self.address
-                    .channel()
-                    .register_exited(Err(ExitError::Aborted));
+                self.address.register_exited(Err(ExitError::Aborted));
             }
         }
     }

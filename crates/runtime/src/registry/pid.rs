@@ -9,7 +9,7 @@ use type_sets::{AsTypeSet, Members};
 ///
 /// A `Pid` is stable across restarts: creating a new [`StrongAddress`] with a
 /// given `Pid` (see [`StrongAddress::create`]) reuses the same registry entry,
-/// which is what allows an actor to be restarted on the same [`Channel`].
+/// which is what allows an actor to be restarted on the same channel.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Pid(SmolStr);
 

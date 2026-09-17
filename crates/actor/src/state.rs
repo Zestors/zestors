@@ -6,7 +6,7 @@ use rootcause::Report;
 use std::fmt::Debug;
 use tokio::select;
 use zestors_runtime::{ActorRef, InboxEvent, prelude::*};
-use zestors_runtime::{Channel, Signal};
+use zestors_runtime::Signal;
 
 pub(super) struct FullHandlerState<H: Handler> {
     inbox: Inbox<H::Interface>,
@@ -131,8 +131,8 @@ impl<H: Handler> FullHandlerState<H> {
 impl<H: Handler> ActorRef for FullHandlerState<H> {
     type Ctx = H::Interface;
 
-    fn channel(&self) -> &Channel<Self::Ctx> {
-        self.address.channel()
+    fn as_address(&self) -> &Address<Self::Ctx> {
+        &self.address
     }
 }
 
@@ -181,7 +181,7 @@ pub struct HandlerState<'a, H: Handler> {
 impl<'a, H: Handler> ActorRef for HandlerState<'a, H> {
     type Ctx = H::Interface;
 
-    fn channel(&self) -> &Channel<Self::Ctx> {
-        self.address.channel()
+    fn as_address(&self) -> &Address<Self::Ctx> {
+        self.address
     }
 }

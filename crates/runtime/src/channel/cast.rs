@@ -84,10 +84,10 @@ impl<M, T> Cast<M> for T
 where
     T: ActorRef + Sync,
     M: Message,
-    Channel<T::Ctx>: _Cast<M>,
+    Address<T::Ctx>: _Cast<M>,
 {
     async fn cast_with(&self, msg: M, options: CastOptions) -> Result<M::Receipt, CastError<M>> {
-        self.channel()._cast_with(msg, options).await
+        self.as_address()._cast_with(msg, options).await
     }
 
     fn try_cast(&self, msg: M) -> Result<M::Receipt, TryCastError<M>> {
@@ -95,26 +95,26 @@ where
     }
 
     fn try_cast_with(&self, msg: M, options: CastOptions) -> Result<M::Receipt, TryCastError<M>> {
-        self.channel()._try_cast_with(msg, options)
+        self.as_address()._try_cast_with(msg, options)
     }
 }
 
-/// A private trait for implementation on [`Channel`] only.
+/// A private trait for implementation on [`Address`] only.
 ///
 /// There is a blanket implementation of [`Cast`] for all types that implement
-/// [`ActorRef`], provided their [`Channel`] implements this trait.
+/// [`ActorRef`], provided their [`Address`] implements this trait.
 pub(crate) trait _Cast<M: Message>: Sync {
-    /// The [`Channel`]-specific implementation backing [`Cast::cast_with`].
+    /// The [`Address`]-specific implementation backing [`Cast::cast_with`].
     fn _cast_with(
         &self,
         msg: M,
         options: CastOptions,
     ) -> impl Future<Output = Result<M::Receipt, CastError<M>>> + Send;
 
-    /// The [`Channel`]-specific implementation backing [`Cast::try_cast_with`].
+    /// The [`Address`]-specific implementation backing [`Cast::try_cast_with`].
     fn _try_cast_with(&self, msg: M, options: CastOptions) -> Result<M::Receipt, TryCastError<M>>;
 
-    /// The [`Channel`]-specific implementation backing [`Cast::call_with`].
+    /// The [`Address`]-specific implementation backing [`Cast::call_with`].
     fn _call_with(
         &self,
         msg: M,
@@ -124,7 +124,7 @@ pub(crate) trait _Cast<M: Message>: Sync {
     }
 }
 
-impl<M, I> _Cast<M> for Channel<I>
+impl<M, I> _Cast<M> for Address<I>
 where
     M: Message,
     I: Interface + TryInto<Envelope<M>> + From<Envelope<M>> + Send + 'static,
@@ -179,7 +179,7 @@ where
     }
 }
 
-impl<M, T> _Cast<M> for Channel<Dyn<T>>
+impl<M, T> _Cast<M> for Address<Dyn<T>>
 where
     M: Message,
     T: AsTypeSet + Contains<M> + 'static,

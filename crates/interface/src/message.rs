@@ -1,5 +1,5 @@
-use crate::prelude::*;
 use crate::{ReceiptError, message::sealed::Sealed};
+use crate::{ResolveError, prelude::*};
 use std::{convert::Infallible, fmt::Debug};
 
 /// Defines whether a message is a fire-and-forget or request-style message.
@@ -18,10 +18,10 @@ use std::{convert::Infallible, fmt::Debug};
 /// It can easily be [derived](derive@Message) as well.
 pub trait Message: Send + 'static + Sized {
     /// The receipt associated with this message, that is returned after sending.
-    type Receipt: Receipt<Output = Self::Output, Responder = Self::Resolver>;
+    type Receipt: Receipt<Output = Self::Output, Resolver = Self::Resolver>;
 
     /// The resolver used to resolve the receipt given to the sender.
-    type Resolver: Responder<Receipt = Self::Receipt>;
+    type Resolver: Resolver<Receipt = Self::Receipt>;
 
     /// The output of the receipt after being resolved.
     type Output: Send + 'static;
@@ -33,7 +33,7 @@ pub trait Receipt: Debug + Send + Sized + Sealed {
     type Output: Send + 'static;
 
     /// The resolver used to resolve this receipt.
-    type Responder: Responder;
+    type Resolver: Resolver;
 
     /// Waits for the message's outcome.
     fn wait(self) -> impl Future<Output = Result<Self::Output, ReceiptError>> + Send;
@@ -45,42 +45,60 @@ pub trait Receipt: Debug + Send + Sized + Sealed {
 }
 
 /// The value passed along with a [`Message`], used to resolve a [`Receipt`]
-pub trait Responder: Debug + Send + Sized + Sealed {
+pub trait Resolver: Debug + Send + Sized + Sealed {
     /// The receipt associated with this resolver.
     type Receipt: Receipt;
 
+    /// The input type used to resolve this receipt.
+    type Input;
+
     /// Construct a new resolver-receipt pair
     fn new() -> (Self, Self::Receipt);
+
+    /// Resolves the receipt with the given input, returning an error if the resolution fails.
+    fn resolve(self, input: Self::Input) -> Result<(), ResolveError<Self::Input>>;
 }
 
 impl Receipt for () {
     type Output = ();
-    type Responder = ();
+    type Resolver = ();
 
     async fn wait(self) -> Result<(), ReceiptError> {
         Ok(())
     }
 }
 
-impl Responder for () {
+impl Resolver for () {
     type Receipt = ();
+
+    type Input = ();
 
     fn new() -> (Self, Self::Receipt) {
         ((), ())
     }
+
+    fn resolve(self, _: Self::Input) -> Result<(), ResolveError<Self::Input>> {
+        Ok(())
+    }
 }
 
-impl<T: Send + 'static> Responder for Request<T> {
+impl<T: Send + 'static> Resolver for Request<T> {
     type Receipt = Reply<T>;
+
+    type Input = T;
 
     fn new() -> (Self, Self::Receipt) {
         Self::new()
+    }
+
+    fn resolve(self, input: Self::Input) -> Result<(), ResolveError<Self::Input>> {
+        self.reply(input)
     }
 }
 
 impl<T: Send + 'static> Receipt for Reply<T> {
     type Output = T;
-    type Responder = Request<T>;
+    type Resolver = Request<T>;
 
     async fn wait(self) -> Result<Self::Output, ReceiptError> {
         self.await

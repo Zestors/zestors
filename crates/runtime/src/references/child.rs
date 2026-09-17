@@ -2,7 +2,7 @@ use crate::*;
 use futures::FutureExt as _;
 use std::{fmt::Debug, pin::Pin, task::Poll, time::Duration};
 
-/// A unique handle to a child process spawned on a [`Channel`]. By default,
+/// A unique handle to a child process spawned on an [`Address`]. By default,
 /// dropping a `Child` will abort the child process. To prevent this, call [`Child::detach`].
 ///
 /// A `Child` is made up of 2 main components:
@@ -112,8 +112,8 @@ impl<E, C: Context> Child<E, C> {
 impl<T, R: Context> ActorRef for Child<T, R> {
     type Ctx = R;
 
-    fn channel(&self) -> &Channel<Self::Ctx> {
-        self.address.channel()
+    fn as_address(&self) -> &Address<Self::Ctx> {
+        self.address.as_address()
     }
 }
 
