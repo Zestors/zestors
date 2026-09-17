@@ -1,6 +1,7 @@
 use futures::{Future, FutureExt};
 use std::{
     fmt::Debug,
+    mem::ManuallyDrop,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -12,7 +13,11 @@ pub struct Request<T>(oneshot::Sender<T>);
 impl<T> Request<T> {
     /// Send a message.
     pub fn reply(self, msg: T) -> Result<(), ResolveError<T>> {
-        self.0.send(msg).map_err(|msg| ResolveError(msg))
+        self.into_inner().send(msg).map_err(|msg| ResolveError(msg))
+    }
+
+    pub fn no_reply(self) {
+        self.into_inner();
     }
 
     /// Whether the [`Rx`] has closed/dropped the oneshot-channel.
@@ -23,6 +28,14 @@ impl<T> Request<T> {
     pub fn new() -> (Request<T>, Reply<T>) {
         let (tx, rx) = oneshot::channel();
         (Request(tx), Reply(rx))
+    }
+
+    /// Extracts the inner sender without running [`Drop::drop`].
+    fn into_inner(self) -> oneshot::Sender<T> {
+        let this = ManuallyDrop::new(self);
+        // SAFETY: `this` is never dropped (it's a `ManuallyDrop`) and is not
+        // accessed again after this read, so no double-use of the sender occurs.
+        unsafe { std::ptr::read(&this.0) }
     }
 }
 
@@ -70,6 +83,12 @@ impl<M> Future for Reply<M> {
 impl<M> Debug for Reply<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Rx").finish()
+    }
+}
+
+impl<M> Drop for Request<M> {
+    fn drop(&mut self) {
+        tracing::warn!("Request dropped without being replied to.");
     }
 }
 

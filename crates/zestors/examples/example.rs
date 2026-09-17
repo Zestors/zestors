@@ -160,11 +160,11 @@ impl Handle<GetHealth> for MyActor {
 impl Handle<GetChildren> for MyActor {
     async fn handle(
         &mut self,
-        _: HandlerState<'_, Self>,
-        _msg: GetChildren,
-        handle: Request<Vec<ChildDescription>>,
+        state: HandlerState<'_, Self>,
+        msg: GetChildren,
+        req: <GetChildren as Message>::Resolver,
     ) -> Result<(), Report> {
-        handle.reply(vec![]).ok();
+        req.reply(vec![]).ok();
         Ok(())
     }
 }

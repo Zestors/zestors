@@ -9,6 +9,7 @@ futures.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 zestors-codegen.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 zestors-codegen.workspace = true
