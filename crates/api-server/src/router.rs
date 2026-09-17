@@ -11,6 +11,7 @@ use zestors_supervision::{
 };
 
 impl ApiServer {
+    /// Builds the `axum` [`Router`] with this server's endpoints.
     pub(super) fn create_router(&self) -> Router {
         Router::new()
             .typed_route(get_tree)
@@ -21,6 +22,8 @@ impl ApiServer {
     }
 }
 
+/// Returns the supervision tree rooted at `pid` (or the root supervisor if no
+/// pid is given). Currently not implemented.
 #[route(GET "/tree?pid&include_debug" with ApiServer)]
 async fn get_tree(pid: Option<Pid>, include_debug: Option<bool>) -> ApiResult<(), ()> {
     tracing::debug!("Received request for supervision with {pid:?} and {include_debug:?}");
@@ -110,6 +113,8 @@ async fn get_children(address: &Address<impl Context>) -> rootcause::Result<Vec<
     .await??)
 }
 
+/// Returns a [`ChannelSnapshot`] for each requested [`Pid`], or `None` if it
+/// is no longer registered.
 #[route(GET "/snapshots" with ApiServer)]
 async fn get_channel_snapshots(
     Json(pids): Json<Vec<Pid>>,
@@ -126,6 +131,8 @@ async fn get_channel_snapshots(
     Ok(Json(results))
 }
 
+/// Returns the [`Health`] of each requested [`Pid`], or `None` if it is no
+/// longer registered or fails to respond in time.
 #[route(GET "/health" with ApiServer)]
 async fn get_health(Json(pids): Json<Vec<Pid>>) -> ApiResult<Json<Vec<Option<Health>>>, ()> {
     let results = stream::iter(pids.into_iter().map(|pid| async move {

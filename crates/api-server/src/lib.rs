@@ -1,3 +1,21 @@
+//! An HTTP API server actor for `zestors`: exposes introspection endpoints
+//! over a running supervision tree.
+//!
+//! [`ApiServerBlueprint`] builds an [`ApiServer`] actor that binds an `axum`
+//! server to a socket address and answers these `GET` routes:
+//!
+//! - `/processes` — every process in the tree, with its
+//!   [`ChildConfig`](zestors_supervision::ChildConfig), live
+//!   [`ActorStatus`](zestors_runtime::ActorStatus), and direct child [`Pid`]s.
+//! - `/snapshots` — [`ChannelSnapshot`](zestors_runtime::ChannelSnapshot)s for
+//!   the requested [`Pid`]s.
+//! - `/health` — the [`Health`] of the requested [`Pid`]s.
+//!
+//! The server discovers its root supervisor from
+//! [`ApiServerBlueprint::root_supervisor_pid`] (falling back to the actor's
+//! parent [`Pid`]) and walks the tree via the child/health query messages from
+//! `zestors-supervision`.
+
 use rootcause::Report;
 use std::{net::SocketAddr, pin::pin, sync::Arc};
 use tokio::net::TcpListener;
@@ -9,9 +27,17 @@ use zestors_supervision::messages::{GetChildren, GetHealth, Health};
 
 mod router;
 
+/// A reusable recipe for an [`ApiServer`]: the socket address to bind, and
+/// optionally the [`Pid`] of the root supervisor to introspect.
+///
+/// Build one with [`ApiServerBlueprint::new`] or [`ApiServer::blueprint`], then
+/// spawn it like any other blueprint.
 #[derive(Clone, Debug)]
 pub struct ApiServerBlueprint {
+    /// The socket address to bind the HTTP server to.
     pub addr: SocketAddr,
+    /// The [`Pid`] of the root supervisor; `None` falls back to the actor's
+    /// parent.
     pub root_supervisor_pid: Option<Pid>,
 }
 
@@ -24,6 +50,8 @@ impl ActorBlueprint for ApiServerBlueprint {
 }
 
 impl ApiServerBlueprint {
+    /// Creates a blueprint for an [`ApiServer`] bound to `addr`, with no
+    /// explicit root supervisor (the actor's parent is used).
     pub fn new(addr: SocketAddr) -> Self {
         Self {
             addr,
@@ -31,18 +59,24 @@ impl ApiServerBlueprint {
         }
     }
 
+    /// Sets the [`Pid`] of the root supervisor to introspect.
     pub fn root_supervisor_pid(mut self, pid: impl Into<Pid>) -> Self {
         self.root_supervisor_pid = Some(pid.into());
         self
     }
 }
 
+/// An actor that runs an `axum` HTTP server exposing supervision-tree
+/// introspection endpoints. See the crate-level documentation for the
+/// available routes.
 #[derive(Clone, Debug)]
 pub struct ApiServer {
     cfg: Arc<ApiServerBlueprint>,
     root_supervisor: Pid,
 }
 
+/// The message interface an [`ApiServer`] accepts: the [`GetChildren`] and
+/// [`GetHealth`] queries from `zestors-supervision`.
 #[derive(Interface)]
 #[interface(path = "zestors_interface")]
 pub enum ApiServerInterface {
@@ -117,6 +151,7 @@ impl ApiServer {
         })
     }
 
+    /// Creates an [`ApiServerBlueprint`] bound to `addr`.
     pub fn blueprint(addr: SocketAddr) -> ApiServerBlueprint {
         ApiServerBlueprint::new(addr)
     }

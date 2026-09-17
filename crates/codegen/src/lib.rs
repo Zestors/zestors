@@ -166,6 +166,9 @@ fn derive_interface(input: TokenStream, base: &str) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// Derives the `HandlerInterface` trait for an enum, allowing it to act as a
+/// handler interface for an actor. Each variant must contain a single unnamed
+/// field of type `Envelope<T>`.
 #[proc_macro_derive(HandlerInterface, attributes(interface))]
 pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
