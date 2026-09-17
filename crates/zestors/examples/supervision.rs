@@ -3,7 +3,7 @@ use rootcause::Report;
 use std::{sync::Arc, time::Duration};
 use zestors::{
     actor::{
-        BasicScheduler, Handle, Handler, HandlerExit, HandlerState, actor_fn, blueprint_fn, task_fn,
+        BasicScheduler, Handle, Handler, HandlerExit, HandlerState, fn_actor, fn_blueprint, fn_task,
     },
     api_server::ApiServer,
     prelude::*,
@@ -118,12 +118,12 @@ async fn main() -> Result<(), Report> {
 
     let source = InMemorySupervisorSource::new_arc();
 
-    let (spec_a, _addr) = blueprint_fn(|| MyActor::new("A"))
+    let (spec_a, _addr) = fn_blueprint(|| MyActor::new("A"))
         .pid("HelloActor")?
         .with_mode(RestartMode::Never)
         .split();
 
-    let (spec_b, _addr) = blueprint_fn(|| MyActor::new("B"))
+    let (spec_b, _addr) = fn_blueprint(|| MyActor::new("B"))
         .pid("HelloActor2")?
         .with_mode(RestartMode::Always)
         .split();
@@ -133,12 +133,12 @@ async fn main() -> Result<(), Report> {
         .pid("SupervisorA")?
         .split();
 
-    let (spec_c, _addr) = blueprint_fn(|| MyActor::new("C"))
+    let (spec_c, _addr) = fn_blueprint(|| MyActor::new("C"))
         .pid("HelloActor3")?
         .with_mode(RestartMode::Always)
         .split();
 
-    let (spec_d, _addr) = blueprint_fn(|| MyActor::new("D"))
+    let (spec_d, _addr) = fn_blueprint(|| MyActor::new("D"))
         .pid("HelloActor4")?
         .with_mode(RestartMode::Always)
         .split();
@@ -149,11 +149,11 @@ async fn main() -> Result<(), Report> {
         .pid("SupervisorB")?
         .split();
 
-    let (dyn_actor_spec, _addr) = actor_fn(async |_: Inbox<MyInterface>| Ok(()))
+    let (dyn_actor_spec, _addr) = fn_actor(async |_: Inbox<MyInterface>| Ok(()))
         .pid("DynActor")?
         .split();
 
-    let (task_spec, _addr) = task_fn(|mut task_box| async move {
+    let (task_spec, _addr) = fn_task(|mut task_box| async move {
         let mut completed_part1 = false;
 
         let res = task_box
@@ -187,10 +187,10 @@ async fn main() -> Result<(), Report> {
             super_spec_b,
             dyn_actor_spec,
             task_spec,
-            blueprint_fn(|| actor_fn(async |_: Inbox<MyInterface>| Ok(())))
+            fn_blueprint(|| fn_actor(async |_: Inbox<MyInterface>| Ok(())))
                 .pid("DynBlueprintActor")?
                 .into(),
-            blueprint_fn(|| MyActor::new("E"))
+            fn_blueprint(|| MyActor::new("E"))
                 .pid("DynBlueprintActor2")?
                 .into(),
         ])
@@ -228,7 +228,7 @@ fn spawn_tasks_in_background(source: Arc<InMemorySupervisorSource>) {
 
             source
                 .add(
-                    task_fn(|mut task| async move {
+                    fn_task(|mut task| async move {
                         task.run_until_shutdown(async {
                             tokio::time::sleep(Duration::from_secs(5)).await;
                             println!("Dynamic task completed");

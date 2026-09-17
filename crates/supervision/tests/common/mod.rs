@@ -11,7 +11,7 @@ use std::{
     },
     time::Duration,
 };
-use zestors_actor::{Actor, RestartIntensity, RestartMode, blueprint_fn};
+use zestors_actor::{Actor, RestartIntensity, RestartMode, fn_blueprint};
 use zestors_codegen::{Interface, Message};
 use zestors_interface::Envelope;
 use zestors_runtime::{Dyn, prelude::*};
@@ -99,7 +99,7 @@ impl Actor for SlowShutdownActor {
 /// Builds a [`SlowShutdownActor`] child (random pid) that sleeps for `delay`
 /// before actually exiting once told to stop.
 pub fn slow_shutdown_child(delay: Duration) -> ChildSpec {
-    blueprint_fn(move || SlowShutdownActor { delay })
+    fn_blueprint(move || SlowShutdownActor { delay })
         .with_rand_pid()
         .split()
         .0
@@ -114,7 +114,7 @@ pub fn test_child(mode: RestartMode) -> (ChildSpec, Address<TestInterface>, Arc<
     let generation = Arc::new(AtomicUsize::new(0));
     let for_actor = generation.clone();
 
-    let (spec, address) = blueprint_fn(move || TestActor {
+    let (spec, address) = fn_blueprint(move || TestActor {
         generation: for_actor.clone(),
     })
     .with_rand_pid()

@@ -120,3 +120,5 @@ impl RestartIntensity {
         }
     }
 }
+
+pub use zestors_codegen::HandlerInterface;
