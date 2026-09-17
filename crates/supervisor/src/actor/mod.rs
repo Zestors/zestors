@@ -20,6 +20,13 @@ use zestors_supervision::{
     messages::{Health, HealthStatus},
 };
 
+/// A supervisor actor: owns a set of [`ChildSpec`] supervisees, starts them,
+/// watches them, and restarts them according to its [`SupervisionStrategy`]
+/// and restart budget when they exit.
+///
+/// Constructed declaratively from a [`SupervisorBlueprint`] via
+/// [`Supervisor::blueprint`], or by implementing [`ActorBlueprint`] for a
+/// custom builder.
 pub struct Supervisor {
     supervisees: SuperviseeMap,
     strategy: SupervisionStrategy,
@@ -44,6 +51,9 @@ impl Actor for Supervisor {
 }
 
 impl Supervisor {
+    /// Creates a new [`SupervisorBlueprint`] (defaulting to
+    /// [`SupervisionStrategy::OneForOne`], no children) for building a
+    /// [`Supervisor`] declaratively.
     pub fn blueprint() -> SupervisorBlueprint {
         SupervisorBlueprint::new()
     }

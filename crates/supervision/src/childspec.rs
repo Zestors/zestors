@@ -5,7 +5,8 @@ use zestors_runtime::{
     errors::{DuplicatePidError, StartOnError},
 };
 
-/// The settings a [`Supervisor`] applies to one of its children: when to
+/// The settings a `Supervisor` applies to one
+/// of its children: when to
 /// restart it, how many restarts to allow, and how long to wait for it to
 /// start, initialize, and shut down.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,11 +68,13 @@ impl ChildConfig {
 }
 
 /// A registered [`Pid`] together with a blueprint and the [`ChildConfig`] a
-/// [`Supervisor`] should apply to it — everything needed to (re)start the
+/// `Supervisor` should apply to it —
+/// everything needed to (re)start the
 /// child on demand.
 ///
 /// `T` is the blueprint type; it defaults to [`DynStarter`], the type-erased
-/// form used once a spec is handed to a [`Supervisor`] (see
+/// form used once a spec is handed to a
+/// `Supervisor` (see
 /// [`ChildSpec::into_dyn`]).
 pub struct ChildSpec<T: Start = DynStarter> {
     cfg: ChildConfig,
@@ -152,7 +155,8 @@ impl<T: Start> ChildSpec<T> {
         self.blueprint.start_on(self.channel.clone()).await
     }
 
-    /// Type-erases this spec's blueprint, for handing it to a [`Supervisor`].
+    /// Type-erases this spec's blueprint, for handing it to a
+    /// `Supervisor`.
     pub fn into_dyn(self) -> ChildSpec {
         ChildSpec {
             cfg: self.cfg,

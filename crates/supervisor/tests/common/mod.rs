@@ -133,7 +133,7 @@ pub fn test_child(mode: RestartMode) -> (ChildSpec, Address<TestInterface>, Arc<
     (spec, address, generation)
 }
 
-/// Starts a [`SupervisorBlueprint`] directly (no [`Node`](zestors_supervision::Node) —
+/// Starts a [`SupervisorBlueprint`] directly (no [`Node`](zestors_supervisor::Node) —
 /// its exit path calls `std::process::exit`, which would kill the test
 /// process), returning the running supervisor's own [`Child`] handle (keep
 /// this alive for the test's duration; dropping it aborts the whole tree)

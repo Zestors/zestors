@@ -3,6 +3,13 @@ use indexmap::IndexMap;
 use std::sync::Arc;
 use zestors_supervision::{RestartIntensity, Start};
 
+/// A declarative, reusable recipe for a [`Supervisor`]: its child
+/// [`ChildSpec`]s, its [`SupervisionStrategy`], an optional restart intensity,
+/// and an optional dynamic [`SupervisorSource`].
+///
+/// Build one with [`SupervisorBlueprint::new`] (or the [`Supervisor::blueprint`]
+/// shorthand) and the `child`/`children`/`strategy`/`intensity`/`source`
+/// builder methods, then spawn it like any other blueprint.
 pub struct SupervisorBlueprint {
     supervisees: IndexMap<Pid, ChildSpec>,
     strategy: SupervisionStrategy,
@@ -11,6 +18,10 @@ pub struct SupervisorBlueprint {
 }
 
 impl SupervisorBlueprint {
+    /// Creates an empty blueprint: [`SupervisionStrategy::OneForOne`], no
+    /// children, no source, and no explicit restart intensity (a
+    /// strategy-dependent fallback is applied at instantiation — see
+    /// [`SupervisorBlueprint::intensity`]).
     pub fn new() -> Self {
         Self {
             supervisees: Default::default(),
@@ -20,41 +31,56 @@ impl SupervisorBlueprint {
         }
     }
 
+    /// Same as [`SupervisorBlueprint::new`] with an explicit
+    /// [`SupervisionStrategy::OneForOne`].
     pub fn one_for_one() -> Self {
         Self::new().strategy(SupervisionStrategy::OneForOne)
     }
 
+    /// Same as [`SupervisorBlueprint::new`] with an explicit
+    /// [`SupervisionStrategy::OneForAll`].
     pub fn one_for_all() -> Self {
         Self::new().strategy(SupervisionStrategy::OneForAll)
     }
 
+    /// Same as [`SupervisorBlueprint::new`] with an explicit
+    /// [`SupervisionStrategy::RestForOne`].
     pub fn rest_for_one() -> Self {
         Self::new().strategy(SupervisionStrategy::RestForOne)
     }
 
+    /// Sets the [`SupervisionStrategy`] used to decide which children are
+    /// restarted when one of them exits.
     pub fn strategy(mut self, strategy: SupervisionStrategy) -> Self {
         self.strategy = strategy;
         self
     }
 
+    /// In-place version of [`SupervisorBlueprint::strategy`].
     pub fn set_strategy(&mut self, strategy: SupervisionStrategy) {
         self.strategy = strategy;
     }
 
+    /// Sets the supervisor-wide [`RestartIntensity`] restart budget. When
+    /// unset, a strategy-dependent fallback is applied at instantiation.
     pub fn intensity(mut self, restart_intensity: RestartIntensity) -> Self {
         self.restart_intensity = Some(restart_intensity);
         self
     }
 
+    /// In-place version of [`SupervisorBlueprint::intensity`], allowing the
+    /// intensity to be set (`Some`) or cleared (`None`).
     pub fn set_intensity(&mut self, restart_intensity: Option<RestartIntensity>) {
         self.restart_intensity = restart_intensity;
     }
 
+    /// Adds a single [`ChildSpec`], type-erasing it.
     pub fn child<T: Start + Sync>(mut self, spec: ChildSpec<T>) -> Self {
         self.supervisees.insert(spec.pid().clone(), spec.into_dyn());
         self
     }
 
+    /// Adds several [`ChildSpec`]s of the same type, type-erasing each one.
     pub fn children<T: Start>(mut self, specs: impl IntoIterator<Item = ChildSpec<T>>) -> Self {
         for spec in specs {
             let spec = spec.into_dyn();
@@ -63,6 +89,8 @@ impl SupervisorBlueprint {
         self
     }
 
+    /// Adds a [`ChildSpec`] by mutable reference and returns the child's
+    /// [`Address`], so the caller can keep a handle to it.
     pub fn add_child<T>(&mut self, spec: ChildSpec<T>) -> Address<<T::Actor as Actor>::Interface>
     where
         T: ActorBlueprint + Send + Sync + 'static,
@@ -74,21 +102,27 @@ impl SupervisorBlueprint {
         address
     }
 
+    /// Attaches a dynamic [`SupervisorSource`] the supervisor reads children
+    /// from at startup and at runtime.
     pub fn source<S: SupervisorSource>(mut self, source: Arc<S>) -> Self {
         self.source = Some(source);
         self
     }
 
+    /// Adds an already type-erased [`ChildSpec`] by mutable reference.
     pub fn add_dyn_child(&mut self, spec: ChildSpec) {
         self.supervisees.insert(spec.pid().clone(), spec);
     }
 
+    /// Adds several already type-erased [`ChildSpec`]s by mutable reference.
     pub fn add_dyn_children(&mut self, specs: impl IntoIterator<Item = ChildSpec>) {
         for spec in specs {
             self.add_dyn_child(spec);
         }
     }
 
+    /// Adds several [`ChildSpec`]s by mutable reference, returning their
+    /// [`Address`]es.
     pub fn add_children<T>(
         &mut self,
         specs: impl IntoIterator<Item = ChildSpec<T>>,

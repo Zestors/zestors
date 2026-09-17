@@ -1,26 +1,32 @@
-//! Supervision trees for `zestors` actors, in the OTP sense: a
-//! [`Supervisor`] starts and watches a set of children — each described by a
-//! [`ChildSpec`] — and restarts them according to a [`SupervisionStrategy`]
-//! and a [`RestartMode`](zestors_actor::RestartMode)/[`RestartIntensity`]
-//! policy when they exit.
+//! Shared building blocks for `zestors` supervision trees, in the OTP sense.
 //!
-//! - [`SupervisorBlueprint`] builds a [`Supervisor`]: its children, its
-//!   [`SupervisionStrategy`], its restart intensity, and an optional
-//!   [`SupervisorSource`] for a dynamically-managed child set.
+//! This crate holds the spec/config/snapshot types and query messages that
+//! describe *what* a supervisor supervises and *how* it may be restarted; the
+//! `Supervisor` actor that actually starts,
+//! watches, and restarts children lives in the `zestors-supervisor` crate.
+//!
 //! - [`ChildSpec`] pairs a child's blueprint with the [`ChildConfig`]
-//!   (restart mode/intensity, timeouts) a supervisor applies to it.
-//! - [`Node`] runs a single root [`Supervisor`] as an entire program: it
-//!   starts it, restarts it if it crashes, and shuts it down gracefully on a
-//!   Ctrl+C/SIGTERM.
-//! - [`messages`] holds the request/response types used to talk to a running
-//!   [`Supervisor`] (fetching its children, checking its health, registering
-//!   or deregistering a child at runtime), and [`SupervisionTree`]
-//!   recursively walks a supervisor and its descendants into a snapshot of
-//!   the whole tree.
+//!   (restart mode/intensity, timeouts) a supervisor applies to it, and owns
+//!   the [`Pid`](zestors_runtime::Pid)/channel under which the child is
+//!   registered.
+//! - [`ChildDescription`] is a serializable snapshot of a child's identity and
+//!   configuration, as returned by [`GetChildren`].
+//! - [`RestartIntensity`] is a sliding-window restart budget used to prevent
+//!   an actor that keeps failing immediately from restarting in a tight,
+//!   endless loop.
+//! - [`Start`]/[`DynStarter`] turn an
+//!   [`ActorBlueprint`](zestors_actor::ActorBlueprint) into something that
+//!   can (re)spawn an actor on an already-registered
+//!   [`StrongAddress`](zestors_runtime::StrongAddress), and
+//!   [`BlueprintSupervisionExt`] adds ergonomic `pid`/`with_rand_pid` helpers
+//!   to every blueprint.
+//! - [`messages`] holds the request/response types used to query a running
+//!   supervisor (its children and its health).
+//! - [`SupervisionTree`] recursively walks a supervisor and its descendants
+//!   into a serializable snapshot of the whole tree.
 
 mod _prelude {
     pub use crate::*;
-    pub use rootcause::Report;
     pub use serde::{Deserialize, Serialize};
     pub use std::fmt::{Debug, Display};
     pub use std::time::Duration;

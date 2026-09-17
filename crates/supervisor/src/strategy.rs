@@ -2,7 +2,8 @@ use std::collections::VecDeque;
 use tokio::time::Instant;
 use zestors_supervision::RestartIntensity;
 
-/// Controls how a [`Supervisor`] reacts when one of its children exits and
+/// Controls how a [`Supervisor`](crate::Supervisor) reacts when one of its
+/// children exits and
 /// needs to be restarted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SupervisionStrategy {

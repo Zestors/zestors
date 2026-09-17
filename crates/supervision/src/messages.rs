@@ -1,8 +1,13 @@
-//! The message/response types used to interact with a running
-//! [`Supervisor`]: fetching its children
-//! ([`GetChildren`]), checking its health ([`GetHealth`]), and registering
-//! or deregistering a child at runtime ([`RegisterChild`]/
-//! [`DeregisterChild`]).
+//! The message/response types used to retrieve supervision-information from
+//! running processes.
+//!
+//! Messages:
+//! - Handle [`GetChildren`] if your actor supervises other actors.
+//! - Handle [`GetHealth`] for your actor to report its health status.
+//!
+//! The `Supervisor` actor implements both
+//! messages, so a running supervision tree can be queried (and, via
+//! [`SupervisionTree`], walked) without stopping it.
 
 use crate::_prelude::*;
 use smol_str::{SmolStr, format_smolstr};

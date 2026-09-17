@@ -124,6 +124,7 @@ impl SupervisionTree {
         }
     }
 
+    /// Builder-style version of [`SupervisionTree::populate_channel_snapshots`].
     pub fn populated_channel_snapshots(mut self) -> Self {
         self.populate_channel_snapshots();
         self
