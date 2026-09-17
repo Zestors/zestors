@@ -10,11 +10,11 @@ use zestors::{
     supervision::messages::{GetChildren, GetHealth, Health},
 };
 use zestors_actor::ActorExt;
-use zestors_runtime::spawn;
+use zestors_runtime::spawn_rand;
 use zestors_supervision::ChildDescription;
 #[tokio::main]
 async fn main() {
-    let child = spawn(async move |mut inbox: Inbox<MyInterface>| {
+    let child = spawn_rand(async move |mut inbox: Inbox<MyInterface>| {
         while let Some(msg) = inbox.recv().await {
             match msg {
                 MyInterface::Add(envelope) => {

@@ -2,14 +2,8 @@
 //! over a running supervision tree.
 //!
 //! [`ApiServerBlueprint`] builds an [`ApiServer`] actor that binds an `axum`
-//! server to a socket address and answers these `GET` routes:
-//!
-//! - `/processes` — every process in the tree, with its
-//!   [`ChildConfig`](zestors_supervision::ChildConfig), live
-//!   [`ActorStatus`](zestors_runtime::ActorStatus), and direct child [`Pid`]s.
-//! - `/snapshots` — [`ChannelSnapshot`](zestors_runtime::ChannelSnapshot)s for
-//!   the requested [`Pid`]s.
-//! - `/health` — the [`Health`] of the requested [`Pid`]s.
+//! server to a socket address. The HTTP endpoints are unstable, and will change
+//! with minor version bumps.
 //!
 //! The server discovers its root supervisor from
 //! [`ApiServerBlueprint::root_supervisor_pid`] (falling back to the actor's

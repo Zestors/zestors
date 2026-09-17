@@ -3,7 +3,7 @@ use std::{convert::Infallible, fmt::Debug};
 use zestors_interface::Interface;
 use zestors_runtime::{
     prelude::*,
-    spawn,
+    spawn_rand,
     {TaskBox, errors::DuplicatePidError},
 };
 
@@ -53,13 +53,13 @@ pub trait ActorExt: Actor {
     /// Spawns this actor under a specific [`Pid`], returning a [`Child`] that
     /// owns its task. Fails if `pid` is already registered.
     fn spawn_with(self, pid: Pid) -> Result<Child<Self::Exit, Self::Interface>, DuplicatePidError> {
-        spawn_with(pid, |inbox| self.run(inbox))
+        spawn(pid, |inbox| self.run(inbox))
     }
 
     /// Spawns this actor under a freshly generated [`Pid`], returning a
     /// [`Child`] that owns its task.
     fn spawn(self) -> Child<Self::Exit, Self::Interface> {
-        spawn(|inbox| self.run(inbox))
+        spawn_rand(|inbox| self.run(inbox))
     }
 }
 impl<T: Actor> ActorExt for T {}

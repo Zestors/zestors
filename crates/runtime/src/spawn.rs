@@ -14,8 +14,8 @@ struct PidInfo {
     parent: Option<Pid>,
 }
 
-/// Same as [`spawn_with`], but spawns a process that cannot accept messages.
-pub fn spawn_task_with<E, F>(
+/// Same as [`spawn`], but spawns a process that cannot accept messages.
+pub fn spawn_task<E, F>(
     pid: Pid,
     f: impl FnOnce(TaskBox) -> F,
 ) -> Result<Child<E, Infallible>, DuplicatePidError>
@@ -29,19 +29,19 @@ where
 }
 
 /// Same as [`spawn`], but spawns a process that cannot accept messages.
-pub fn spawn_task<E, F>(f: impl FnOnce(TaskBox) -> F) -> Child<E, Infallible>
+pub fn spawn_task_rand<E, F>(f: impl FnOnce(TaskBox) -> F) -> Child<E, Infallible>
 where
     E: Send + 'static,
     F: Future<Output = Result<E, rootcause::Report>> + Send + 'static,
 {
-    spawn_task_with(Pid::rand(), f).expect("Pid is unique")
+    spawn_task(Pid::rand(), f).expect("Pid is unique")
 }
 
 /// Spawns a process on a new [`StrongAddress`] with the given [`Pid`], and
 /// registers it in the [`Registry`].
 ///
 /// Can fail if the pid is already registered.
-pub fn spawn_with<T, E, F>(
+pub fn spawn<T, E, F>(
     pid: Pid,
     f: impl FnOnce(Inbox<T>) -> F,
 ) -> Result<Child<E, T>, DuplicatePidError>
@@ -57,13 +57,13 @@ where
 
 /// Spawns a process on a new [`StrongAddress`] with a random [`Pid`], and
 /// registers it in the [`Registry`].
-pub fn spawn<T, E, F>(f: impl FnOnce(Inbox<T>) -> F) -> Child<E, T>
+pub fn spawn_rand<T, E, F>(f: impl FnOnce(Inbox<T>) -> F) -> Child<E, T>
 where
     T: Interface,
     E: Send + 'static,
     F: Future<Output = Result<E, rootcause::Report>> + Send + 'static,
 {
-    spawn_with(Pid::rand(), f).expect("Pid is unique")
+    spawn(Pid::rand(), f).expect("Pid is unique")
 }
 
 impl StrongAddress<Infallible> {
@@ -112,9 +112,9 @@ impl<T: Context> StrongAddress<T> {
                             Ok(result) => {
                                 match &result {
                                     Ok(_) => bomb.address.register_exited(Ok(())),
-                                    Err(_) => bomb
-                                        .address
-                                        .register_exited(Err(ExitError::UnhandledError)),
+                                    Err(_) => {
+                                        bomb.address.register_exited(Err(ExitError::UnhandledError))
+                                    }
                                 };
 
                                 result

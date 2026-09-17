@@ -1,11 +1,11 @@
 use std::{assert_matches, time::Duration};
 use zestors_runtime::{
-    Registry, spawn, {ActorOps as _, ActorStatus, ExitStatus, Pid, StrongAddress},
+    Registry, spawn_rand, {ActorOps as _, ActorStatus, ExitStatus, Pid, StrongAddress},
 };
 
 #[tokio::test]
 async fn register_and_deregister_refcounts_basics() {
-    let mut child = spawn(common::simplest_handler);
+    let mut child = spawn_rand(common::simplest_handler);
     let pid = child.pid().clone();
 
     assert!(Registry::local().get(&pid).is_some());
