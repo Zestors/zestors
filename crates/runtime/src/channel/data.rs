@@ -447,9 +447,9 @@ impl<I: Interface> Channel<I> {
         match self.status() {
             ActorStatus::Suspended => self.next_signal().await.map(InboxEvent::Signal),
 
-            ActorStatus::Exited(_) if self.msgs_is_empty() => None,
+            ActorStatus::Exited(_) if self.msg_is_empty() => None,
 
-            ActorStatus::Exiting if self.msgs_is_empty() && !while_exiting => None,
+            ActorStatus::Exiting if self.msg_is_empty() && !while_exiting => None,
 
             _ => {
                 select! {
@@ -466,8 +466,8 @@ impl<I: Interface> Channel<I> {
     pub(crate) fn try_next_event(&self) -> Option<InboxEvent<I>> {
         match self.status() {
             ActorStatus::Suspended => self.pop_signal().map(InboxEvent::Signal),
-            ActorStatus::Exited(_) if self.msgs_is_empty() => None,
-            ActorStatus::Exiting if self.msgs_is_empty() => None,
+            ActorStatus::Exited(_) if self.msg_is_empty() => None,
+            ActorStatus::Exiting if self.msg_is_empty() => None,
             _ => {
                 if let Some(signal) = self.pop_signal() {
                     Some(InboxEvent::Signal(signal))

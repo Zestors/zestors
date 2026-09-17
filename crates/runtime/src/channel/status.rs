@@ -54,19 +54,35 @@ impl ActorStatus {
     }
 }
 
+/// The final outcome of an actor's most recently completed run, carried by
+/// [`ActorStatus::Exited`] and recorded in the exit history returned by
+/// [`ActorOps::snapshot`].
+///
+/// This mirrors `Result<(), ExitError>` (see [`ExitStatus::from_result`] /
+/// [`ExitStatus::into_result`]), flattened into a single [`Copy`]/[`Eq`]/[`Hash`]
+/// enum so it can be stored directly in [`ActorStatus`] and cloned into history
+/// without going through a `Result`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Copy, thiserror::Error)]
 pub enum ExitStatus {
+    /// The actor's task returned `Ok(())`.
     #[error("Normal exit")]
     Normal,
+    /// The actor's task panicked.
     #[error("Panicked")]
     Panicked,
+    /// The actor's task was aborted (e.g. via [`Child::abort`]) before it
+    /// could finish.
     #[error("Aborted")]
     Aborted,
+    /// The actor's task returned `Err(_)`.
     #[error("Unhandled error")]
     UnhandledError,
 }
 
 impl ExitStatus {
+    /// Converts a task's result into an [`ExitStatus`], mapping `Ok(())` to
+    /// [`ExitStatus::Normal`] and each [`ExitError`] variant to its
+    /// corresponding `ExitStatus` variant.
     pub fn from_result(result: Result<(), ExitError>) -> Self {
         match result {
             Ok(_) => ExitStatus::Normal,
@@ -78,6 +94,7 @@ impl ExitStatus {
         }
     }
 
+    /// The inverse of [`ExitStatus::from_result`].
     pub fn into_result(self) -> Result<(), ExitError> {
         match self {
             ExitStatus::Normal => Ok(()),
@@ -87,10 +104,12 @@ impl ExitStatus {
         }
     }
 
+    /// Returns `true` for [`ExitStatus::Normal`].
     pub fn is_normal(&self) -> bool {
         matches!(self, ExitStatus::Normal)
     }
 
+    /// Returns `true` for any variant other than [`ExitStatus::Normal`].
     pub fn is_error(&self) -> bool {
         matches!(
             self,

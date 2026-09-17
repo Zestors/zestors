@@ -53,6 +53,12 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         }
     }
 
+    /// Same as [`Cast::try_cast`], but see [`ActorOps::cast_dyn`] for how it
+    /// differs from [`Cast::cast`].
+    fn try_cast_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, TryCastDynError<M>> {
+        self.try_cast_dyn_with(msg, Default::default())
+    }
+
     /// Same as [`Cast::try_cast_with`], but checks at runtime whether `M` is
     /// accepted by the channel, returning [`TryCastDynError::NotAccepted`]
     /// rather than failing to compile.
@@ -80,7 +86,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     fn call_dyn<M: Message>(
         &self,
         msg: M,
-    ) -> impl Future<Output = Result<M::Output, CallCheckedError<M>>> + Send {
+    ) -> impl Future<Output = Result<M::Output, CallDynError<M>>> + Send {
         self.call_dyn_with(msg, Default::default())
     }
 
@@ -90,19 +96,28 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         &self,
         msg: M,
         options: CastOptions,
-    ) -> impl Future<Output = Result<M::Output, CallCheckedError<M>>> + Send {
+    ) -> impl Future<Output = Result<M::Output, CallDynError<M>>> + Send {
         let handle = self.channel();
         async move { Ok(handle.cast_dyn_with(msg, options).await?.wait().await?) }
     }
 
+    /// Returns the actor's [`Pid`].
     fn pid(&self) -> &Pid {
         self.data().pid()
     }
 
+    /// Returns the actor's current [`ActorStatus`].
     fn status(&self) -> ActorStatus {
         self.data().status()
     }
 
+    /// Returns `true` if the actor's status is [`ActorStatus::Exiting`].
+    fn is_exiting(&self) -> bool {
+        self.status().is_exiting()
+    }
+
+    /// Captures a [`ChannelSnapshot`] of the actor's current status, queue
+    /// lengths, and spawn/exit history.
     fn snapshot(&self) -> ChannelSnapshot {
         let clock = Clock::now();
         let data = &self.data();
@@ -126,6 +141,9 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         }
     }
 
+    /// Waits until `check_for` returns `Some` for the actor's [`ActorStatus`].
+    /// Checked once against the current status, and then again after every
+    /// subsequent status change, until `check_for` returns `Some`.
     fn watch<T>(
         &self,
         check_for: impl FnMut(ActorStatus) -> Option<T> + Send + 'static,
@@ -133,6 +151,9 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.data().watch(check_for)
     }
 
+    /// Waits until the actor reaches [`ActorStatus::Running`] for the first
+    /// time, returning `Err` with the actor's [`ExitStatus`] if it instead
+    /// reaches [`ActorStatus::Exited`] beforehand.
     fn watch_init(&self) -> impl Future<Output = Result<(), ExitStatus>> + Send {
         self.watch(|status| match status {
             ActorStatus::Running => return Some(Ok(())),
@@ -143,6 +164,8 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         })
     }
 
+    /// Waits until the actor reaches [`ActorStatus::Exited`], returning the
+    /// outcome as a `Result`.
     fn watch_exit(&self) -> impl Future<Output = Result<(), ExitError>> + Send {
         self.watch(|status| match status {
             ActorStatus::Exited(exit) => return Some(exit.into_result()),
@@ -150,30 +173,58 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         })
     }
 
+    /// Returns the [`TypeId`]s of every message type the channel accepts.
     fn members(&self) -> &'static [TypeId] {
         self.data().members()
     }
 
+    /// Returns the number of messages currently queued.
     fn msg_len(&self) -> usize {
         self.data().msg_len()
     }
 
-    fn msgs_is_empty(&self) -> bool {
+    /// Returns `true` if there are no messages currently queued.
+    fn msg_is_empty(&self) -> bool {
         self.msg_len() == 0
     }
 
-    fn can_send(&self, type_id: TypeId) -> bool {
+    /// Returns the number of signals currently queued.
+    fn signal_len(&self) -> usize {
+        self.data().signal_len()
+    }
+
+    /// Returns `true` if there are no signals currently queued.
+    fn signal_is_empty(&self) -> bool {
+        self.signal_len() == 0
+    }
+
+    /// Returns `true` if the channel accepts messages of type `M`.
+    fn can_send<M: Message>(&self) -> bool {
+        self.can_send_type_id(TypeId::of::<M>())
+    }
+
+    /// The [`TypeId`]-based primitive behind [`ActorOps::can_send`], for use
+    /// where the message type isn't statically known. See
+    /// [`ActorOps::is_superset_of`].
+    fn can_send_type_id(&self, type_id: TypeId) -> bool {
         self.members().contains(&type_id)
     }
 
+    /// Returns `true` if the channel accepts every message type in
+    /// `type_ids`. Used internally by [`IntoDyn::into_dyn_checked`] and
+    /// [`AsDyn::as_dyn_checked`].
     fn is_superset_of(&self, type_ids: &[TypeId]) -> bool {
-        type_ids.iter().all(|id| self.can_send(*id))
+        type_ids.iter().all(|id| self.can_send_type_id(*id))
     }
 
+    /// Returns `true` if the channel's concrete message type is exactly `I`.
     fn is_interface<I: Interface>(&self) -> bool {
         self.data().is_interface::<I>()
     }
 
+    /// Returns `true` if the channel is currently under backpressure, i.e.
+    /// sending would incur a delay (via [`Cast::cast`]) or fail with
+    /// [`TryCastError::Full`] (via [`Cast::try_cast`]).
     fn reached_backpressure(&self) -> bool {
         let handle = self.channel();
 
@@ -183,18 +234,26 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
             .is_some()
     }
 
+    /// Sends a [`Signal::Shutdown`] to the actor. Returns `false` if the
+    /// channel was already exiting or dead.
     fn signal_shutdown(&self) -> bool {
         self.signal(Signal::Shutdown)
     }
 
+    /// Sends a [`Signal::Suspend`] to the actor. Returns `false` if the
+    /// channel was already exiting or dead.
     fn signal_suspend(&self) -> bool {
         self.signal(Signal::Suspend)
     }
 
+    /// Sends a [`Signal::Resume`] to the actor. Returns `false` if the
+    /// channel was already exiting or dead.
     fn signal_resume(&self) -> bool {
         self.signal(Signal::Resume)
     }
 
+    /// Sends the given [`Signal`] to the actor. Returns `false` if the
+    /// channel was already exiting or dead.
     fn signal(&self, signal: Signal) -> bool {
         let interface = match signal {
             Signal::Shutdown => SignalInterface::Shutdown(Envelope::new(signals::Shutdown, ())),
@@ -205,6 +264,10 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.data().signal(interface)
     }
 
+    /// Sends a liveness-check signal to the actor, returning a [`Reply`] that
+    /// resolves once the actor's event loop has processed it. Since signals
+    /// are always processed before queued messages, this can be used to
+    /// confirm the actor has caught up to this point in its signal queue.
     fn ping(&self) -> Reply<()> {
         let (tx, rx) = Request::new();
 
@@ -215,33 +278,51 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         rx
     }
 
+    /// Returns the [`Instant`] at which the channel was created. This is
+    /// fixed for the channel's lifetime; see [`ActorOps::last_spawned_at`]
+    /// for the most recent spawn.
     fn created_at(&self) -> Instant {
         self.data().created_at()
     }
 
+    /// Returns the [`Instant`] of the most recent spawn, or `None` if the
+    /// actor has never been spawned.
     fn last_spawned_at(&self) -> Option<Instant> {
         self.data().last_spawned_at()
     }
 
+    /// Returns the [`Instant`]s of the most recent spawns, oldest first. This
+    /// is a bounded history: older entries are dropped once the limit is
+    /// reached.
     fn spawned_at(&self) -> Vec<Instant> {
         self.data().spawned_at()
     }
 
+    /// Returns the time elapsed since the actor's most recent spawn, or
+    /// `None` if it has never been spawned.
+    ///
+    /// This keeps counting after the actor has exited — it measures time
+    /// since the last spawn, not how long the actor was running for. Check
+    /// [`ActorOps::is_dead`] if you need to know whether it's still running.
     fn uptime(&self) -> Option<Duration> {
         self.last_spawned_at().map(|instant| instant.elapsed())
     }
 
+    /// Returns `true` if the actor's status is [`ActorStatus::Exited`].
     fn is_dead(&self) -> bool {
         self.status().is_dead()
     }
 
+    /// Returns `true` if the actor is dead and no [`StrongAddress`],
+    /// [`Inbox`] or [`Child`] reference remains that could respawn it.
     fn is_permanently_dead(&self) -> bool {
         self.status().is_dead() && self.strong_count() == 0
     }
 
-    /// The amount of [`channels`](Channel), [`inboxes`](Inbox) and
-    /// [`children`](Child) in existence for this
-    /// channel.
+    /// The number of [`StrongAddress`]es currently alive for this channel —
+    /// including the ones held internally by every [`Inbox`] and [`Child`].
+    /// Once this reaches zero, the channel is permanently dead (see
+    /// [`ActorOps::is_permanently_dead`]).
     ///
     /// This amount should only be used as an indication of the number of
     /// active references to the channel.
@@ -249,7 +330,9 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.data().strong_count()
     }
 
-    /// The total amount of references to this channel, including [`Channel`]s, [`StrongAddress`]es, [`Inbox`]es, [`Child`]ren and [`Address`]es.
+    /// The total number of live references to this channel, both strong
+    /// ([`StrongAddress`], and the ones held internally by [`Inbox`]/[`Child`])
+    /// and weak ([`Address`]).
     ///
     /// This amount should only be used as an indication of the number of
     /// active references to the channel.
@@ -265,10 +348,14 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.ref_count().saturating_sub(self.strong_count())
     }
 
+    /// Returns a weak [`Address`] reference to the channel, borrowed from
+    /// `self`.
     fn address(&self) -> &Address<Self::Ctx> {
         Address::from_ref(self.channel())
     }
 
+    /// Attempts to obtain a [`StrongAddress`] to the channel, returning
+    /// `None` if it is permanently dead (see [`ActorOps::is_permanently_dead`]).
     fn upgrade(&self) -> Option<StrongAddress<Self::Ctx>> {
         StrongAddress::from_channel_ref(self.channel())
     }
@@ -301,12 +388,12 @@ impl Clock {
     }
 }
 
-trait ActorOpsExtPriv: ActorRef {
+trait ChannelAccess: ActorRef {
     fn data(&self) -> &ChannelInner<dyn DynamicQueue> {
         self.channel().data()
     }
 }
-impl<T: ActorRef + ?Sized> ActorOpsExtPriv for T {}
+impl<T: ActorRef + ?Sized> ChannelAccess for T {}
 
 mod sealed {
     pub trait Sealed {}

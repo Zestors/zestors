@@ -166,11 +166,6 @@ impl<T: Interface> Inbox<T> {
         self.channel().register_exiting().unwrap_or(false)
     }
 
-    /// Returns `true` if the channel is in the [`ActorStatus::Exiting`] state.
-    pub fn is_exiting(&self) -> bool {
-        self.status() == ActorStatus::Exiting
-    }
-
     async fn wait_resume(&mut self) {
         while let Some(signal) = self.recv_signal().await {
             match signal {

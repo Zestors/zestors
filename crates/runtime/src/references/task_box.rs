@@ -48,11 +48,6 @@ impl TaskBox {
         }
     }
 
-    /// Returns `true` if the channel is in the [`ActorStatus::Exiting`] state.
-    pub fn is_exiting(&self) -> bool {
-        self.status() == ActorStatus::Exiting
-    }
-
     /// Runs `fut` to completion while responding to signals. See
     /// [`Inbox::run_until_shutdown`].
     pub async fn run_until_shutdown<O>(

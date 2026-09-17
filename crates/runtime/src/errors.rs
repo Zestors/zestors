@@ -124,7 +124,7 @@ impl<M> From<ReceiptError> for CallError<M> {
 }
 
 #[derive(Debug, thiserror::Error, Clone)]
-pub enum CallCheckedError<M> {
+pub enum CallDynError<M> {
     #[error("The channel was closed")]
     Closed(M),
 
@@ -135,32 +135,32 @@ pub enum CallCheckedError<M> {
     NoResponse,
 }
 
-impl<M> From<CastDynError<M>> for CallCheckedError<M> {
+impl<M> From<CastDynError<M>> for CallDynError<M> {
     fn from(err: CastDynError<M>) -> Self {
         match err {
-            CastDynError::Closed(m) => CallCheckedError::Closed(m),
-            CastDynError::NotAccepted(m) => CallCheckedError::NotAccepted(m),
+            CastDynError::Closed(m) => CallDynError::Closed(m),
+            CastDynError::NotAccepted(m) => CallDynError::NotAccepted(m),
         }
     }
 }
 
-impl<M> From<ReceiptError> for CallCheckedError<M> {
+impl<M> From<ReceiptError> for CallDynError<M> {
     fn from(_err: ReceiptError) -> Self {
         Self::NoResponse
     }
 }
 
-impl<M> From<NotAccepted<M>> for CallCheckedError<M> {
+impl<M> From<NotAccepted<M>> for CallDynError<M> {
     fn from(err: NotAccepted<M>) -> Self {
-        CallCheckedError::NotAccepted(err.0)
+        CallDynError::NotAccepted(err.0)
     }
 }
 
-impl<M> From<CallError<M>> for CallCheckedError<M> {
+impl<M> From<CallError<M>> for CallDynError<M> {
     fn from(err: CallError<M>) -> Self {
         match err {
-            CallError::Closed(m) => CallCheckedError::Closed(m),
-            CallError::NoResponse => CallCheckedError::NoResponse,
+            CallError::Closed(m) => CallDynError::Closed(m),
+            CallError::NoResponse => CallDynError::NoResponse,
         }
     }
 }
