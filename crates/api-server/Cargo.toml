@@ -1,7 +1,11 @@
 [package]
 name = "zestors-api-server"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+description = "HTTP introspection server for the zestors actor framework"
+repository = "https://github.com/Zestors/zestors"
 
 [dependencies]
 zestors-runtime.workspace = true

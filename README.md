@@ -1,183 +1,93 @@
-# PolyBox
-[![crates.io](https://img.shields.io/crates/v/polybox.svg)](https://crates.io/crates/polybox)
-[![Documentation](https://docs.rs/polybox/badge.svg)](https://docs.rs/polybox)
+# zestors
 
-`PolyBox` provides message-passing abstractions to make working with channels and actors a more seamless experience.
+[![crates.io](https://img.shields.io/crates/v/zestors.svg)](https://crates.io/crates/zestors)
+[![Documentation](https://docs.rs/zestors/badge.svg)](https://docs.rs/zestors)
 
-The fundamental idea is that a `Sender<T>` should not have to care about the actor it is sending to. The only thing that it should care about is the messages that can be sent over the channel. A sender should not care whether it is talking to `ProcessA` or `ProcessB`, only that they both accept the same `Message`. This is exactly what a `PolyBox` provides.
+`zestors` is an actor framework for Rust with Erlang/OTP-style supervision.
 
-In order for this to work, each `Message` must define if and what kind of reply an actor will send back. This guarantees that all actors handle messages uniformly. PolyBox provides `FireAndForget` and `Request<T>` messages. (Similar to cast and call from Erlang)
+An actor is a `tokio` task that owns an `Inbox` and processes messages —
+defined as plain structs deriving `Message`, grouped per-actor into an
+`Interface` — one at a time until it exits. Actors can be supervised: a
+`Supervisor` starts, watches, and restarts a set of children according to a
+restart strategy, and a `Node` runs a root supervisor as an entire program,
+shutting it down gracefully on Ctrl+C/SIGTERM.
 
-Every actor has an `Interface`-enum, that defines which messages can be sent to the actor. This is done through a definition of the `Set` of messages (`Set![Msg1, Msg2, ...]`), and the conversions between the messages and the interface. This allows for both static-dispatch (`TokioInbox<T>` / `FlumeInbox<T>`) and dynamic dispatch (`DynInbox<Set![..]>`), and seemless conversions between the two.
+This repository is a Cargo workspace; most consumers should depend on the
+[`zestors`](crates/zestors) facade crate, which re-exports the other crates
+as modules.
 
-Check out the example below and docs.rs for more details.
+## Example
 
-# Example
+A worker actor, written with `Handler`, supervised by a `Supervisor`, run as
+a program with `Node`:
 ```rust
-use polybox::{
-    DynInbox, Interface, Message, Envelope, PolyboxExt as _, Sends, SendsExt as _,
-    inboxes::{FlumeInbox, TokioInbox},
-    type_sets::Set,
-};
-
-// The following are messages defined for the NumberAdder and Printer actors.
-// Some messages have replies, while others are fire-and-forget.
-//
-// The Health and Exit messages are accepted by both actors, whilst the others
-// are specific to each actor.
+use zestors::interface::{Envelope, Interface, Message};
+use zestors::prelude::*;
+use zestors::supervisor::{Node, Supervisor};
 
 #[derive(Message, Debug)]
-#[msg(reply = Health)]
-pub struct GetHealth;
+struct Ping;
 
-#[derive(Debug)]
-pub enum Health {
-    Positive,
-    Negative,
+#[derive(Interface, HandlerInterface, Debug)]
+enum WorkerInterface {
+    Ping(Envelope<Ping>),
 }
 
-#[derive(Message, Debug)]
-pub struct Exit;
+#[derive(Debug, Clone)]
+struct Worker;
 
-#[derive(Message, Debug)]
-pub struct AddNumber(u32);
-
-#[derive(Message, Debug)]
-#[msg(reply = u32)]
-pub struct GetNumber;
-
-#[derive(Message, Debug)]
-pub struct Print(&'static str);
-
-/// A simple actor that adds numbers and can report its total.
-#[derive(Interface, Debug)]
-pub enum NumberAdder {
-    Health(Envelope<GetHealth>),
-    Exit(Envelope<Exit>),
-    Add(Envelope<AddNumber>),
-    Get(Envelope<GetNumber>),
+impl Handler for Worker {
+    type Interface = WorkerInterface;
 }
 
-impl NumberAdder {
-    fn spawn() -> (TokioInbox<NumberAdder>, tokio::task::JoinHandle<()>) {
-        let (inbox, mut receiver) = TokioInbox::<NumberAdder>::new(1000);
-
-        let handle = tokio::spawn(async move {
-            let mut total: u32 = 0;
-
-            while let Some(msg) = receiver.recv().await {
-                match msg {
-                    NumberAdder::Health((GetHealth, tx)) => {
-                        let _ = tx.send(Health::Positive);
-                    }
-                    NumberAdder::Exit(Exit) => {
-                        break;
-                    }
-                    NumberAdder::Add(envelope) => {
-                        total += envelope.0;
-                    }
-                    NumberAdder::Get((GetNumber, tx)) => {
-                        let _ = tx.send(total);
-                    }
-                }
-            }
-        });
-
-        (inbox, handle)
+impl Handle<Ping> for Worker {
+    async fn handle(
+        &mut self,
+        _ctx: HandlerContext<'_, Self>,
+        _msg: Ping,
+        _req: (),
+    ) -> Result<(), rootcause::Report> {
+        Ok(())
     }
 }
 
-/// A simple actor that prints messages.
-#[derive(Interface, Debug)]
-pub enum Printer {
-    Health(Envelope<GetHealth>),
-    Exit(Envelope<Exit>),
-    Print(Envelope<Print>),
-}
+#[tokio::main]
+async fn main() {
+    let node = Node::new(
+        Supervisor::blueprint()
+            .child(Worker.pid("worker").unwrap())
+            .rand_pid(),
+    );
 
-impl Printer {
-    fn spawn() -> (FlumeInbox<Printer>, tokio::task::JoinHandle<()>) {
-        let (inbox, receiver) = FlumeInbox::<Printer>::new(1000);
-
-        let handle = tokio::spawn(async move {
-            while let Ok(msg) = receiver.recv_async().await {
-                match msg {
-                    Printer::Health((GetHealth, tx)) => {
-                        let _ = tx.send(Health::Positive);
-                    }
-                    Printer::Exit(Exit) => {
-                        break;
-                    }
-                    Printer::Print(envelope) => {
-                        println!("Printer received: {}", envelope.0);
-                    }
-                }
-            }
-        });
-
-        (inbox, handle)
-    }
-}
-
-#[tokio::test]
-pub async fn main() {
-    let (adder, adder_handle) = NumberAdder::spawn();
-    let (printer, printer_handle) = Printer::spawn();
-
-    // Convert the individual inboxes into their common subset.
-    // This even converts a FlumeInbox and TokioInbox into a common type.
-    let all_inboxes: Vec<DynInbox<Set![Exit, GetHealth]>> = vec![
-        adder.clone().into_dyn_subset(),
-        printer.clone().into_dyn_subset(),
-    ];
-
-    // Start a background task to monitor the health of all inboxes.
-    tokio::task::spawn({
-        let all_inboxes = all_inboxes.clone();
-        async move {
-            monitor_inboxes_in_background(&all_inboxes).await;
-        }
-    });
-
-    // Send some messages to the actors and check their responses.
-    adder.send(AddNumber(10)).await.unwrap();
-    adder.send(AddNumber(20)).await.unwrap();
-    let number = adder.request(GetNumber).await.unwrap();
-    assert_eq!(number, 30);
-    printer.send(Print("Hello!")).await.unwrap();
-
-    // Wait for a moment to let the actors process the messages before exiting.
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    send_exit_to(&all_inboxes).await;
-
-    adder_handle.await.unwrap();
-    printer_handle.await.unwrap();
-}
-
-/// A helper function to monitor the health of multiple inboxes in the background.
-pub async fn monitor_inboxes_in_background(inboxes: &[impl Sends<GetHealth>]) {
-    loop {
-        for inbox in inboxes {
-            let health = inbox.request(GetHealth).await.unwrap();
-
-            match health {
-                Health::Positive => {
-                    println!("Inbox is healthy");
-                }
-                Health::Negative => {
-                    println!("Inbox is unhealthy");
-                }
-            }
-        }
-
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-    }
-}
-
-pub async fn send_exit_to(inboxes: &[impl Sends<Exit>]) {
-    for inbox in inboxes {
-        inbox.send(Exit).await.unwrap();
-    }
+    // Starts the supervisor, restarts it on error, and shuts it down
+    // gracefully on Ctrl+C/SIGTERM.
+    node.run().await.unwrap();
 }
 ```
-(If the example is not compiling, look [here](polybox/tests/example.rs))
+
+## Learn more
+
+The [`zestors` crate docs](https://docs.rs/zestors) are the main
+documentation: they walk through defining messages, spawning actors,
+sending and receiving, and building supervision trees, with runnable
+examples for each step. Each workspace crate also documents the layer it
+provides — see the crate list below.
+
+## Workspace crates
+
+| Crate                                       | What it provides                                                                                 |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| [`zestors`](crates/zestors)                 | Facade crate re-exporting the others; start here.                                                |
+| [`zestors-interface`](crates/interface)     | `Message`/`Interface`: the vocabulary for defining what an actor accepts.                        |
+| [`zestors-runtime`](crates/runtime)         | The actor runtime: `Inbox`, `Address`, `Pid`, `Registry`, signals.                               |
+| [`zestors-actor`](crates/actor)             | `Handler`/`Actor`: declarative and low-level ways to implement an actor.                         |
+| [`zestors-supervision`](crates/supervision) | `ChildSpec`/`ChildConfig`/`RestartIntensity`: the supervisor's vocabulary.                       |
+| [`zestors-supervisor`](crates/supervisor)   | The `Supervisor` and `Node` actors that use it.                                                  |
+| [`zestors-api-server`](crates/api-server)   | HTTP introspection for a running actor tree.                                                     |
+| [`zestors-codegen`](crates/codegen)         | The `#[derive(Message)]`/`#[derive(Interface)]` proc macros.                                     |
+| [`zestors-inspector`](crates/inspector)     | A GUI that visualizes the tree data `zestors-api-server` exposes (not re-exported by `zestors`). |
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option.

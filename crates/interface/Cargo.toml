@@ -1,7 +1,11 @@
 [package]
 name = "zestors-interface"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+description = "Message/Interface vocabulary for the zestors actor framework"
+repository = "https://github.com/Zestors/zestors"
 
 [dependencies]
 type-sets.workspace = true
@@ -12,5 +16,5 @@ zestors-codegen.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-zestors-codegen.workspace = true
+zestors-codegen = { path = "../codegen" }
 zestors = { path = "../zestors" }

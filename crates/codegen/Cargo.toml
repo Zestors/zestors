@@ -1,12 +1,12 @@
 [package]
 name = "zestors-codegen"
-version = "0.0.2"
+version.workspace = true
 edition = "2021"
-repository = "https://github.com/jvdwrf/polybox"
-homepage = "https://github.com/jvdwrf/polybox"
+repository = "https://github.com/Zestors/zestors"
+homepage = "https://github.com/Zestors/zestors"
 authors = ["Jasper van der Werf"]
 license = "MIT OR Apache-2.0"
-description = "Message-passing abstractions to make working with channels and actors a more seamless experience"
+description = "Derive macros for the zestors actor framework"
 keywords = ["actor", "actor-system", "tokio"]
 categories = ["concurrency"]
 readme = "README.md"
@@ -19,7 +19,7 @@ heck = "0.5"
 darling = { version = "0.24" }
 
 [dev-dependencies]
-zestors-interface.workspace = true
+zestors-interface = { path = "../interface" }
 
 [lib]
 proc-macro = true

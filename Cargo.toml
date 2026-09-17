@@ -12,16 +12,19 @@ members = [
   "crates/supervisor",
 ]
 
+[workspace.package]
+version = "0.2.0"
+
 [workspace.dependencies]
-zestors-codegen = { path = "crates/codegen" }
-zestors = { path = "crates/zestors" }
-zestors-runtime = { path = "crates/runtime" }
-zestors-inspector = { path = "crates/inspector" }
-zestors-api-server = { path = "crates/api-server" }
-zestors-supervision = { path = "crates/supervision" }
-zestors-actor = { path = "crates/actor" }
-zestors-interface = { path = "crates/interface" }
-zestors-supervisor = { path = "crates/supervisor" }
+zestors-codegen = { path = "crates/codegen", version = "0.2.0" }
+zestors = { path = "crates/zestors", version = "0.2.0" }
+zestors-runtime = { path = "crates/runtime", version = "0.2.0" }
+zestors-inspector = { path = "crates/inspector", version = "0.2.0" }
+zestors-api-server = { path = "crates/api-server", version = "0.2.0" }
+zestors-supervision = { path = "crates/supervision", version = "0.2.0" }
+zestors-actor = { path = "crates/actor", version = "0.2.0" }
+zestors-interface = { path = "crates/interface", version = "0.2.0" }
+zestors-supervisor = { path = "crates/supervisor", version = "0.2.0" }
 
 
 type-sets = { version = "0.2.2" }
