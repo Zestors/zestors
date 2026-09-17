@@ -1,6 +1,6 @@
 [package]
 name = "zestors-supervision"
-version.workspace = true
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 readme = "README.md"

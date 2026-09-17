@@ -1,6 +1,6 @@
 [package]
 name = "zestors-codegen"
-version.workspace = true
+version = "0.2.0"
 edition = "2021"
 repository = "https://github.com/Zestors/zestors"
 homepage = "https://github.com/Zestors/zestors"

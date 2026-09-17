@@ -12,14 +12,13 @@ members = [
   "crates/supervisor",
 ]
 
-[workspace.package]
-version = "0.2.0"
 
 [workspace.dependencies]
+zestors-inspector = { path = "crates/inspector", version = "0.2.0" }
+
 zestors-codegen = { path = "crates/codegen", version = "0.2.0" }
 zestors = { path = "crates/zestors", version = "0.2.0" }
 zestors-runtime = { path = "crates/runtime", version = "0.2.0" }
-zestors-inspector = { path = "crates/inspector", version = "0.2.0" }
 zestors-api-server = { path = "crates/api-server", version = "0.2.0" }
 zestors-supervision = { path = "crates/supervision", version = "0.2.0" }
 zestors-actor = { path = "crates/actor", version = "0.2.0" }
@@ -29,34 +28,22 @@ zestors-supervisor = { path = "crates/supervisor", version = "0.2.0" }
 
 type-sets = { version = "0.2.2" }
 tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
 futures = "0.3"
 thiserror = "2"
-derive_more = { version = "2", features = ["full"] }
-flume = "0.12"
 tracing = "0.1"
 rootcause = "0.13"
 indexmap = "2"
-async-channel = "2"
 smol_str = { version = "0.3", features = ["serde"] }
 serde = { version = "1", features = ["derive", "rc"] }
 papaya = { version = "0.2", features = ["serde"] }
-arc-swap = { version = "1", features = ["serde"] }
 rand = { version = "0.10" }
 bs58 = { version = "0.5" }
 axum = { version = "0.8", features = ["macros"]}
-serde_json = "1"
-axum-autoroute = { version = "0.2", features = [] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-vtable = "0.4"
 concurrent-queue = "2"
 eyeball = "0.8"
 jiff = { version = "0.2", features = ["serde"] }
-anyhow = "1.0"
-serde_with = "3"
 reqwest = { version = "0.13" }
 axum-typed-routing = { version = "0.4.6" }
 streamunordered = "0.5"
 
-iced = { version = "0.14" }
-iced_test = { version = "0.14", features = [] }

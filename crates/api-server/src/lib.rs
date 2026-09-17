@@ -29,10 +29,10 @@ mod router;
 #[derive(Clone, Debug)]
 pub struct ApiServerBlueprint {
     /// The socket address to bind the HTTP server to.
-    pub addr: SocketAddr,
+    addr: SocketAddr,
     /// The [`Pid`] of the root supervisor; `None` falls back to the actor's
     /// parent.
-    pub root_supervisor_pid: Option<Pid>,
+    root_supervisor_pid: Pid,
 }
 
 impl Blueprint for ApiServerBlueprint {
@@ -46,17 +46,11 @@ impl Blueprint for ApiServerBlueprint {
 impl ApiServerBlueprint {
     /// Creates a blueprint for an [`ApiServer`] bound to `addr`, with no
     /// explicit root supervisor (the actor's parent is used).
-    pub fn new(addr: SocketAddr) -> Self {
+    pub fn new(addr: SocketAddr, root_supervisor_pid: impl Into<Pid>) -> Self {
         Self {
             addr,
-            root_supervisor_pid: None,
+            root_supervisor_pid: root_supervisor_pid.into(),
         }
-    }
-
-    /// Sets the [`Pid`] of the root supervisor to introspect.
-    pub fn root_supervisor_pid(mut self, pid: impl Into<Pid>) -> Self {
-        self.root_supervisor_pid = Some(pid.into());
-        self
     }
 }
 
@@ -129,11 +123,7 @@ impl Actor for ApiServer {
 
 impl ApiServer {
     fn build(cfg: ApiServerBlueprint) -> Result<Self, Report> {
-        let root_supervisor = cfg
-            .root_supervisor_pid
-            .clone()
-            .or_else(|| Pid::parent())
-            .ok_or_else(|| rootcause::report!("No root supervisor PID found"))?;
+        let root_supervisor = cfg.root_supervisor_pid.clone();
 
         Registry::local()
             .get(&root_supervisor)
@@ -145,9 +135,10 @@ impl ApiServer {
         })
     }
 
-    /// Creates an [`ApiServerBlueprint`] bound to `addr`.
-    pub fn blueprint(addr: SocketAddr) -> ApiServerBlueprint {
-        ApiServerBlueprint::new(addr)
+    /// Creates an [`ApiServerBlueprint`] bound to `addr`, and will expose the supervision-tree starting
+    /// from the specified `root_supervisor_pid`.
+    pub fn blueprint(addr: SocketAddr, root_supervisor_pid: impl Into<Pid>) -> ApiServerBlueprint {
+        ApiServerBlueprint::new(addr, root_supervisor_pid)
     }
 
     async fn run(self) -> Result<(), Report> {

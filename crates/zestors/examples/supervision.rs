@@ -201,8 +201,7 @@ async fn main() -> Result<(), Report> {
         Supervisor::blueprint()
             .strategy(SupervisionStrategy::RestForOne)
             .child(
-                ApiServer::blueprint("127.0.0.1:8080".parse().unwrap())
-                    .root_supervisor_pid("root-supervisor")
+                ApiServer::blueprint("127.0.0.1:8080".parse().unwrap(), "root-supervisor")
                     .pid("ApiServer")?,
             )
             .child(app_supervisor)
