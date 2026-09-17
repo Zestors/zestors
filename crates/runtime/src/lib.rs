@@ -1,7 +1,7 @@
 //! The actor runtime underlying `zestors`.
 //!
-//! An actor is a [`tokio`] task, spawned via [`spawn`]/[`spawn_with`] (or, for a
-//! signal-only task, [`spawn_task`]/[`spawn_task_with`]), that owns an [`Inbox`]
+//! An actor is a [`tokio`] task, spawned via [`spawn`]/[`spawn_rand`] (or, for a
+//! signal-only task, [`spawn_task`]/[`spawn_task_rand`]), that owns an [`Inbox`]
 //! and receives messages and [`Signal`]s through it. Every actor is backed by a
 //! shared channel, reachable through a family of reference types with different
 //! ownership semantics:
