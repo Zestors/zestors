@@ -16,7 +16,7 @@ use zestors_runtime::errors::DuplicatePidError;
 /// allows you to manage child specs in-memory.
 ///
 /// A source can be passed to a [`SupervisorBlueprint`] using the
-/// [`with_source`](SupervisorBlueprint::with_source) method.
+/// [`source`](SupervisorBlueprint::source) method.
 pub trait SupervisorSource: Debug + Send + Sync + 'static {
     /// Returns the next event from the source, or `None` if the source is closed.
     fn next(&self) -> BoxFuture<'_, Option<SupervisorSourceEvent>>;
@@ -27,17 +27,26 @@ pub trait SupervisorSource: Debug + Send + Sync + 'static {
     /// Returns all child specs currently in the source, and clears the event queue.
     fn load_all(&self) -> BoxFuture<'_, Result<Vec<ChildSpec>, Report>>;
 
+    /// Removes and returns the child spec for `pid`, if the source has one.
     fn remove(&self, pid: Pid) -> BoxFuture<'_, Result<Option<ChildSpec>, Report>>;
 
+    /// Adds `spec` to the source.
     fn add(&self, spec: ChildSpec) -> BoxFuture<'_, Result<(), Report>>;
 }
 
+/// A change to a [`SupervisorSource`]'s set of child specs, as returned by
+/// [`SupervisorSource::next`].
 #[derive(Debug, Clone)]
 pub enum SupervisorSourceEvent {
+    /// A child spec was added.
     Added(ChildSpec),
+    /// The child spec for this [`Pid`] was removed.
     Removed(Pid),
 }
 
+/// An in-memory, thread-safe [`SupervisorSource`], for managing a
+/// [`Supervisor`]'s child specs at runtime without implementing a custom
+/// [`SupervisorSource`].
 #[derive(Debug)]
 pub struct InMemorySupervisorSource {
     inner: Mutex<LocalSupervisorChildren>,
@@ -51,6 +60,7 @@ struct LocalSupervisorChildren {
 }
 
 impl InMemorySupervisorSource {
+    /// Creates a new, empty source.
     pub fn new() -> Self {
         Self {
             inner: Default::default(),
@@ -58,10 +68,13 @@ impl InMemorySupervisorSource {
         }
     }
 
+    /// Same as [`InMemorySupervisorSource::new`], already wrapped in an
+    /// [`Arc`] for passing to [`SupervisorBlueprint::source`].
     pub fn new_arc() -> Arc<Self> {
         Arc::new(Self::new())
     }
 
+    /// Adds `spec`, failing if its [`Pid`] is already present.
     pub fn add<T: Start>(&self, spec: ChildSpec<T>) -> Result<(), DuplicatePidError> {
         let dyn_spec = spec.into_dyn();
         let pid = dyn_spec.pid().clone();
@@ -80,6 +93,7 @@ impl InMemorySupervisorSource {
         Ok(())
     }
 
+    /// Removes and returns the child spec for `pid`, if present.
     pub fn remove(&self, pid: Pid) -> Option<ChildSpec> {
         let mut inner = self.inner.lock().unwrap();
 
@@ -95,6 +109,7 @@ impl InMemorySupervisorSource {
         }
     }
 
+    /// Returns every child spec currently in the source.
     pub fn read_all(&self) -> Vec<ChildSpec> {
         self.inner
             .lock()
@@ -105,14 +120,17 @@ impl InMemorySupervisorSource {
             .collect::<Vec<_>>()
     }
 
+    /// Returns the child spec for `pid`, if present.
     pub fn get(&self, pid: &Pid) -> Option<ChildSpec> {
         self.inner.lock().unwrap().children.get(pid).cloned()
     }
 
+    /// The number of child specs currently in the source.
     pub fn len(&self) -> usize {
         self.inner.lock().unwrap().children.len()
     }
 
+    /// Returns `true` if the source has no child specs.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

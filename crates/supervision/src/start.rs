@@ -7,10 +7,21 @@ use zestors_runtime::{
     {AsDyn as _, Context, Dyn, IntoDyn, errors::StartOnError},
 };
 
+/// A blueprint-like type that can spawn a task on an already-registered
+/// [`StrongAddress`], rather than creating its own. Implemented
+/// automatically for every [`ActorBlueprint`], and also implemented by the
+/// type-erased [`DynStarter`].
+///
+/// This is what lets a [`ChildSpec`](crate::ChildSpec) hold on to its [`Pid`] and spawn (or
+/// respawn) the same actor under it repeatedly.
 pub trait Start: Into<DynStarter> {
+    /// The [`Context`] of the actor this spawns.
     type Ctx: Context;
+
+    /// The value produced once the spawned actor exits.
     type Exit: Send + 'static;
 
+    /// Instantiates the actor and spawns it onto `channel`.
     fn start_on(
         &self,
         channel: StrongAddress<Self::Ctx>,
@@ -34,6 +45,9 @@ impl<B: ActorBlueprint> Start for B {
     }
 }
 
+/// A type-erased [`ActorBlueprint`], used so a [`ChildSpec`](crate::ChildSpec) doesn't need to
+/// carry its blueprint's concrete type. Created via [`DynStarter::new`], or
+/// implicitly through [`Into<DynStarter>`] for any [`ActorBlueprint`].
 #[derive(Debug, Clone)]
 pub struct DynStarter(Arc<dyn Spawnable + Send + Sync + 'static>);
 
@@ -79,6 +93,7 @@ impl Start for DynStarter {
 }
 
 impl DynStarter {
+    /// Type-erases `blueprint` into a `DynStarter`.
     pub fn new<R>(blueprint: R) -> Self
     where
         R: ActorBlueprint + Send + Sync + 'static,

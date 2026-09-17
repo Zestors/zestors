@@ -39,11 +39,10 @@ enum Cascade {
     },
 
     /// The whole supervisor is shutting down: every remaining supervisee is
-    /// stopped one at a time, in reverse start order (see `Cascade::ShuttingDown`),
-    /// rather than all at once — later children may depend on earlier
-    /// ones, so they need to go first. Idempotent: a shutdown already in
-    /// progress is left alone. `current` is the one we're waiting to hear an
-    /// exit from; `pending` holds the rest, next up at the back.
+    /// stopped one at a time, in reverse start order, the same as a normal
+    /// cascade's stop phase — just covering everyone, and never followed by
+    /// a restart. `current` is the one we're waiting to hear an exit from;
+    /// `pending` holds the rest, next up at the back.
     ShuttingDown {
         current: Pid,
         pending: Vec<Pid>,
@@ -400,7 +399,10 @@ impl<'a> Strategy for RestForOneSupervisor<'a> {
     }
 
     /// Tears down the whole supervisor: every live supervisee is stopped
-    /// one at a time, in reverse start order (see `Cascade::ShuttingDown`).
+    /// one at a time, in reverse start order (see `Cascade::ShuttingDown`),
+    /// rather than all at once — later children may depend on earlier
+    /// ones, so they need to go first. Idempotent: a shutdown already in
+    /// progress is left alone.
     fn shutdown(&mut self) -> ControlFlow<()> {
         if matches!(self.cascade, Cascade::ShuttingDown { .. }) {
             return ControlFlow::Continue(());

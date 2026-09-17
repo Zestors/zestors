@@ -2,17 +2,25 @@ use crate::_prelude::*;
 use std::time::Duration;
 use zestors_runtime::errors::{JoinError, ShutdownAbortError, StartOnError};
 
+/// The reason a [`Node`] stopped running.
 #[derive(Debug, thiserror::Error)]
 pub enum NodeError {
+    /// The root supervisor failed to start in the first place.
     #[error("Failed to start root supervisor: {0}")]
     StartFailed(#[source] StartOnError),
 
+    /// The root supervisor exited with an error, and its restart budget
+    /// (see [`Node::with_restart_intensity`]) was exhausted.
     #[error("Root-Supervisor exited with error: {0}")]
     SupervisorExited(#[source] JoinError),
 
+    /// The root supervisor didn't exit within its abort timeout after a
+    /// shutdown signal was received.
     #[error("Root-Supervisor failed to exit gracefully within timeout: {0}")]
     ShutdownFailed(#[source] ShutdownAbortError),
 
+    /// A second shutdown signal was received while still waiting for the
+    /// root supervisor to exit gracefully from the first one.
     #[error("Forced shutdown: received a second shutdown signal while waiting for graceful exit")]
     ForcedShutdown,
 }
@@ -29,6 +37,10 @@ impl NodeError {
     }
 }
 
+/// Runs a single root [`Supervisor`] as an entire program: starts it,
+/// restarts it (up to a configurable limit) if it exits with an error, and
+/// shuts it down gracefully on a Ctrl+C/SIGTERM — forcing immediate
+/// termination if a second signal arrives before it finishes.
 pub struct Node {
     restart_intensity: RestartIntensity,
     supervisor_spec: ChildSpec<SupervisorBlueprint>,
@@ -41,6 +53,9 @@ struct NodeActor {
 }
 
 impl Node {
+    /// Creates a [`Node`] for the root supervisor described by `spec`. By
+    /// default the root supervisor is never restarted; see
+    /// [`Node::with_restart_intensity`].
     pub fn new(spec: ChildSpec<SupervisorBlueprint>) -> Self {
         Self {
             restart_intensity: RestartIntensity::restarts(0),
@@ -48,11 +63,17 @@ impl Node {
         }
     }
 
+    /// Sets how many times (and how often) the root supervisor may be
+    /// restarted if it exits with an error, before [`Node::run`] gives up
+    /// and returns [`NodeError::SupervisorExited`].
     pub fn with_restart_intensity(mut self, intensity: RestartIntensity) -> Self {
         self.restart_intensity = intensity;
         self
     }
 
+    /// Starts the root supervisor and runs until the node exits — either
+    /// because the supervisor exited normally, a shutdown signal was
+    /// handled, or an unrecoverable error occurred (see [`NodeError`]).
     pub async fn run(self) -> Result<(), NodeError> {
         let Self {
             restart_intensity,
@@ -73,6 +94,7 @@ impl Node {
         .await
     }
 
+    /// Returns the root supervisor's [`ChildSpec`].
     pub fn root_supervisor(&self) -> &ChildSpec<SupervisorBlueprint> {
         &self.supervisor_spec
     }

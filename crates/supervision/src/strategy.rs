@@ -2,10 +2,16 @@ use crate::_prelude::*;
 use std::collections::VecDeque;
 use tokio::time::Instant;
 
+/// Controls how a [`Supervisor`] reacts when one of its children exits and
+/// needs to be restarted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SupervisionStrategy {
+    /// Only the child that exited is restarted; its siblings are left alone.
     OneForOne,
+    /// Every child is stopped and restarted together, whichever one exited.
     OneForAll,
+    /// The child that exited, and every child started after it, are stopped
+    /// (in reverse start order) and restarted together (in start order).
     RestForOne,
 }
 

@@ -1,3 +1,23 @@
+//! Supervision trees for `zestors` actors, in the OTP sense: a
+//! [`Supervisor`] starts and watches a set of children — each described by a
+//! [`ChildSpec`] — and restarts them according to a [`SupervisionStrategy`]
+//! and a [`RestartMode`](zestors_actor::RestartMode)/[`RestartIntensity`]
+//! policy when they exit.
+//!
+//! - [`SupervisorBlueprint`] builds a [`Supervisor`]: its children, its
+//!   [`SupervisionStrategy`], its restart intensity, and an optional
+//!   [`SupervisorSource`] for a dynamically-managed child set.
+//! - [`ChildSpec`] pairs a child's blueprint with the [`ChildConfig`]
+//!   (restart mode/intensity, timeouts) a supervisor applies to it.
+//! - [`Node`] runs a single root [`Supervisor`] as an entire program: it
+//!   starts it, restarts it if it crashes, and shuts it down gracefully on a
+//!   Ctrl+C/SIGTERM.
+//! - [`messages`] holds the request/response types used to talk to a running
+//!   [`Supervisor`] (fetching its children, checking its health, registering
+//!   or deregistering a child at runtime), and [`SupervisionTree`]
+//!   recursively walks a supervisor and its descendants into a snapshot of
+//!   the whole tree.
+
 mod _prelude {
     pub use crate::*;
     pub use rootcause::Report;
