@@ -11,7 +11,7 @@ impl Theme {
     pub const PID_BLUE: Color32 = Color32::from_rgb(97, 175, 239);
     pub const LABEL_MUTED: Color32 = Color32::from_rgb(140, 148, 170);
     pub const VALUE_PURPLE: Color32 = Color32::from_rgb(198, 120, 221);
-    pub const ERROR_RED: Color32 = Color32::from_rgb(224, 108, 117);
+    // pub const ERROR_RED: Color32 = Color32::from_rgb(224, 108, 117);
 
     pub fn apply(ctx: &Context) {
         let mut visuals = Visuals::dark();

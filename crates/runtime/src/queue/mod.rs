@@ -6,5 +6,5 @@ use std::any::{Any, TypeId};
 mod backpressure;
 mod dynamic;
 
-pub use backpressure::*;
-pub use dynamic::*;
+pub(crate) use backpressure::*;
+pub(crate) use dynamic::*;

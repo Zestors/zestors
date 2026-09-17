@@ -2,7 +2,7 @@ use crate::{Actor, ActorExt as _, RestartIntensity, RestartMode};
 use std::{fmt::Debug, future::Future, time::Duration};
 use zestors_runtime::{errors::DuplicatePidError, prelude::*};
 
-pub trait Blueprint: Debug + Send + Sync + 'static {
+pub trait ActorBlueprint: Debug + Send + Sync + 'static {
     type Actor: Actor;
 
     fn instantiate(&self) -> impl Future<Output = rootcause::Result<Self::Actor>> + Send;
@@ -28,7 +28,7 @@ pub trait Blueprint: Debug + Send + Sync + 'static {
     }
 }
 
-impl<T: Actor + Clone + Debug + Send + Sync + 'static> Blueprint for T {
+impl<T: Actor + Clone + Debug + Send + Sync + 'static> ActorBlueprint for T {
     type Actor = T;
 
     async fn instantiate(&self) -> rootcause::Result<Self::Actor> {
@@ -36,7 +36,7 @@ impl<T: Actor + Clone + Debug + Send + Sync + 'static> Blueprint for T {
     }
 }
 
-pub trait BlueprintExt: Blueprint + Sized {
+pub trait BlueprintExt: ActorBlueprint + Sized {
     fn start_with(
         &self,
         pid: Pid,
@@ -58,7 +58,7 @@ pub trait BlueprintExt: Blueprint + Sized {
         }
     }
 }
-impl<T: Blueprint> BlueprintExt for T {}
+impl<T: ActorBlueprint> BlueprintExt for T {}
 
 pub struct FnBlueprint<F, A>
 where
@@ -87,7 +87,7 @@ where
     }
 }
 
-impl<F, A> Blueprint for FnBlueprint<F, A>
+impl<F, A> ActorBlueprint for FnBlueprint<F, A>
 where
     F: Fn() -> A + Send + Sync + 'static,
     A: Actor,

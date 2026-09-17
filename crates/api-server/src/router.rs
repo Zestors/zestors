@@ -1,16 +1,11 @@
-use axum::{
-    Json, Router,
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
+use axum::{Json, Router, extract::State};
+use axum_error_sets::{ApiResult, codes::Internal};
 use axum_typed_routing::{TypedRouter, route};
 use futures::{StreamExt, stream};
 use indexmap::IndexMap;
-use rootcause::report;
 use std::time::Duration;
 use zestors_runtime::{ActorStatus, CastOptions, ChannelSnapshot, Context, Registry, prelude::*};
-use zestors_supervision::{ChildConfig, ChildDescription, GetChildren, GetHealth, Health, Node};
+use zestors_supervision::{ChildConfig, ChildDescription, GetChildren, GetHealth, Health};
 
 impl ApiServer {
     pub(super) fn create_router(&self) -> Router {
@@ -24,7 +19,7 @@ impl ApiServer {
 }
 
 #[route(GET "/tree?pid&include_debug" with ApiServer)]
-async fn get_tree(pid: Option<Pid>, include_debug: Option<bool>) -> ApiResult {
+async fn get_tree(pid: Option<Pid>, include_debug: Option<bool>) -> ApiResult<(), ()> {
     tracing::debug!("Received request for supervision with {pid:?} and {include_debug:?}");
 
     // let include_debug = include_debug.unwrap_or(false);
@@ -60,7 +55,7 @@ async fn get_tree(pid: Option<Pid>, include_debug: Option<bool>) -> ApiResult {
 #[axum::debug_handler]
 async fn get_processes(
     State(state): State<ApiServer>,
-) -> ApiResult<Json<IndexMap<Pid, (ChildConfig, ActorStatus, Vec<Pid>)>>> {
+) -> ApiResult<Json<IndexMap<Pid, (ChildConfig, ActorStatus, Vec<Pid>)>>, (Internal<String>,)> {
     let root_pid = state.root_supervisor.clone();
     let root_desc = ChildDescription {
         pid: root_pid,
@@ -68,7 +63,7 @@ async fn get_processes(
     };
     let root_address = Registry::local()
         .get(&root_desc.pid)
-        .ok_or_else(|| report!("Root supervisor not found in registry"))?;
+        .ok_or_else(|| Internal("Root supervisor not found in registry".to_string()))?;
 
     let mut pending = Vec::from_iter([(root_address, root_desc)]);
     let mut results = IndexMap::new();
@@ -88,7 +83,7 @@ async fn get_processes(
             let existing = results.insert(desc.pid, (desc.cfg, address.status(), child_pids));
 
             if let Some(duplicate_process) = &existing {
-                return Err(report!("Supervision tree is circular or changed during traversal. Circle contains {duplicate_process:?}").into());
+                return Err(Internal(format!("Supervision tree is circular or changed during traversal. Circle contains {duplicate_process:?}")).into());
             }
 
             for child in children {
@@ -115,7 +110,7 @@ async fn get_children(address: &Address<impl Context>) -> rootcause::Result<Vec<
 #[route(GET "/snapshots" with ApiServer)]
 async fn get_channel_snapshots(
     Json(pids): Json<Vec<Pid>>,
-) -> ApiResult<Json<Vec<Option<ChannelSnapshot>>>> {
+) -> ApiResult<Json<Vec<Option<ChannelSnapshot>>>, ()> {
     let results = pids
         .into_iter()
         .map(|pid| {
@@ -129,7 +124,7 @@ async fn get_channel_snapshots(
 }
 
 #[route(GET "/health" with ApiServer)]
-async fn get_health(Json(pids): Json<Vec<Pid>>) -> ApiResult<Json<Vec<Option<Health>>>> {
+async fn get_health(Json(pids): Json<Vec<Pid>>) -> ApiResult<Json<Vec<Option<Health>>>, ()> {
     let results = stream::iter(pids.into_iter().map(|pid| async move {
         let Some(address) = Registry::local().get(&pid) else {
             return None;
@@ -152,8 +147,6 @@ async fn get_health(Json(pids): Json<Vec<Pid>>) -> ApiResult<Json<Vec<Option<Hea
     Ok(Json(results))
 }
 
-use error::*;
 use tokio::time::timeout;
 
 use crate::ApiServer;
-mod error;

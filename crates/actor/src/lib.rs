@@ -17,7 +17,7 @@ pub use scheduler::*;
 
 pub mod prelude {
     pub use crate::actor::Actor;
-    pub use crate::blueprint::Blueprint;
+    pub use crate::blueprint::ActorBlueprint;
     pub use crate::handler::Handler;
     pub use crate::scheduler::HandledBy;
     pub use crate::state::HandlerState;
@@ -57,8 +57,8 @@ impl RestartMode {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RestartIntensity {
-    max_restarts: u16,
-    within: Duration,
+    pub max_restarts: u16,
+    pub within: Duration,
 }
 
 impl Default for RestartIntensity {

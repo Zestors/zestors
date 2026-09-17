@@ -43,7 +43,7 @@ struct NodeActor {
 impl Node {
     pub fn new(spec: ChildSpec<SupervisorBlueprint>) -> Self {
         Self {
-            restart_intensity: RestartIntensity::new(3, Duration::from_secs(120)),
+            restart_intensity: RestartIntensity::restarts(0),
             supervisor_spec: spec,
         }
     }

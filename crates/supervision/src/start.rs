@@ -1,7 +1,7 @@
 use std::{fmt::Debug, sync::Arc};
 
 use futures::future::BoxFuture;
-use zestors_actor::{Actor, ActorExt as _, Blueprint};
+use zestors_actor::{Actor, ActorBlueprint, ActorExt as _};
 use zestors_runtime::{
     prelude::*,
     {AsDyn as _, Context, Dyn, IntoDyn, errors::StartOnError},
@@ -17,7 +17,7 @@ pub trait Start: Into<DynStarter> {
     ) -> impl Future<Output = Result<Child<Self::Exit, Self::Ctx>, StartOnError>> + Send;
 }
 
-impl<B: Blueprint> Start for B {
+impl<B: ActorBlueprint> Start for B {
     type Ctx = <B::Actor as Actor>::Interface;
     type Exit = <B::Actor as Actor>::Exit;
 
@@ -44,7 +44,7 @@ trait Spawnable: Debug {
     ) -> BoxFuture<'a, Result<Child, StartOnError>>;
 }
 
-impl<R: Blueprint> Spawnable for R {
+impl<R: ActorBlueprint> Spawnable for R {
     fn spawn_on_dyn<'a>(
         &'a self,
         data: &'a StrongAddress,
@@ -81,7 +81,7 @@ impl Start for DynStarter {
 impl DynStarter {
     pub fn new<R>(blueprint: R) -> Self
     where
-        R: Blueprint + Send + Sync + 'static,
+        R: ActorBlueprint + Send + Sync + 'static,
     {
         DynStarter(Arc::new(blueprint))
     }
@@ -89,7 +89,7 @@ impl DynStarter {
 
 impl<R> From<R> for DynStarter
 where
-    R: Blueprint + Send + Sync + 'static,
+    R: ActorBlueprint + Send + Sync + 'static,
 {
     fn from(value: R) -> Self {
         Self::new(value)

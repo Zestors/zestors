@@ -36,7 +36,7 @@ impl Supervisee {
         Self {
             restarter: spec.cfg().intensity.clone().map(RestartLimiter::new),
             spec,
-            state: SuperviseeState::idle(),
+            state: SuperviseeState::dead(),
             waker: None,
         }
     }
@@ -129,7 +129,7 @@ impl Supervisee {
             // dead. This resolves synchronously: no exit event will follow.
             SuperviseeState::Starting { fut } => {
                 drop(fut);
-                (SuperviseeState::start_cancelled(), StopOutcome::Cancelled)
+                (SuperviseeState::dead(), StopOutcome::Cancelled)
             }
 
             // If the supervisee is still initializing, the init-watch future
@@ -171,7 +171,7 @@ impl Supervisee {
                 }
 
                 Err(e) => {
-                    self.state = SuperviseeState::start_error();
+                    self.state = SuperviseeState::dead();
                     SuperviseeItem::Started(Err(e))
                 }
             },
@@ -179,7 +179,7 @@ impl Supervisee {
             SuperviseeState::Initializing { fut, .. } => match fut.await {
                 Ok(()) => {
                     let SuperviseeState::Initializing { child, .. } =
-                        std::mem::replace(&mut self.state, SuperviseeState::idle())
+                        std::mem::replace(&mut self.state, SuperviseeState::dead())
                     else {
                         unreachable!();
                     };
@@ -188,29 +188,29 @@ impl Supervisee {
                     SuperviseeItem::Initialized(Ok(()))
                 }
                 Err(e) => {
-                    self.state = SuperviseeState::start_error();
+                    self.state = SuperviseeState::dead();
                     SuperviseeItem::Initialized(Err(e))
                 }
             },
 
             SuperviseeState::Alive { child } => match child.await {
                 Ok(()) => {
-                    self.state = SuperviseeState::normal_exit();
+                    self.state = SuperviseeState::dead();
                     SuperviseeItem::Exit(SuperviseeExit::NormalExit)
                 }
                 Err(join_error) => {
-                    self.state = SuperviseeState::join_error();
+                    self.state = SuperviseeState::dead();
                     SuperviseeItem::Exit(SuperviseeExit::JoinError(join_error))
                 }
             },
 
             SuperviseeState::ShuttingDown { child } => match child.await {
                 Ok(()) => {
-                    self.state = SuperviseeState::normal_shutdown();
+                    self.state = SuperviseeState::dead();
                     SuperviseeItem::Exit(SuperviseeExit::NormalShutdown)
                 }
                 Err(join_error) => {
-                    self.state = SuperviseeState::join_error();
+                    self.state = SuperviseeState::dead();
                     SuperviseeItem::Exit(SuperviseeExit::JoinError(join_error))
                 }
             },
@@ -267,16 +267,6 @@ pub(crate) enum SuperviseeExit {
     NormalShutdown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DeadSuperviseeStatus {
-    JoinError,
-    StartError,
-    Idle,
-    StartCancelled,
-    NormalExit,
-    NormalShutdown,
-}
-
 #[derive(Debug)]
 enum SuperviseeState {
     /// The supervisee is starting, and has not yet been spawned.
@@ -300,50 +290,16 @@ enum SuperviseeState {
     },
 
     /// The supervisee has exited, and is no longer running.
-    Dead {
-        status: DeadSuperviseeStatus,
-    },
+    Dead,
 }
 
 impl SuperviseeState {
-    fn idle() -> Self {
-        SuperviseeState::Dead {
-            status: DeadSuperviseeStatus::Idle,
-        }
-    }
-
-    fn start_cancelled() -> Self {
-        SuperviseeState::Dead {
-            status: DeadSuperviseeStatus::StartCancelled,
-        }
-    }
-
-    fn start_error() -> Self {
-        SuperviseeState::Dead {
-            status: DeadSuperviseeStatus::StartError,
-        }
-    }
-
-    fn join_error() -> Self {
-        SuperviseeState::Dead {
-            status: DeadSuperviseeStatus::JoinError,
-        }
-    }
-
-    fn normal_exit() -> Self {
-        SuperviseeState::Dead {
-            status: DeadSuperviseeStatus::NormalExit,
-        }
-    }
-
-    fn normal_shutdown() -> Self {
-        SuperviseeState::Dead {
-            status: DeadSuperviseeStatus::NormalShutdown,
-        }
+    fn dead() -> Self {
+        SuperviseeState::Dead
     }
 
     fn map<T>(&mut self, f: impl FnOnce(Self) -> (Self, T)) -> T {
-        let old_state = std::mem::replace(self, SuperviseeState::idle());
+        let old_state = std::mem::replace(self, SuperviseeState::dead());
         let (new_state, result) = f(old_state);
         *self = new_state;
         result

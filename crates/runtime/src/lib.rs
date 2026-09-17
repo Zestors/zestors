@@ -24,7 +24,7 @@ mod references;
 pub use references::*;
 
 mod queue;
-pub use queue::*;
+pub(crate) use queue::*;
 
 mod spawn;
 pub use spawn::*;

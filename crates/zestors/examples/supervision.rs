@@ -8,7 +8,7 @@ use zestors::{
     api_server::ApiServer,
     prelude::*,
     runtime::errors::Cancelled,
-    supervision::{InMemorySupervisorSource, Supervisor, SupervisorBlueprint},
+    supervision::{InMemorySupervisorSource, Supervisor},
 };
 use zestors_actor::RestartMode;
 use zestors_supervision::{BlueprintSupervisionExt as _, Node};
@@ -142,7 +142,7 @@ async fn main() -> Result<(), Report> {
 
     let (super_spec_b, _addr) = Supervisor::blueprint()
         .children([spec_c, spec_d])
-        .with_source(source.clone())
+        .source(source.clone())
         .pid("SupervisorB")?
         .split();
 

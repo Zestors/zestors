@@ -2,7 +2,6 @@ use super::*;
 use crate::registry::Registry;
 use jiff::Zoned;
 use std::{fmt::Debug, hash::Hash};
-use type_sets::AsTypeSet;
 
 /// A strong version of [`Address`], which allows the [`Channel`] to spawn
 /// a new task after the previous one has exited. Once all strong references to a

@@ -5,7 +5,7 @@ use std::sync::Arc;
 pub struct SupervisorBlueprint {
     supervisees: IndexMap<Pid, ChildSpec>,
     strategy: SupervisionStrategy,
-    restart_intensity: RestartIntensity,
+    restart_intensity: Option<RestartIntensity>,
     source: Option<Arc<dyn SupervisorSource>>,
 }
 
@@ -14,7 +14,7 @@ impl SupervisorBlueprint {
         Self {
             supervisees: Default::default(),
             strategy: SupervisionStrategy::default(),
-            restart_intensity: RestartIntensity::default(),
+            restart_intensity: None,
             source: None,
         }
     }
@@ -36,18 +36,21 @@ impl SupervisorBlueprint {
         self
     }
 
-    pub fn with_intensity(mut self, restart_intensity: RestartIntensity) -> Self {
-        self.restart_intensity = restart_intensity;
+    pub fn set_strategy(&mut self, strategy: SupervisionStrategy) {
+        self.strategy = strategy;
+    }
+
+    pub fn intensity(mut self, restart_intensity: RestartIntensity) -> Self {
+        self.restart_intensity = Some(restart_intensity);
         self
+    }
+
+    pub fn set_intensity(&mut self, restart_intensity: Option<RestartIntensity>) {
+        self.restart_intensity = restart_intensity;
     }
 
     pub fn child<T: Start + Sync>(mut self, spec: ChildSpec<T>) -> Self {
         self.supervisees.insert(spec.pid().clone(), spec.into_dyn());
-        self
-    }
-
-    pub fn with_source<S: SupervisorSource>(mut self, source: Arc<S>) -> Self {
-        self.source = Some(source);
         self
     }
 
@@ -56,6 +59,22 @@ impl SupervisorBlueprint {
             let spec = spec.into_dyn();
             self.supervisees.insert(spec.pid().clone(), spec);
         }
+        self
+    }
+
+    pub fn add_child<T>(&mut self, spec: ChildSpec<T>) -> Address<<T::Actor as Actor>::Interface>
+    where
+        T: ActorBlueprint + Send + Sync + 'static,
+    {
+        let address = spec.address().clone();
+
+        self.add_dyn_child(spec.into_dyn());
+
+        address
+    }
+
+    pub fn source<S: SupervisorSource>(mut self, source: Arc<S>) -> Self {
+        self.source = Some(source);
         self
     }
 
@@ -69,39 +88,42 @@ impl SupervisorBlueprint {
         }
     }
 
-    pub fn add_child<T>(&mut self, spec: ChildSpec<T>) -> Address<<T::Actor as Actor>::Interface>
-    where
-        T: Blueprint + Send + Sync + 'static,
-    {
-        let address = spec.address().clone();
-
-        self.add_dyn_child(spec.into_dyn());
-
-        address
-    }
-
     pub fn add_children<T>(
         &mut self,
         specs: impl IntoIterator<Item = ChildSpec<T>>,
     ) -> Vec<Address<<T::Actor as Actor>::Interface>>
     where
-        T: Blueprint + Send + Sync + 'static,
+        T: ActorBlueprint + Send + Sync + 'static,
     {
         specs
             .into_iter()
             .map(|blueprint| self.add_child(blueprint))
             .collect()
     }
+
+    fn fallback_restart_intensity(&self) -> RestartIntensity {
+        match self.strategy {
+            SupervisionStrategy::OneForOne => RestartIntensity {
+                max_restarts: (self.supervisees.len() * 2).try_into().unwrap_or(u16::MAX),
+                within: Duration::from_mins(5),
+            },
+            SupervisionStrategy::OneForAll | SupervisionStrategy::RestForOne => {
+                RestartIntensity::default()
+            }
+        }
+    }
 }
 
-impl Blueprint for SupervisorBlueprint {
+impl ActorBlueprint for SupervisorBlueprint {
     type Actor = Supervisor;
 
     async fn instantiate(&self) -> rootcause::Result<Self::Actor> {
         Ok(Supervisor::new(
             SuperviseeMap::new(self.supervisees.values().cloned()),
             self.strategy,
-            self.restart_intensity.clone(),
+            self.restart_intensity
+                .clone()
+                .unwrap_or_else(|| self.fallback_restart_intensity()),
             self.source.clone(),
         ))
     }

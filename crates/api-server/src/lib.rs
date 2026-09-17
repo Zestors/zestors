@@ -1,11 +1,11 @@
 use rootcause::Report;
 use std::{net::SocketAddr, pin::pin, sync::Arc};
 use tokio::net::TcpListener;
-use zestors_actor::{Actor, Blueprint};
+use zestors_actor::{Actor, ActorBlueprint};
 use zestors_codegen::Interface;
 use zestors_interface::Envelope;
 use zestors_runtime::{Registry, prelude::*};
-use zestors_supervision::{ChildDescription, GetChildren, GetHealth, Health, SupervisorInterface};
+use zestors_supervision::{GetChildren, GetHealth, Health};
 
 mod router;
 
@@ -15,7 +15,7 @@ pub struct ApiServerBlueprint {
     pub root_supervisor_pid: Option<Pid>,
 }
 
-impl Blueprint for ApiServerBlueprint {
+impl ActorBlueprint for ApiServerBlueprint {
     type Actor = ApiServer;
 
     async fn instantiate(&self) -> rootcause::Result<Self::Actor> {

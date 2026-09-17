@@ -19,6 +19,7 @@ impl Client {
         })
     }
 
+    #[expect(dead_code)]
     pub async fn get_tree(&self) -> rootcause::Result<Option<SupervisionTree>> {
         let url = self.base_url.join("/tree")?;
         let response = self.client.get(url).send().await?;
@@ -61,6 +62,7 @@ impl Client {
         }
     }
 
+    #[expect(dead_code)]
     pub async fn get_health(&self, pids: Vec<Pid>) -> rootcause::Result<Vec<Option<Health>>> {
         let url = self.base_url.join("/debug_info")?;
         let response = self.client.get(url).json(&pids).send().await?;

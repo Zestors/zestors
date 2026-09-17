@@ -33,7 +33,7 @@ pub struct ChildDescription {
 }
 
 impl ChildConfig {
-    pub fn from_blueprint<T: Blueprint>(blueprint: &T) -> Self {
+    pub fn from_blueprint<T: ActorBlueprint>(blueprint: &T) -> Self {
         Self {
             restart_mode: blueprint.default_restart_mode(),
             abort_timeout: blueprint.default_abort_timeout(),
@@ -51,7 +51,7 @@ pub struct ChildSpec<T: Start = DynStarter> {
 }
 
 // Implementations just when T is statically known
-impl<T: Blueprint> ChildSpec<T> {
+impl<T: ActorBlueprint> ChildSpec<T> {
     pub fn create(id: impl Into<Pid>, blueprint: T) -> Result<Self, DuplicatePidError> {
         Ok(Self {
             channel: StrongAddress::<<T::Actor as Actor>::Interface>::create(id.into())?,
@@ -146,13 +146,13 @@ impl<T: Start + Debug> Debug for ChildSpec<T> {
     }
 }
 
-impl<T: Blueprint> From<ChildSpec<T>> for ChildSpec {
+impl<T: ActorBlueprint> From<ChildSpec<T>> for ChildSpec {
     fn from(spec: ChildSpec<T>) -> Self {
         spec.into_dyn()
     }
 }
 
-pub trait BlueprintSupervisionExt: Blueprint + Sized {
+pub trait BlueprintSupervisionExt: ActorBlueprint + Sized {
     fn into_spawn_fn(self) -> DynStarter
     where
         Self: Send + Sync + 'static,
@@ -168,4 +168,4 @@ pub trait BlueprintSupervisionExt: Blueprint + Sized {
         ChildSpec::create_rand_pid(self)
     }
 }
-impl<T: Blueprint> BlueprintSupervisionExt for T {}
+impl<T: ActorBlueprint> BlueprintSupervisionExt for T {}

@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use rootcause::Report;
 use std::time::Duration;
 use zestors::{

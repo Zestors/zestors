@@ -1,5 +1,4 @@
 use super::*;
-use std::fmt::Display;
 
 /// Represents the status of an actor in it's lifecycle.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Copy)]

@@ -6,7 +6,7 @@ mod common;
 use common::{slow_shutdown_child, spawn_supervisor, test_child, wait_for};
 use std::time::Duration;
 use zestors_actor::RestartMode;
-use zestors_runtime::prelude::*;
+use zestors_runtime::{CastOptions, prelude::*};
 use zestors_supervision::{GetChildren, SupervisorBlueprint};
 
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -44,7 +44,7 @@ async fn get_children_reports_supervisees_while_shutting_down() {
 
     let children = tokio::time::timeout(
         Duration::from_millis(200),
-        supervisor_addr.call_dyn(GetChildren),
+        supervisor_addr.call_dyn_with(GetChildren, CastOptions::default().ignore_exiting(true)),
     )
     .await
     .expect("GetChildren should not time out while the supervisor is stopping")
