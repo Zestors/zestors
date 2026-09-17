@@ -1,3 +1,5 @@
+use crate::messages::{DeregisterChild, RegisterChild};
+
 use super::*;
 
 /// The parts of a supervision strategy's event loop that don't vary by

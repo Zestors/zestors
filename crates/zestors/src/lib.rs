@@ -8,9 +8,11 @@ pub mod prelude {
     pub use zestors_interface::prelude::*;
     pub use zestors_runtime::prelude::*;
     pub use zestors_supervision::prelude::*;
+    pub use zestors_supervisor::prelude::*;
 }
 
 pub use zestors_actor as actor;
 pub use zestors_interface as interface;
 pub use zestors_runtime as runtime;
 pub use zestors_supervision as supervision;
+pub use zestors_supervisor as supervisor;

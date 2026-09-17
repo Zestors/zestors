@@ -7,7 +7,7 @@ use zestors::{
         BasicScheduler, Handle, HandledBy, Handler, HandlerCallback, HandlerContext, HandlerMessage,
     },
     prelude::*,
-    supervision::{GetChildren, GetHealth, Health},
+    supervision::messages::{GetChildren, GetHealth, Health},
 };
 use zestors_actor::ActorExt;
 use zestors_runtime::spawn;

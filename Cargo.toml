@@ -9,6 +9,7 @@ members = [
   "crates/supervision",
   "crates/actor",
   "crates/interface",
+  "crates/supervisor",
 ]
 
 [workspace.dependencies]
@@ -20,6 +21,7 @@ zestors-api-server = { path = "crates/api-server" }
 zestors-supervision = { path = "crates/supervision" }
 zestors-actor = { path = "crates/actor" }
 zestors-interface = { path = "crates/interface" }
+zestors-supervisor = { path = "crates/supervisor" }
 
 
 type-sets = { version = "0.2.1" }

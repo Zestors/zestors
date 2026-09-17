@@ -9,7 +9,8 @@ use common::{Crash, spawn_supervisor, test_child, wait_for, wait_for_generation}
 use std::{sync::atomic::Ordering, time::Duration};
 use zestors_actor::RestartMode;
 use zestors_runtime::prelude::*;
-use zestors_supervision::{GetChildren, SupervisorBlueprint};
+use zestors_supervision::messages::GetChildren;
+use zestors_supervisor::SupervisorBlueprint;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 

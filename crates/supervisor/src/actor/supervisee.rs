@@ -1,5 +1,4 @@
 use crate::_prelude::*;
-use crate::ChildSpec;
 use futures::{
     Stream,
     future::{self, BoxFuture},
@@ -15,6 +14,7 @@ use zestors_runtime::{
     ActorRef, Address, Child, Dyn, ExitStatus, Pid, ShutdownChild,
     errors::{JoinError, StartOnError},
 };
+use zestors_supervision::{ChildConfig, ChildDescription};
 
 #[derive(Debug)]
 pub(super) struct Supervisee {

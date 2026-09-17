@@ -1,6 +1,7 @@
 use crate::_prelude::*;
 use std::time::Duration;
 use zestors_runtime::errors::{JoinError, ShutdownAbortError, StartOnError};
+use zestors_supervision::RestartIntensity;
 
 /// The reason a [`Node`] stopped running.
 #[derive(Debug, thiserror::Error)]

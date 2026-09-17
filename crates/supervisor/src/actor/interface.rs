@@ -1,7 +1,7 @@
-use zestors_codegen::Interface;
-use zestors_interface::Envelope;
-
 use super::*;
+use crate::messages::{DeregisterChild, RegisterChild};
+use zestors_interface::Envelope;
+use zestors_supervision::messages::{GetChildren, GetHealth};
 
 #[derive(Interface, Debug)]
 #[interface(path = "zestors_interface")]

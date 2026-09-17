@@ -7,7 +7,8 @@ use common::{slow_shutdown_child, spawn_supervisor, test_child, wait_for};
 use std::time::Duration;
 use zestors_actor::RestartMode;
 use zestors_runtime::{CastOptions, prelude::*};
-use zestors_supervision::{GetChildren, SupervisorBlueprint};
+use zestors_supervision::messages::GetChildren;
+use zestors_supervisor::SupervisorBlueprint;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 

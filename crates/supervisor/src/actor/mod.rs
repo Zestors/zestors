@@ -1,6 +1,6 @@
 use crate::{
     _prelude::*,
-    supervisor::actor::{
+    actor::{
         one_for_all::OneForAllSupervisor, one_for_one::OneForOneSupervisor,
         rest_for_one::RestForOneSupervisor,
     },
@@ -15,6 +15,10 @@ use std::{
     task::{Context, Poll},
 };
 use zestors_runtime::{ActorStatus, ExitStatus, errors::DuplicatePidError};
+use zestors_supervision::{
+    RestartIntensity,
+    messages::{Health, HealthStatus},
+};
 
 pub struct Supervisor {
     supervisees: SuperviseeMap,

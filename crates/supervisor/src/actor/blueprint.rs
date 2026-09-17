@@ -1,6 +1,7 @@
-use crate::{_prelude::*, supervisor::actor::SuperviseeMap};
+use crate::{_prelude::*, actor::SuperviseeMap};
 use indexmap::IndexMap;
 use std::sync::Arc;
+use zestors_supervision::{RestartIntensity, Start};
 
 pub struct SupervisorBlueprint {
     supervisees: IndexMap<Pid, ChildSpec>,

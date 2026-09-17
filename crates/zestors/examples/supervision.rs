@@ -9,10 +9,11 @@ use zestors::{
     api_server::ApiServer,
     prelude::*,
     runtime::errors::Cancelled,
-    supervision::{InMemorySupervisorSource, Supervisor},
+    supervisor::{InMemorySupervisorSource, Supervisor},
 };
 use zestors_actor::RestartMode;
-use zestors_supervision::{BlueprintSupervisionExt as _, Node};
+use zestors_supervision::BlueprintSupervisionExt as _;
+use zestors_supervisor::Node;
 
 #[derive(Interface, HandlerInterface)]
 enum MyInterface {

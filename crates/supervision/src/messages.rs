@@ -7,7 +7,6 @@
 use crate::_prelude::*;
 use smol_str::{SmolStr, format_smolstr};
 use zestors_codegen::Message;
-use zestors_runtime::errors::DuplicatePidError;
 
 /// Requests the [`ChildDescription`] of every direct child of a supervisor.
 #[derive(Message, Debug)]
@@ -18,18 +17,6 @@ pub struct GetChildren;
 #[derive(Message, Debug)]
 #[msg(path = "zestors_interface", reply = Health)]
 pub struct GetHealth;
-
-/// Registers a new child under a running supervisor. Fails if the spec's
-/// [`Pid`] is already registered.
-#[derive(Message, Debug)]
-#[msg(path = "zestors_interface", reply = "Result<(), DuplicatePidError>")]
-pub struct RegisterChild(pub ChildSpec);
-
-/// Removes a child from a running supervisor (stopping it if it's alive),
-/// returning its [`ChildDescription`] if it was present.
-#[derive(Message, Debug)]
-#[msg(path = "zestors_interface", reply = "Option<ChildDescription>")]
-pub struct DeregisterChild(pub Pid);
 
 /// A point-in-time health report, as returned by [`GetHealth`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

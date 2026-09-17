@@ -2,25 +2,6 @@ use crate::_prelude::*;
 use std::collections::VecDeque;
 use tokio::time::Instant;
 
-/// Controls how a [`Supervisor`] reacts when one of its children exits and
-/// needs to be restarted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SupervisionStrategy {
-    /// Only the child that exited is restarted; its siblings are left alone.
-    OneForOne,
-    /// Every child is stopped and restarted together, whichever one exited.
-    OneForAll,
-    /// The child that exited, and every child started after it, are stopped
-    /// (in reverse start order) and restarted together (in start order).
-    RestForOne,
-}
-
-impl Default for SupervisionStrategy {
-    fn default() -> Self {
-        Self::OneForOne
-    }
-}
-
 /// Limits how many times an actor may be restarted within a sliding time
 /// window, to prevent an actor that keeps failing immediately from restarting
 /// in a tight, endless loop.
@@ -99,24 +80,5 @@ impl RestartIntensity {
             max_restarts: u16::MAX,
             within: Duration::ZERO,
         }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub(crate) struct RestartLimiter {
-    intensity: RestartIntensity,
-    restarts: VecDeque<Instant>,
-}
-
-impl RestartLimiter {
-    pub fn new(intensity: RestartIntensity) -> Self {
-        Self {
-            intensity,
-            restarts: VecDeque::new(),
-        }
-    }
-
-    pub fn acquire_permit(&mut self) -> bool {
-        self.intensity.allow_restart(&mut self.restarts)
     }
 }

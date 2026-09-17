@@ -2,6 +2,7 @@ use super::*;
 use std::{pin::Pin, task::ready};
 use streamunordered::{StreamUnordered, StreamYield};
 use zestors_runtime::errors::DuplicatePidError;
+use zestors_supervision::ChildDescription;
 
 #[derive(Debug, Default)]
 pub(super) struct SuperviseeMap {

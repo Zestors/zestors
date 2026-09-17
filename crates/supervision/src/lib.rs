@@ -32,9 +32,6 @@ mod _prelude {
 mod childspec;
 pub use childspec::*;
 
-mod supervisor;
-pub use supervisor::*;
-
 mod start;
 pub use start::*;
 
@@ -44,14 +41,9 @@ pub use strategy::*;
 pub mod messages;
 pub(crate) use messages::*;
 
-mod node;
-pub use node::*;
-
 mod tree;
 pub use tree::*;
 
 pub mod prelude {
     pub use crate::childspec::ChildSpec;
-    pub use crate::strategy::SupervisionStrategy;
-    pub use crate::supervisor::{SupervisorBlueprint, SupervisorInterface};
 }
