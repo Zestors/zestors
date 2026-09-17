@@ -8,13 +8,16 @@ use type_sets::{AsTypeSet, Members};
 pub trait Interface:
     Message<Receipt = ()> + TryInto<Envelope<Self>> + From<Envelope<Self>>
 {
-    /// The set of messages that this interface can handle. (a tuple)
+    /// A type-level set — implemented as a tuple — of the message types this
+    /// interface accepts.
     type Set: AsTypeSet + Members;
 
-    /// Attempt to convert a boxed envelope into this interface by downcasting.
+    /// Attempts to convert a type-erased [`AnyEnvelope`] into this interface
+    /// by downcasting, returning `Err` unchanged if the envelope holds a
+    /// message type not accepted by this interface.
     fn try_from_dyn_envelope(envelope: AnyEnvelope) -> Result<Self, AnyEnvelope>;
 
-    /// Convert the inner envelope of this interface into a boxed envelope.
+    /// Converts this interface's inner envelope into a type-erased [`AnyEnvelope`].
     fn into_dyn_envelope(self) -> AnyEnvelope;
 }
 
@@ -31,9 +34,7 @@ impl Interface for () {
 }
 
 impl From<Envelope<()>> for () {
-    fn from(_envelope: Envelope<()>) -> Self {
-        ()
-    }
+    fn from(_envelope: Envelope<()>) -> Self {}
 }
 
 impl TryInto<Envelope<()>> for () {

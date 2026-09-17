@@ -16,6 +16,10 @@
 //!   [`StrongAddress`], and aborts the task when dropped unless detached.
 //!
 //! Actors are looked up process-wide by [`Pid`] through the global [`Registry`].
+//!
+//! Once you have a reference, [`Cast`] and [`ActorOps`] (both re-exported
+//! through the [`prelude`]) provide the methods for interacting with the
+//! actor — sending and receiving messages, inspecting status, and more.
 
 use concurrent_queue::{ConcurrentQueue, PopError, PushError};
 pub(crate) use rootcause::Report;

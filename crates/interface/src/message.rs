@@ -5,14 +5,14 @@ use std::{convert::Infallible, fmt::Debug};
 /// Defines whether a message is a fire-and-forget or request-style message.
 ///
 /// When the message is sent, an [`Envelope`] is constructed that contains both the
-/// message itself, as well as the associated [`Resolver`]. The sender immeadeately
+/// message itself, as well as the associated [`Resolver`]. The sender immediately
 /// receives the [`Receipt`] of sending the message.
 ///
 /// Receipts and resolvers come in two types:
-/// - `fire-and-forget`: Both the resolver and the request are of type `()`. No reply
-/// is expected.
+/// - `fire-and-forget`: Both the resolver and the receipt are of type `()`.
+///   No reply is expected.
 /// - `request`: The resolver is a [`Request<T>`], and the receipt is a
-/// [`Response<T>`]. Once a reply is sent, the response resolves to `T`.
+///   [`Reply<T>`]. Once a reply is sent, the receipt resolves to `T`.
 ///
 /// This trait must be implemented for any message that is sent in zestors.
 /// It can easily be [derived](derive@Message) as well.
@@ -27,7 +27,8 @@ pub trait Message: Send + 'static + Sized {
     type Output: Send + 'static;
 }
 
-/// The the value returned after sending a [`Message`].
+/// The value returned to the sender after sending a [`Message`]; can be
+/// awaited (or, for [`Reply`], blocked on) to obtain the message's outcome.
 pub trait Receipt: Debug + Send + Sized + Sealed {
     /// The output of the receipt after being resolved.
     type Output: Send + 'static;
@@ -44,7 +45,7 @@ pub trait Receipt: Debug + Send + Sized + Sealed {
     }
 }
 
-/// The value passed along with a [`Message`], used to resolve a [`Receipt`]
+/// The value passed along with a [`Message`], used to resolve a [`Receipt`].
 pub trait Resolver: Debug + Send + Sized + Sealed {
     /// The receipt associated with this resolver.
     type Receipt: Receipt;
@@ -52,7 +53,7 @@ pub trait Resolver: Debug + Send + Sized + Sealed {
     /// The input type used to resolve this receipt.
     type Input;
 
-    /// Construct a new resolver-receipt pair
+    /// Constructs a new resolver/receipt pair.
     fn new() -> (Self, Self::Receipt);
 
     /// Resolves the receipt with the given input, returning an error if the resolution fails.
@@ -102,6 +103,12 @@ impl<T: Send + 'static> Receipt for Reply<T> {
 
     async fn wait(self) -> Result<Self::Output, ReceiptError> {
         self.await
+    }
+
+    // Overrides the default (`futures::executor::block_on(self.wait())`) to
+    // go through tokio's dedicated blocking-recv instead.
+    fn wait_blocking(self) -> Result<Self::Output, ReceiptError> {
+        Reply::wait_blocking(self)
     }
 }
 
