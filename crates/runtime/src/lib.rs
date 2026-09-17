@@ -16,6 +16,7 @@
 //!   not keep the actor alive.
 //!
 //! Actors are looked up process-wide by [`Pid`] through the global [`Registry`].
+
 use concurrent_queue::{ConcurrentQueue, PopError, PushError};
 pub(crate) use rootcause::Report;
 pub(crate) use serde::{Deserialize, Serialize};

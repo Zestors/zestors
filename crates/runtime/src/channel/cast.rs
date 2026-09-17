@@ -51,11 +51,7 @@ pub trait Cast<M: Message>: Sync {
     /// [`ActorStatus::Exiting`]).
     ///
     /// Returns [`TryCastError::Full`] if `options.ignore_backpressure` is
-    /// `false` and the channel is currently under backpressure. This check
-    /// only applies when sending through a dynamically-typed reference (a
-    /// [`Dyn`] [`Context`], e.g. [`Address<Dyn>`]): sending through a
-    /// statically-typed reference bypasses it entirely, and can only fail due
-    /// to the channel being closed.
+    /// `false` and the channel is currently under backpressure.
     fn try_cast_with(&self, msg: M, options: CastOptions) -> Result<M::Receipt, TryCastError<M>>;
 
     /// Sends a message via [`Cast::cast`] and waits for its reply.
@@ -148,12 +144,17 @@ where
     }
 
     fn _try_cast_with(&self, msg: M, options: CastOptions) -> Result<M::Receipt, TryCastError<M>> {
-        let status = self.status();
-        if !status.accepts_messages() && !(options.ignore_exiting && status.is_shutting_down()) {
-            return Err(TryCastError::Closed(msg));
-        }
-
         if let Some(queue) = self.raw_queue() {
+            if !options.ignore_backpressure && self.reached_backpressure() {
+                return Err(TryCastError::Full(msg));
+            }
+
+            let status = self.status();
+            if !status.accepts_messages() && !(options.ignore_exiting && status.is_shutting_down())
+            {
+                return Err(TryCastError::Closed(msg));
+            }
+
             let (envelope, receipt) = Envelope::new_pair(msg);
             let interface = I::from(envelope);
 

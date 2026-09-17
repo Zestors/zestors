@@ -54,10 +54,8 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     }
 
     /// Same as [`Cast::try_cast_with`], but checks at runtime whether `M` is
-    /// accepted by the channel (returning [`TryCastDynError::NotAccepted`]
-    /// rather than failing to compile), and always checks backpressure
-    /// (unless `options.ignore_backpressure` is `true`) regardless of whether
-    /// the actor reference is statically or dynamically typed.
+    /// accepted by the channel, returning [`TryCastDynError::NotAccepted`]
+    /// rather than failing to compile.
     fn try_cast_dyn_with<M: Message>(
         &self,
         msg: M,
