@@ -39,7 +39,7 @@ impl<T: Context> StrongAddress<T> {
         if handle.is_permanently_dead() {
             return None;
         }
-        handle.incr_strong_count();
+        handle._channel().incr_strong_count();
         Some(Self {
             address: handle._clone(),
         })
@@ -48,13 +48,29 @@ impl<T: Context> StrongAddress<T> {
 
 impl<C: Context> Drop for StrongAddress<C> {
     fn drop(&mut self) {
-        self.address.decr_strong_count();
+        if self.channel().decr_strong_count() {
+            let removed_address = Registry::local().remove(self.pid());
+
+            if removed_address.is_none() {
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "Address {} was not found in the registry when dropping the last strong reference",
+                        self.pid()
+                    );
+                } else {
+                    tracing::error!(
+                        "Address {} was not found in the registry when dropping the last strong reference",
+                        self.pid()
+                    );
+                }
+            }
+        }
     }
 }
 
 impl<T: Context> Clone for StrongAddress<T> {
     fn clone(&self) -> Self {
-        self.address.incr_strong_count();
+        self.channel().incr_strong_count();
 
         StrongAddress {
             address: self.address._clone(),

@@ -17,7 +17,7 @@
 //!
 //! Actors are looked up process-wide by [`Pid`] through the global [`Registry`].
 //!
-//! Once you have a reference, [`Cast`] and [`ActorOps`] (both re-exported
+//! Once you have a reference, [`Accepts`] and [`ActorOps`] (both re-exported
 //! through the [`prelude`]) provide the methods for interacting with the
 //! actor — sending and receiving messages, inspecting status, and more.
 
@@ -32,7 +32,7 @@ pub(crate) use zestors_interface::*;
 
 pub mod prelude {
     pub use crate::{
-        ActorOps as _, Address, Cast as _, Child, Inbox, InboxEvent, IntoDyn as _, Pid, Signal,
+        Accepts as _, ActorOps as _, Address, Child, Inbox, InboxEvent, IntoDyn as _, Pid, Signal,
         StrongAddress, spawn,
     };
 }
@@ -53,13 +53,16 @@ mod spawn;
 pub use spawn::*;
 
 mod channel;
-pub use channel::*;
+pub(crate) use channel::*;
 
 pub mod errors;
 pub(crate) use errors::*;
 
+mod accepts;
 mod context;
+mod ops;
 mod registry;
 mod signals;
+mod status;
 
-pub use {context::*, registry::*, signals::*};
+pub use {accepts::*, context::*, ops::*, registry::*, signals::*, status::*};

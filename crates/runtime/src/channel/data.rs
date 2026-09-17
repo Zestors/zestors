@@ -345,7 +345,7 @@ impl Channel<dyn DynamicQueue> {
         let len = self.msg_queue.len();
         let limit = self.msg_backpressure_limit;
 
-        if let Some(delay) = BackPressure::global().delay(len, limit) {
+        if let Some(delay) = BackpressureConfig::global().delay(len, limit) {
             tracing::warn!(
                 "Backpressure applied: queue occupancy = {:.2}%, delay = {:?}",
                 len as f32 / limit as f32 * 100.0,
@@ -444,6 +444,168 @@ impl Channel<dyn DynamicQueue> {
                 None
             }
         }
+    }
+
+    pub(crate) fn backpressure_cfg(&self) -> &BackpressureConfig {
+        BackpressureConfig::global()
+    }
+
+    pub(crate) fn reached_backpressure(&self) -> bool {
+        self.backpressure_cfg()
+            .delay(self.msg_len(), self.backpressure_limit())
+            .is_some()
+    }
+
+    pub(crate) fn try_cast_dyn_with<M: Message>(
+        &self,
+        msg: M,
+        options: CallOptions,
+    ) -> Result<M::Receipt, TryCastDynError<M>> {
+        if !options.ignore_backpressure && self.reached_backpressure() {
+            return Err(TryCastDynError::Full(msg));
+        }
+
+        let status = self.status();
+        if !status.accepts_messages() && !(options.ignore_exiting && status.is_exiting()) {
+            return Err(TryCastDynError::Closed(msg));
+        }
+
+        let output = self.try_push_msg(msg)?;
+        self.msg_notify_one();
+        Ok(output)
+    }
+
+    pub(crate) fn cast_dyn_with<M: Message>(
+        &self,
+        msg: M,
+        mut options: CallOptions,
+    ) -> impl Future<Output = Result<M::Receipt, CastDynError<M>>> + Send {
+        async move {
+            if !options.ignore_backpressure {
+                self.delay_for_backpressure().await;
+                options.ignore_backpressure = true;
+            }
+
+            self.try_cast_dyn_with(msg, options)
+                .map_err(|e| e.into_cast_error_dbg_assert())
+        }
+    }
+
+    pub(crate) fn try_cast_with<M, I>(
+        &self,
+        msg: M,
+        options: CallOptions,
+    ) -> Result<M::Receipt, TryCastError<M>>
+    where
+        M: Message,
+        I: Interface + TryInto<Envelope<M>> + From<Envelope<M>> + Send + 'static,
+    {
+        // Fallback to dynamic implementation
+        let Some(queue) = self.raw_queue::<I>() else {
+            return match self.try_cast_dyn_with(msg, options) {
+                Ok(output) => Ok(output),
+                Err(TryCastDynError::Closed(msg)) => Err(TryCastError::Closed(msg)),
+                Err(TryCastDynError::Full(msg)) => Err(TryCastError::Full(msg)),
+                Err(TryCastDynError::NotAccepted(_)) => {
+                    panic!(
+                        "Message type {} not accepted by channel {}",
+                        std::any::type_name::<M>(),
+                        std::any::type_name::<Self>(),
+                    );
+                }
+            };
+        };
+
+        if !options.ignore_backpressure && self.reached_backpressure() {
+            return Err(TryCastError::Full(msg));
+        }
+
+        let status = self.status();
+        if !status.accepts_messages() && !(options.ignore_exiting && status.is_exiting()) {
+            return Err(TryCastError::Closed(msg));
+        }
+
+        let (envelope, receipt) = Envelope::new_pair(msg);
+        let interface = I::from(envelope);
+
+        if let Err(_e) = queue.push(interface) {
+            panic!("Queue was full or empty {}", std::any::type_name::<Self>());
+        }
+
+        Ok(receipt)
+    }
+
+    pub(crate) async fn cast_with<M, I>(
+        &self,
+        msg: M,
+        mut options: CallOptions,
+    ) -> Result<M::Receipt, CastError<M>>
+    where
+        M: Message,
+        I: Interface + TryInto<Envelope<M>> + From<Envelope<M>> + Send + 'static,
+    {
+        if !options.ignore_backpressure {
+            self.delay_for_backpressure().await;
+            options.ignore_backpressure = true;
+        }
+
+        self.try_cast_with::<M, I>(msg, options)
+            .map_err(|e| e.into_cast_error_dbg_assert())
+    }
+
+    pub(crate) fn drain_messages_and_signals<I: Interface>(&self) {
+        while let Some(msg) = self.pop_msg::<I>() {
+            drop(msg);
+        }
+
+        while let Some(signal) = self.pop_signal() {
+            let _ = signal;
+        }
+    }
+
+    pub(crate) async fn next_event<I: Interface>(
+        &self,
+        while_exiting: bool,
+    ) -> Option<InboxEvent<I>> {
+        match self.status() {
+            ActorStatus::Suspended => self.next_signal().await.map(InboxEvent::Signal),
+
+            ActorStatus::Exited(_) if self.msg_is_empty() => None,
+
+            ActorStatus::Exiting if self.msg_is_empty() && !while_exiting => None,
+
+            _ => {
+                tokio::select! {
+                    biased;
+
+                    Some(signal) = self.next_signal() => Some(InboxEvent::Signal(signal)),
+                    Some(msg) = self.next_msg() => Some(InboxEvent::Message(msg)),
+                    else => None,
+                }
+            }
+        }
+    }
+
+    pub(crate) fn try_next_event<I: Interface>(&self) -> Option<InboxEvent<I>> {
+        match self.status() {
+            ActorStatus::Suspended => self.pop_signal().map(InboxEvent::Signal),
+            ActorStatus::Exited(_) if self.msg_is_empty() => None,
+            ActorStatus::Exiting if self.msg_is_empty() => None,
+            _ => {
+                if let Some(signal) = self.pop_signal() {
+                    Some(InboxEvent::Signal(signal))
+                } else if let Some(msg) = self.pop_msg() {
+                    Some(InboxEvent::Message(msg))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    /// Returns `true` if there are no messages currently queued.
+    pub(crate) fn msg_is_empty(&self) -> bool {
+        self.msg_len() == 0
     }
 }
 

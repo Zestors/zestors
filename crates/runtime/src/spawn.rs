@@ -95,6 +95,7 @@ impl<T: Context> StrongAddress<T> {
             let address = inbox.address().clone();
             let mut bomb = AbortBomb::new(address);
             bomb.address
+                ._channel()
                 .register_spawned()
                 .expect("Transition must succeed, because inbox was just created");
             let spawn_future = AssertUnwindSafe(spawn_fn(inbox)).catch_unwind();
@@ -111,17 +112,20 @@ impl<T: Context> StrongAddress<T> {
                         let mapped_result = match spawn_result {
                             Ok(result) => {
                                 match &result {
-                                    Ok(_) => bomb.address.register_exited(Ok(())),
-                                    Err(_) => {
-                                        bomb.address.register_exited(Err(ExitError::UnhandledError))
-                                    }
+                                    Ok(_) => bomb.address._channel().register_exited(Ok(())),
+                                    Err(_) => bomb
+                                        .address
+                                        ._channel()
+                                        .register_exited(Err(ExitError::UnhandledError)),
                                 };
 
                                 result
                             }
 
                             Err(boxed) => {
-                                bomb.address.register_exited(Err(ExitError::Panicked));
+                                bomb.address
+                                    ._channel()
+                                    .register_exited(Err(ExitError::Panicked));
                                 std::panic::resume_unwind(boxed);
                             }
                         };
@@ -162,7 +166,9 @@ impl<T: Context> Drop for AbortBomb<T> {
             tracing::debug!("AbortBomb triggered");
 
             if !self.address.status().is_dead() {
-                self.address.register_exited(Err(ExitError::Aborted));
+                self.address
+                    ._channel()
+                    .register_exited(Err(ExitError::Aborted));
             }
         }
     }

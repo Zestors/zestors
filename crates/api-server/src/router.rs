@@ -4,7 +4,7 @@ use axum_typed_routing::{TypedRouter, route};
 use futures::{StreamExt, stream};
 use indexmap::IndexMap;
 use std::time::Duration;
-use zestors_runtime::{ActorStatus, CastOptions, ChannelSnapshot, Context, Registry, prelude::*};
+use zestors_runtime::{ActorStatus, CallOptions, ChannelSnapshot, Context, Registry, prelude::*};
 use zestors_supervision::{
     ChildConfig, ChildDescription,
     messages::{GetChildren, GetHealth, Health},
@@ -14,46 +14,11 @@ impl ApiServer {
     /// Builds the `axum` [`Router`] with this server's endpoints.
     pub(super) fn create_router(&self) -> Router {
         Router::new()
-            .typed_route(get_tree)
             .typed_route(get_processes)
             .typed_route(get_channel_snapshots)
             .typed_route(get_health)
             .with_state(self.clone())
     }
-}
-
-/// Returns the supervision tree rooted at `pid` (or the root supervisor if no
-/// pid is given). Currently not implemented.
-#[route(GET "/tree?pid&include_debug" with ApiServer)]
-async fn get_tree(pid: Option<Pid>, include_debug: Option<bool>) -> ApiResult<(), ()> {
-    tracing::debug!("Received request for supervision with {pid:?} and {include_debug:?}");
-
-    // let include_debug = include_debug.unwrap_or(false);
-
-    // let pid = pid
-    //     .or_else(|| Node::root_supervisor().map(|desc| desc.pid.clone()))
-    //     .ok_or_else(|| report!("No PID provided and no root supervisor PID found"))?;
-
-    // let tree = SupervisionTree::new(ChildDescription {
-    //     pid,
-    //     cfg: ChildConfig {
-    //         restart_mode: RestartMode::Always,
-    //         abort_timeout: Duration::from_secs(10),
-    //         init_timeout: Duration::from_secs(10),
-    //     },
-    // })
-    // .populated(Duration::from_millis(50))
-    // .await
-    // .populated_channel_snapshots();
-
-    // let tree = if include_debug {
-    //     tree.populated_debug_state(Duration::from_millis(50)).await
-    // } else {
-    //     tree
-    // };
-
-    // Ok((StatusCode::OK, Json(tree)).into_response())
-    unimplemented!()
 }
 
 /// Returns all processes in the tree, with their actor-status and child-configuration
@@ -62,6 +27,10 @@ async fn get_tree(pid: Option<Pid>, include_debug: Option<bool>) -> ApiResult<()
 async fn get_processes(
     State(state): State<ApiServer>,
 ) -> ApiResult<Json<IndexMap<Pid, (ChildConfig, ActorStatus, Vec<Pid>)>>, (Internal<String>,)> {
+    // let mut addresses = Registry::local().fetch_addresses().await;
+
+    // stream::iter(addresses.drain(..)).buffered(10);
+
     let root_pid = state.root_supervisor.clone();
     let root_desc = ChildDescription {
         pid: root_pid,
@@ -108,7 +77,7 @@ async fn get_processes(
 async fn get_children(address: &Address<impl Context>) -> rootcause::Result<Vec<ChildDescription>> {
     Ok(timeout(
         Duration::from_millis(50),
-        address.call_dyn_with(GetChildren, CastOptions::new().ignore_exiting(true)),
+        address.call_dyn_with(GetChildren, CallOptions::new().ignore_exiting(true)),
     )
     .await??)
 }
@@ -142,7 +111,7 @@ async fn get_health(Json(pids): Json<Vec<Pid>>) -> ApiResult<Json<Vec<Option<Hea
 
         match timeout(
             Duration::from_millis(50),
-            address.call_dyn_with(GetHealth, CastOptions::new().ignore_exiting(true)),
+            address.call_dyn_with(GetHealth, CallOptions::new().ignore_exiting(true)),
         )
         .await
         {

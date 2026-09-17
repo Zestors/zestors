@@ -23,7 +23,7 @@ pub trait ActorRef {
 /// This trait is sealed, and is implemented automatically for any type that
 /// implements [`ActorRef`].
 pub trait ActorOps: ActorRef + sealed::Sealed {
-    /// Same as [`Cast::cast`], but works for any actor reference regardless of
+    /// Same as [`Accepts::cast`], but works for any actor reference regardless of
     /// whether its [`Context`] statically guarantees that `M` is accepted:
     /// the check is performed at runtime instead, returning
     /// [`CastDynError::NotAccepted`] rather than failing to compile.
@@ -34,57 +34,35 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.cast_dyn_with(msg, Default::default())
     }
 
-    /// Same as [`Cast::cast_with`], but see [`ActorOps::cast_dyn`] for how it
-    /// differs from [`Cast::cast_with`].
+    /// Same as [`Accepts::cast_with`], but see [`ActorOps::cast_dyn`] for how it
+    /// differs from [`Accepts::cast_with`].
     fn cast_dyn_with<M: Message>(
         &self,
         msg: M,
-        mut options: CastOptions,
+        options: CallOptions,
     ) -> impl Future<Output = Result<M::Receipt, CastDynError<M>>> + Send {
-        let handle = self.actor_ref();
-
-        async move {
-            if !options.ignore_backpressure {
-                handle.delay_for_backpressure().await;
-                options.ignore_backpressure = true;
-            }
-
-            handle
-                .try_cast_dyn_with(msg, options)
-                .map_err(|e| e.into_cast_error_dbg_assert())
-        }
+        self.channel().cast_dyn_with(msg, options)
     }
 
-    /// Same as [`Cast::try_cast`], but see [`ActorOps::cast_dyn`] for how it
-    /// differs from [`Cast::cast`].
+    /// Same as [`Accepts::try_cast`], but see [`ActorOps::cast_dyn`] for how it
+    /// differs from [`Accepts::cast`].
     fn try_cast_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, TryCastDynError<M>> {
         self.try_cast_dyn_with(msg, Default::default())
     }
 
-    /// Same as [`Cast::try_cast_with`], but checks at runtime whether `M` is
+    /// Same as [`Accepts::try_cast_with`], but checks at runtime whether `M` is
     /// accepted by the channel, returning [`TryCastDynError::NotAccepted`]
     /// rather than failing to compile.
     fn try_cast_dyn_with<M: Message>(
         &self,
         msg: M,
-        options: CastOptions,
+        options: CallOptions,
     ) -> Result<M::Receipt, TryCastDynError<M>> {
-        if !options.ignore_backpressure && self.reached_backpressure() {
-            return Err(TryCastDynError::Full(msg));
-        }
-
-        let status = self.status();
-        if !status.accepts_messages() && !(options.ignore_exiting && status.is_exiting()) {
-            return Err(TryCastDynError::Closed(msg));
-        }
-
-        let output = self.actor_ref().try_push_msg(msg)?;
-        self.actor_ref().msg_notify_one();
-        Ok(output)
+        self.channel().try_cast_dyn_with(msg, options)
     }
 
-    /// Same as [`Cast::call`], but see [`ActorOps::cast_dyn`] for how it
-    /// differs from [`Cast::cast`].
+    /// Same as [`Accepts::call`], but see [`ActorOps::cast_dyn`] for how it
+    /// differs from [`Accepts::cast`].
     fn call_dyn<M: Message>(
         &self,
         msg: M,
@@ -92,12 +70,12 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.call_dyn_with(msg, Default::default())
     }
 
-    /// Same as [`Cast::call_with`], but see [`ActorOps::cast_dyn`] for how it
-    /// differs from [`Cast::cast_with`].
+    /// Same as [`Accepts::call_with`], but see [`ActorOps::cast_dyn`] for how it
+    /// differs from [`Accepts::cast_with`].
     fn call_dyn_with<M: Message>(
         &self,
         msg: M,
-        options: CastOptions,
+        options: CallOptions,
     ) -> impl Future<Output = Result<M::Output, CallDynError<M>>> + Send {
         let handle = self.actor_ref();
         async move { Ok(handle.cast_dyn_with(msg, options).await?.wait().await?) }
@@ -105,12 +83,12 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
 
     /// Returns the actor's [`Pid`].
     fn pid(&self) -> &Pid {
-        self.data().pid()
+        self.channel().pid()
     }
 
     /// Returns the actor's current [`ActorStatus`].
     fn status(&self) -> ActorStatus {
-        self.data().status()
+        self.channel().status()
     }
 
     /// Returns `true` if the actor's status is [`ActorStatus::Exiting`].
@@ -122,7 +100,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// lengths, and spawn/exit history.
     fn snapshot(&self) -> ChannelSnapshot {
         let clock = Clock::now();
-        let data = &self.data();
+        let data = &self.channel();
 
         ChannelSnapshot {
             pid: data.pid().clone(),
@@ -150,7 +128,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         &self,
         check_for: impl FnMut(ActorStatus) -> Option<T> + Send + 'static,
     ) -> impl Future<Output = T> + Send {
-        self.data().watch(check_for)
+        self.channel().watch(check_for)
     }
 
     /// Waits until the actor reaches [`ActorStatus::Running`] for the first
@@ -177,12 +155,12 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
 
     /// Returns the [`TypeId`]s of every message type the channel accepts.
     fn members(&self) -> &'static [TypeId] {
-        self.data().members()
+        self.channel().members()
     }
 
     /// Returns the number of messages currently queued.
     fn msg_len(&self) -> usize {
-        self.data().msg_len()
+        self.channel().msg_len()
     }
 
     /// Returns `true` if there are no messages currently queued.
@@ -192,7 +170,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
 
     /// Returns the number of signals currently queued.
     fn signal_len(&self) -> usize {
-        self.data().signal_len()
+        self.channel().signal_len()
     }
 
     /// Returns `true` if there are no signals currently queued.
@@ -221,19 +199,14 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
 
     /// Returns `true` if the channel's concrete message type is exactly `I`.
     fn is_interface<I: Interface>(&self) -> bool {
-        self.data().is_interface::<I>()
+        self.channel().is_interface::<I>()
     }
 
     /// Returns `true` if the channel is currently under backpressure, i.e.
-    /// sending would incur a delay (via [`Cast::cast`]) or fail with
-    /// [`TryCastError::Full`] (via [`Cast::try_cast`]).
+    /// sending would incur a delay (via [`Accepts::cast`]) or fail with
+    /// [`TryCastError::Full`] (via [`Accepts::try_cast`]).
     fn reached_backpressure(&self) -> bool {
-        let handle = self.actor_ref();
-
-        handle
-            .backpressure()
-            .delay(handle.data().msg_len(), handle.data().backpressure_limit())
-            .is_some()
+        self.channel().reached_backpressure()
     }
 
     /// Sends a [`Signal::Shutdown`] to the actor. Returns `false` if the
@@ -263,7 +236,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
             Signal::Resume => SignalInterface::Resume(Envelope::new(signals::Resume, ())),
         };
 
-        self.data().signal(interface)
+        self.channel().signal(interface)
     }
 
     /// Sends a liveness-check signal to the actor, returning a [`Reply`] that
@@ -274,7 +247,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         let (tx, rx) = Request::new();
 
         self.actor_ref()
-            .data()
+            ._channel()
             .signal(SignalInterface::Ping(Envelope::new(signals::Ping, tx)));
 
         rx
@@ -284,20 +257,20 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// fixed for the channel's lifetime; see [`ActorOps::last_spawned_at`]
     /// for the most recent spawn.
     fn created_at(&self) -> Instant {
-        self.data().created_at()
+        self.channel().created_at()
     }
 
     /// Returns the [`Instant`] of the most recent spawn, or `None` if the
     /// actor has never been spawned.
     fn last_spawned_at(&self) -> Option<Instant> {
-        self.data().last_spawned_at()
+        self.channel().last_spawned_at()
     }
 
     /// Returns the [`Instant`]s of the most recent spawns, oldest first. This
     /// is a bounded history: older entries are dropped once the limit is
     /// reached.
     fn spawned_at(&self) -> Vec<Instant> {
-        self.data().spawned_at()
+        self.channel().spawned_at()
     }
 
     /// Returns the time elapsed since the actor's most recent spawn, or
@@ -329,7 +302,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// This amount should only be used as an indication of the number of
     /// active references to the channel.
     fn strong_count(&self) -> usize {
-        self.data().strong_count()
+        self.channel().strong_count()
     }
 
     /// The total number of live references to this channel, both strong
@@ -391,9 +364,9 @@ impl Clock {
     }
 }
 
-trait ChannelAccess: ActorRef {
-    fn data(&self) -> &Channel<dyn DynamicQueue> {
-        self.actor_ref().data()
+pub(crate) trait ChannelAccess: ActorRef {
+    fn channel(&self) -> &Channel<dyn DynamicQueue> {
+        self.actor_ref()._channel()
     }
 }
 impl<T: ActorRef + ?Sized> ChannelAccess for T {}
@@ -401,48 +374,4 @@ impl<T: ActorRef + ?Sized> ChannelAccess for T {}
 mod sealed {
     pub trait Sealed {}
     impl<T: super::ActorRef> Sealed for T {}
-}
-
-/// Options controlling how a [`Cast`]/[`ActorOps`] sending method behaves.
-/// The default, used by [`Cast::cast`]/[`Cast::try_cast`]/etc., disables both
-/// options below.
-#[derive(Debug, Clone, Copy)]
-pub struct CastOptions {
-    /// If `true`, a message is still accepted while the channel is
-    /// [`ActorStatus::Exiting`]. Has no effect once the channel is fully
-    /// [`ActorStatus::Exited`], which always rejects new messages.
-    pub ignore_exiting: bool,
-    /// If `true`, backpressure is ignored entirely: waiting methods (e.g.
-    /// [`Cast::cast`]) skip their delay, and non-waiting methods (e.g.
-    /// [`Cast::try_cast`]) skip the check that would otherwise return a
-    /// full-channel error.
-    pub ignore_backpressure: bool,
-}
-
-impl Default for CastOptions {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl CastOptions {
-    /// Creates a new [`CastOptions`] with both options disabled.
-    pub fn new() -> Self {
-        Self {
-            ignore_exiting: false,
-            ignore_backpressure: false,
-        }
-    }
-
-    /// Sets [`CastOptions::ignore_exiting`].
-    pub fn ignore_exiting(mut self, ignore: bool) -> Self {
-        self.ignore_exiting = ignore;
-        self
-    }
-
-    /// Sets [`CastOptions::ignore_backpressure`].
-    pub fn ignore_backpressure(mut self, ignore: bool) -> Self {
-        self.ignore_backpressure = ignore;
-        self
-    }
 }

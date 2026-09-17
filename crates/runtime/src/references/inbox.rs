@@ -8,8 +8,8 @@ use std::convert::Infallible;
 ///
 /// See the [`Inbox::recv_event`] method for receiving messages and signals from the channel.
 #[derive(Debug)]
-pub struct Inbox<T: Interface> {
-    address: StrongAddress<T>,
+pub struct Inbox<I: Interface> {
+    address: StrongAddress<I>,
     init: InitState,
 }
 
@@ -35,8 +35,8 @@ impl Inbox<Infallible> {
     }
 }
 
-impl<T: Interface> Inbox<T> {
-    pub(crate) fn try_new(address: StrongAddress<T>) -> Result<Self, ConcurrentInboxError> {
+impl<I: Interface> Inbox<I> {
+    pub(crate) fn try_new(address: StrongAddress<I>) -> Result<Self, ConcurrentInboxError> {
         if !address.status().is_dead() {
             return Err(ConcurrentInboxError);
         }
@@ -51,27 +51,27 @@ impl<T: Interface> Inbox<T> {
 
     /// Returns the next event from the channel, or `None` if the channel has received
     /// a [`Signal::Shutdown`] signal and has no more messages to process.
-    pub async fn recv_event(&mut self) -> Option<InboxEvent<T>> {
+    pub async fn recv_event(&mut self) -> Option<InboxEvent<I>> {
         self.maybe_auto_init();
-        self.actor_ref().next_event(false).await
+        self.channel().next_event::<I>(false).await
     }
 
     /// Same as [`Inbox::recv_event`], but keeps returning signals (as
     /// [`InboxEvent::Signal`]) after a [`Signal::Shutdown`] has been received,
     /// instead of returning `None` once the inbox is empty.
-    pub async fn recv_event_always(&mut self) -> Option<InboxEvent<T>> {
+    pub async fn recv_event_always(&mut self) -> Option<InboxEvent<I>> {
         self.maybe_auto_init();
-        self.actor_ref().next_event(true).await
+        self.channel().next_event::<I>(true).await
     }
 
     /// Block until the next message becomes available. Once the actor has received a
     /// [`Signal::Shutdown`], the inbox will be closed, and all remaining messages
     /// are received until the inbox is empty.
-    pub async fn recv(&mut self) -> Option<T> {
+    pub async fn recv(&mut self) -> Option<I> {
         self.maybe_auto_init();
 
         loop {
-            match self.actor_ref().next_event(false).await {
+            match self.channel().next_event::<I>(false).await {
                 Some(ev) => {
                     if let InboxEvent::Message(msg) = ev {
                         return Some(msg);
@@ -84,15 +84,15 @@ impl<T: Interface> Inbox<T> {
 
     /// Non-blocking version of [`Inbox::recv_event`]: returns `None` immediately
     /// if no message or signal is currently available.
-    pub fn try_recv(&mut self) -> Option<InboxEvent<T>> {
+    pub fn try_recv(&mut self) -> Option<InboxEvent<I>> {
         self.maybe_auto_init();
-        self.actor_ref().try_next_event()
+        self.channel().try_next_event::<I>()
     }
 
     /// Block until the next signal becomes available, ignoring any queued messages.
     pub async fn recv_signal(&mut self) -> Option<Signal> {
         self.maybe_auto_init();
-        self.actor_ref().next_signal().await
+        self.channel().next_signal().await
     }
 
     fn init_completed(&self) -> bool {
@@ -156,14 +156,14 @@ impl<T: Interface> Inbox<T> {
         }
 
         self.init = InitState::Completed;
-        self.actor_ref().register_initialized().unwrap_or(false)
+        self.channel().register_initialized().unwrap_or(false)
     }
 
     /// Transitions the channel to [`ActorStatus::Exiting`], as if a
     /// [`Signal::Shutdown`] had been received. Returns `false` if the channel
     /// was already exiting or dead.
     pub fn register_exiting(&mut self) -> bool {
-        self.actor_ref().register_exiting().unwrap_or(false)
+        self.channel().register_exiting().unwrap_or(false)
     }
 
     async fn wait_resume(&mut self) {
@@ -215,17 +215,17 @@ impl<T: Interface> Inbox<T> {
     }
 }
 
-impl<T: Interface> ActorRef for Inbox<T> {
-    type Ctx = T;
+impl<I: Interface> ActorRef for Inbox<I> {
+    type Ctx = I;
 
     fn actor_ref(&self) -> &Address<Self::Ctx> {
         self.address.actor_ref()
     }
 }
 
-impl<T: Interface> Drop for Inbox<T> {
+impl<I: Interface> Drop for Inbox<I> {
     fn drop(&mut self) {
-        self.actor_ref().drain_messages_and_signals();
+        self.channel().drain_messages_and_signals::<I>();
     }
 }
 

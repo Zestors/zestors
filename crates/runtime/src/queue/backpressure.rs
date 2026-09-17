@@ -1,10 +1,10 @@
 use super::*;
 use std::sync::OnceLock;
 
-static DEFAULT_BACKPRESSURE: OnceLock<BackPressure> = OnceLock::new();
+static DEFAULT_BACKPRESSURE: OnceLock<BackpressureConfig> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct BackPressure {
+pub(crate) struct BackpressureConfig {
     /// Queue occupancy at which backpressure starts, as a fraction [0, 1].
     starts_at: f32,
 
@@ -12,7 +12,7 @@ pub(crate) struct BackPressure {
     max_delay: Duration,
 }
 
-impl BackPressure {
+impl BackpressureConfig {
     pub const fn new(starts_at: f32, max_delay: Duration) -> Self {
         assert!(starts_at >= 0.0 && starts_at < 1.0);
 
