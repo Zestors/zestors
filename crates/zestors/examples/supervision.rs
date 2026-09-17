@@ -12,7 +12,6 @@ use zestors::{
     supervisor::{InMemorySupervisorSource, Supervisor},
 };
 use zestors_actor::RestartMode;
-use zestors_supervision::BlueprintSupervisionExt as _;
 use zestors_supervisor::Node;
 
 #[derive(Interface, HandlerInterface)]
@@ -238,7 +237,7 @@ fn spawn_tasks_in_background(source: Arc<InMemorySupervisorSource>) {
                         .await?;
                         Ok(())
                     })
-                    .with_rand_pid()
+                    .rand_pid()
                     .into_dyn(),
                 )
                 .expect("Pid is unique");

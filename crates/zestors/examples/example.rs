@@ -172,7 +172,7 @@ impl Handle<GetChildren> for MyActor {
 async fn test() {
     let child = MyActor::new()
         // .map_actor_exit(|x| x.map(|x| x * 2))
-        .spawn();
+        .spawn_rand();
     let address = child.address().clone();
 
     address.cast(5u32).await.unwrap();

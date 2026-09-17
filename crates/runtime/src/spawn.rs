@@ -84,7 +84,7 @@ where
 /// # }
 /// ```
 pub fn spawn<T, E, F>(
-    pid: Pid,
+    pid: impl Into<Pid>,
     f: impl FnOnce(Inbox<T>) -> F,
 ) -> Result<Child<E, T>, DuplicatePidError>
 where
@@ -92,7 +92,7 @@ where
     E: Send + 'static,
     F: Future<Output = Result<E, rootcause::Report>> + Send + 'static,
 {
-    Ok(StrongAddress::create(pid)?
+    Ok(StrongAddress::create(pid.into())?
         .spawn(f)
         .expect("Address was just created. Must be valid"))
 }

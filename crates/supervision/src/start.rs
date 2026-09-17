@@ -2,7 +2,7 @@ use std::{fmt::Debug, sync::Arc};
 
 use futures::future::BoxFuture;
 use rootcause::Report;
-use zestors_actor::{Actor, ActorBlueprint, ActorExt as _};
+use zestors_actor::{Actor, ActorExt as _, Blueprint};
 use zestors_runtime::{
     prelude::*,
     {AsDyn as _, Context, Dyn, IntoDyn, errors::ConcurrentInboxError},
@@ -30,7 +30,7 @@ impl From<ConcurrentInboxError> for StartOnError {
 
 /// A blueprint-like type that can spawn a task on an already-registered
 /// [`StrongAddress`], rather than creating its own. Implemented
-/// automatically for every [`ActorBlueprint`], and also implemented by the
+/// automatically for every [`Blueprint`], and also implemented by the
 /// type-erased [`DynStarter`].
 ///
 /// This is what lets a [`ChildSpec`](crate::ChildSpec) hold on to its [`Pid`] and spawn (or
@@ -49,7 +49,7 @@ pub trait Start: Into<DynStarter> {
     ) -> impl Future<Output = Result<Child<Self::Exit, Self::Ctx>, StartOnError>> + Send;
 }
 
-impl<B: ActorBlueprint> Start for B {
+impl<B: Blueprint> Start for B {
     type Ctx = <B::Actor as Actor>::Interface;
     type Exit = <B::Actor as Actor>::Exit;
 
@@ -66,9 +66,9 @@ impl<B: ActorBlueprint> Start for B {
     }
 }
 
-/// A type-erased [`ActorBlueprint`], used so a [`ChildSpec`](crate::ChildSpec) doesn't need to
+/// A type-erased [`Blueprint`], used so a [`ChildSpec`](crate::ChildSpec) doesn't need to
 /// carry its blueprint's concrete type. Created via [`DynStarter::new`], or
-/// implicitly through [`Into<DynStarter>`] for any [`ActorBlueprint`].
+/// implicitly through [`Into<DynStarter>`] for any [`Blueprint`].
 #[derive(Debug, Clone)]
 pub struct DynStarter(Arc<dyn Spawnable + Send + Sync + 'static>);
 
@@ -79,7 +79,7 @@ trait Spawnable: Debug {
     ) -> BoxFuture<'a, Result<Child, StartOnError>>;
 }
 
-impl<R: ActorBlueprint> Spawnable for R {
+impl<R: Blueprint> Spawnable for R {
     fn spawn_on_dyn<'a>(
         &'a self,
         data: &'a StrongAddress,
@@ -117,7 +117,7 @@ impl DynStarter {
     /// Type-erases `blueprint` into a `DynStarter`.
     pub fn new<R>(blueprint: R) -> Self
     where
-        R: ActorBlueprint + Send + Sync + 'static,
+        R: Blueprint + Send + Sync + 'static,
     {
         DynStarter(Arc::new(blueprint))
     }
@@ -125,7 +125,7 @@ impl DynStarter {
 
 impl<R> From<R> for DynStarter
 where
-    R: ActorBlueprint + Send + Sync + 'static,
+    R: Blueprint + Send + Sync + 'static,
 {
     fn from(value: R) -> Self {
         Self::new(value)

@@ -25,7 +25,7 @@ use zestors_supervision::{
 /// and restart budget when they exit.
 ///
 /// Constructed declaratively from a [`SupervisorBlueprint`] via
-/// [`Supervisor::blueprint`], or by implementing [`ActorBlueprint`] for a
+/// [`Supervisor::blueprint`], or by implementing [`Blueprint`] for a
 /// custom builder.
 pub struct Supervisor {
     supervisees: SuperviseeMap,

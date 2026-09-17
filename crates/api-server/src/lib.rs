@@ -13,7 +13,7 @@
 use rootcause::Report;
 use std::{net::SocketAddr, pin::pin, sync::Arc};
 use tokio::net::TcpListener;
-use zestors_actor::{Actor, ActorBlueprint};
+use zestors_actor::{Actor, Blueprint};
 use zestors_codegen::Interface;
 use zestors_interface::Envelope;
 use zestors_runtime::{Registry, prelude::*};
@@ -35,7 +35,7 @@ pub struct ApiServerBlueprint {
     pub root_supervisor_pid: Option<Pid>,
 }
 
-impl ActorBlueprint for ApiServerBlueprint {
+impl Blueprint for ApiServerBlueprint {
     type Actor = ApiServer;
 
     async fn instantiate(&self) -> rootcause::Result<Self::Actor> {

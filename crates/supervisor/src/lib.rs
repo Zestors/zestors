@@ -29,6 +29,64 @@
 //! child/health query messages, and
 //! [`SupervisionTree`](zestors_supervision::SupervisionTree) — all live in the
 //! `zestors-supervision` crate.
+//!
+//! # Example
+//!
+//! Building on `zestors-supervision`'s [`ChildSpec`](zestors_supervision::ChildSpec)
+//! example: a [`SupervisorBlueprint`] collects one or more specs, and
+//! instantiating it produces a [`Supervisor`] - an ordinary [`Actor`] like
+//! any other, so it's spawned and messaged the same way.
+//!
+//! ```
+//! use zestors::interface::{Envelope, Interface, Message};
+//! use zestors::prelude::*;
+//! use zestors::supervision::ChildSpec;
+//! use zestors::supervision::messages::GetChildren;
+//! use zestors::supervisor::Supervisor;
+//!
+//! #[derive(Message, Debug)]
+//! struct Ping;
+//!
+//! #[derive(Interface, HandlerInterface, Debug)]
+//! enum WorkerInterface {
+//!     Ping(Envelope<Ping>),
+//! }
+//!
+//! #[derive(Debug, Clone)]
+//! struct Worker;
+//!
+//! impl Handler for Worker {
+//!     type Interface = WorkerInterface;
+//! }
+//!
+//! impl Handle<Ping> for Worker {
+//!     async fn handle(
+//!         &mut self,
+//!         _ctx: HandlerContext<'_, Self>,
+//!         _msg: Ping,
+//!         _req: (),
+//!     ) -> Result<(), rootcause::Report> {
+//!         Ok(())
+//!     }
+//! }
+//!
+//! # #[tokio::main]
+//! # async fn main() {
+//! let blueprint = Supervisor::blueprint().child(ChildSpec::create_rand_pid(Worker));
+//! let supervisor = blueprint.instantiate().await.unwrap().spawn_rand();
+//!
+//! // `SupervisorInterface` answers `GetChildren`/`GetHealth` (from
+//! // `zestors-supervision`) without needing to stop the tree to inspect it.
+//! let children = supervisor.call(GetChildren).await.unwrap();
+//! assert_eq!(children.len(), 1);
+//!
+//! supervisor.signal_shutdown();
+//! # }
+//! ```
+//!
+//! This spawns the supervisor directly; [`Node`] is for the common case of
+//! running one *root* supervisor as an entire program, adding Ctrl+C/SIGTERM
+//! handling and a bounded shutdown on top.
 
 mod actor;
 mod source;

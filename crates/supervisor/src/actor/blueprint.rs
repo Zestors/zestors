@@ -93,7 +93,7 @@ impl SupervisorBlueprint {
     /// [`Address`], so the caller can keep a handle to it.
     pub fn add_child<T>(&mut self, spec: ChildSpec<T>) -> Address<<T::Actor as Actor>::Interface>
     where
-        T: ActorBlueprint + Send + Sync + 'static,
+        T: Blueprint + Send + Sync + 'static,
     {
         let address = spec.address().clone();
 
@@ -128,7 +128,7 @@ impl SupervisorBlueprint {
         specs: impl IntoIterator<Item = ChildSpec<T>>,
     ) -> Vec<Address<<T::Actor as Actor>::Interface>>
     where
-        T: ActorBlueprint + Send + Sync + 'static,
+        T: Blueprint + Send + Sync + 'static,
     {
         specs
             .into_iter()
@@ -149,7 +149,7 @@ impl SupervisorBlueprint {
     }
 }
 
-impl ActorBlueprint for SupervisorBlueprint {
+impl Blueprint for SupervisorBlueprint {
     type Actor = Supervisor;
 
     async fn instantiate(&self) -> rootcause::Result<Self::Actor> {

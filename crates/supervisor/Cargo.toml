@@ -18,5 +18,8 @@ tracing.workspace = true
 streamunordered.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+zestors = { path = "../zestors" }
+
 [features]
 _ra = []

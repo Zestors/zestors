@@ -99,7 +99,7 @@ impl Actor for SlowShutdownActor {
 /// before actually exiting once told to stop.
 pub fn slow_shutdown_child(delay: Duration) -> ChildSpec {
     fn_blueprint(move || SlowShutdownActor { delay })
-        .with_rand_pid()
+        .rand_pid()
         .split()
         .0
 }
@@ -116,7 +116,7 @@ pub fn test_child(mode: RestartMode) -> (ChildSpec, Address<TestInterface>, Arc<
     let (spec, address) = fn_blueprint(move || TestActor {
         generation: for_actor.clone(),
     })
-    .with_rand_pid()
+    .rand_pid()
     .with_cfg(ChildConfig {
         restart_mode: mode,
         // The channel a just-stopped child was on can briefly still report
@@ -142,7 +142,7 @@ pub fn test_child(mode: RestartMode) -> (ChildSpec, Address<TestInterface>, Arc<
 pub async fn spawn_supervisor(
     blueprint: SupervisorBlueprint,
 ) -> (Child<(), Dyn>, Address<SupervisorInterface>) {
-    let (spec, address) = blueprint.with_rand_pid().split();
+    let (spec, address) = blueprint.rand_pid().split();
     let child = spec.start().await.expect("supervisor should start");
     (child, address)
 }

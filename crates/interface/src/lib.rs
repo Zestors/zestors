@@ -21,7 +21,9 @@
 //! [`Envelope`] for it and pushing that onto an actor's queue; see its
 //! `Accepts::cast`/`Accepts::call` for the sending side.
 //!
-//! # Example
+//! # Examples
+//!
+//! ## Request/reply
 //!
 //! A request-style message: it derives [`Message`] with a `reply` type, so
 //! its [`Resolver`] is a [`Request<T>`] and its [`Receipt`] is a
@@ -50,6 +52,49 @@
 //!
 //! // The "sending" side awaits the receipt to get that reply back.
 //! assert_eq!(receipt.wait().await.unwrap(), 42);
+//! # }
+//! ```
+//!
+//! ## Grouping messages into an `Interface`
+//!
+//! A real actor accepts more than one message type, so its messages get
+//! grouped into an [`Interface`] - one variant per message, each wrapping
+//! an [`Envelope`] of that message. Deriving it also gives you the
+//! [`AnyEnvelope`] conversions ([`Interface::into_dyn_envelope`]/
+//! [`Interface::try_from_dyn_envelope`]) that let a message be sent without
+//! the sender statically knowing the receiver's whole `Interface`:
+//!
+//! ```
+//! # use zestors::interface::{AnyEnvelope, Envelope, Interface, Message, Receipt as _};
+//! #[derive(Message, Debug)]
+//! #[msg(path = "zestors::interface")]
+//! struct Ping;
+//!
+//! #[derive(Message, Debug)]
+//! #[msg(reply = u32)]
+//! #[msg(path = "zestors::interface")]
+//! struct Double(u32);
+//!
+//! #[derive(Interface, Debug)]
+//! #[interface(path = "zestors::interface")]
+//! enum MyInterface {
+//!     Ping(Envelope<Ping>),
+//!     Double(Envelope<Double>),
+//! }
+//!
+//! # #[tokio::main]
+//! # async fn main() {
+//! // A concrete `Ping` envelope, type-erased and then recovered as
+//! // `MyInterface` - the same round trip a dynamic send goes through.
+//! let (envelope, receipt) = Envelope::new_pair(Ping);
+//! let any_envelope = MyInterface::Ping(envelope).into_dyn_envelope();
+//!
+//! let restored = MyInterface::try_from_dyn_envelope(any_envelope).unwrap();
+//! assert!(matches!(restored, MyInterface::Ping(_)));
+//!
+//! // `Ping`'s resolver/receipt are both `()`, a fire-and-forget message:
+//! // there's nothing to actually wait for.
+//! receipt.wait().await.unwrap();
 //! # }
 //! ```
 

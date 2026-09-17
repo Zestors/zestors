@@ -21,10 +21,12 @@
 //! through the [`prelude`]) provide the methods for interacting with the
 //! actor — sending and receiving messages, inspecting status, and more.
 //!
-//! # Example
+//! # Examples
 //!
-//! A minimal fire-and-forget actor: it accepts `()` messages (the simplest
-//! possible [`Interface`]) and counts how many it has seen.
+//! ## Fire-and-forget
+//!
+//! A minimal actor: it accepts `()` messages (the simplest possible
+//! [`Interface`]) and counts how many it has seen.
 //!
 //! ```
 //! # use zestors::runtime::prelude::*;
@@ -53,10 +55,90 @@
 //! # }
 //! ```
 //!
-//! See [`Accepts::call`] for sending a message that expects a reply, which
-//! needs a richer [`Interface`] than plain `()` - usually generated with
-//! `#[derive(Interface)]` (re-exported from `zestors-interface`) rather than
-//! written by hand.
+//! ## Request/reply
+//!
+//! A real actor usually has more than one message, and expects a reply for
+//! at least some of them - both come from its [`Interface`], generated with
+//! `#[derive(Interface)]` over a set of `#[derive(Message)]` types rather
+//! than written by hand (`GetCount`'s `#[msg(reply = u32)]` is what makes
+//! [`Accepts::call`] return a `u32`, instead of `cast`'s fire-and-forget
+//! `()`):
+//!
+//! ```
+//! # use zestors::interface::{Envelope, Interface, Message};
+//! # use zestors::runtime::prelude::*;
+//! # use zestors::runtime::spawn_rand;
+//! #[derive(Message, Debug)]
+//! # #[msg(path = "zestors::interface")]
+//! struct Increment;
+//!
+//! #[derive(Message, Debug)]
+//! #[msg(reply = u32)]
+//! # #[msg(path = "zestors::interface")]
+//! struct GetCount;
+//!
+//! #[derive(Interface, Debug)]
+//! # #[interface(path = "zestors::interface")]
+//! enum CounterInterface {
+//!     Increment(Envelope<Increment>),
+//!     GetCount(Envelope<GetCount>),
+//! }
+//!
+//! # #[tokio::main]
+//! # async fn main() {
+//! let child = spawn_rand(|mut inbox: Inbox<CounterInterface>| async move {
+//!     let mut count = 0;
+//!     while let Some(msg) = inbox.recv().await {
+//!         match msg {
+//!             CounterInterface::Increment(_) => count += 1,
+//!             CounterInterface::GetCount(envelope) => {
+//!                 let _ = envelope.reply(count);
+//!             }
+//!         }
+//!     }
+//!     Ok::<_, rootcause::Report>(())
+//! });
+//!
+//! for _ in 0..5 {
+//!     child.cast(Increment).await.unwrap();
+//! }
+//! // Every message goes through the same queue, in order, so `call` can
+//! // only resolve once all 5 `Increment`s above have already been handled.
+//! assert_eq!(child.call(GetCount).await.unwrap(), 5);
+//!
+//! child.signal_shutdown();
+//! # }
+//! ```
+//!
+//! ## Looking an actor up by `Pid`, and a bounded shutdown
+//!
+//! Actors don't have to be wired together by holding onto references
+//! directly: any code that knows an actor's [`Pid`] can look it up through
+//! the global [`Registry`], from anywhere in the process.
+//!
+//! ```
+//! # use std::time::Duration;
+//! # use zestors::runtime::prelude::*;
+//! # use zestors::runtime::spawn;
+//! # #[tokio::main]
+//! # async fn main() {
+//! let pid = Pid::new("counter");
+//! let child = spawn(pid.clone(), |mut inbox: Inbox<()>| async move {
+//!     while inbox.recv().await.is_some() {}
+//!     Ok::<_, rootcause::Report>(())
+//! })
+//! .unwrap();
+//!
+//! // Elsewhere in the process, with only the `Pid` in hand:
+//! let found = pid.typed_address::<()>().expect("still registered");
+//! found.cast(()).await.unwrap();
+//!
+//! // `shutdown_abort` signals a shutdown and gives the actor a grace
+//! // period to exit on its own, aborting it only if it overruns that.
+//! child.shutdown_abort(Duration::from_secs(1)).await.unwrap();
+//! assert!(pid.address().is_none(), "deregistered once fully gone");
+//! # }
+//! ```
 
 use concurrent_queue::{ConcurrentQueue, PopError, PushError};
 pub(crate) use rootcause::Report;
