@@ -1,0 +1,28 @@
+[package]
+name = "zestors-runtime"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+concurrent-queue.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+type-sets.workspace = true
+futures.workspace = true
+rootcause.workspace = true
+zestors-codegen.workspace = true
+zestors-interface.workspace = true
+bs58.workspace = true
+smol_str.workspace = true
+serde.workspace = true
+eyeball.workspace = true
+tracing.workspace = true
+rand.workspace = true
+jiff.workspace = true
+papaya.workspace = true
+
+[dev-dependencies]
+zestors = { path = "../zestors" }
+
+[features]
+_ra = []

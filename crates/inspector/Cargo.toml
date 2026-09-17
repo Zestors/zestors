@@ -1,0 +1,23 @@
+[package]
+name = "zestors-inspector"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+description = "An application for the COSMIC™ desktop"
+repository = "https://github.com/pop-os/cosmic-app-template"
+
+[dependencies]
+eframe = { version = "0.36.1", features = ["glow", "__screenshot"] }
+env_logger = { version = "0.11", features = ["auto-color", "humantime"] }
+egui_extras = { version = "0.36", features = ["default", "image"] }
+egui_glow = { version = "0.36", features = [] }
+egui = { version = "0.36", features = [] }
+tokio = { workspace = true, features = ["full"] }
+rootcause = { workspace = true }
+futures = { workspace = true }
+zestors = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+indexmap = { workspace = true }
+
+[features]
+_ra = []
