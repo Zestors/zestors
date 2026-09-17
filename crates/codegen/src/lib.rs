@@ -200,7 +200,7 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
 
                 handle_matches.push(quote! {
                     Self::#variant_name(envelope) => {
-                        <T as #base_path::actor::Handle<#inner_type>>::handle(actor, state, envelope).await
+                        <T as #base_path::actor::Handle<#inner_type>>::handle(actor, state, envelope.msg, envelope.req).await
                     }
                 });
                 inner_types.push(inner_type);

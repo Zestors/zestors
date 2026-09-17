@@ -72,7 +72,8 @@ impl Handle<Tick> for MyActor {
     async fn handle(
         &mut self,
         _state: HandlerState<'_, Self>,
-        _msg: Envelope<Tick>,
+        _msg: Tick,
+        _req: (),
     ) -> Result<(), Report> {
         tracing::info!("Actor {} received a tick", self.name);
 
@@ -89,7 +90,8 @@ impl Handle<u32> for MyActor {
     async fn handle(
         &mut self,
         _state: HandlerState<'_, Self>,
-        msg: Envelope<u32>,
+        msg: u32,
+        _req: (),
     ) -> Result<(), Report> {
         println!("Received message: {:?}", msg);
         Ok(())
@@ -100,7 +102,8 @@ impl Handle<String> for MyActor {
     async fn handle(
         &mut self,
         _state: HandlerState<'_, Self>,
-        msg: Envelope<String>,
+        msg: String,
+        _req: (),
     ) -> Result<(), Report> {
         println!("Received message: {:?}", msg);
         Ok(())

@@ -11,6 +11,7 @@ use zestors::{
 };
 use zestors_actor::ActorExt;
 use zestors_runtime::spawn;
+use zestors_supervision::ChildDescription;
 #[tokio::main]
 async fn main() {
     let child = spawn(async move |mut inbox: Inbox<MyInterface>| {
@@ -94,7 +95,8 @@ impl Handle<u32> for MyActor {
     async fn handle(
         &mut self,
         state: HandlerState<'_, Self>,
-        Envelope { msg, req: () }: Envelope<u32>,
+        msg: u32,
+        _req: (),
     ) -> Result<(), Report> {
         println!("Received message: {:?}", msg);
 
@@ -112,7 +114,8 @@ impl Handle<String> for MyActor {
     async fn handle(
         &mut self,
         _: HandlerState<'_, Self>,
-        msg: Envelope<String>,
+        msg: String,
+        _req: (),
     ) -> Result<(), Report> {
         println!("Received message: {:?}", msg);
         Ok(())
@@ -123,7 +126,8 @@ impl Handle<IntervalTick> for MyActor {
     async fn handle(
         &mut self,
         _: HandlerState<'_, Self>,
-        _: Envelope<IntervalTick>,
+        _: IntervalTick,
+        _: (),
     ) -> Result<(), Report> {
         println!("Interval tick: {}", self.nr);
         Ok(())
@@ -134,12 +138,10 @@ impl Handle<GetHealth> for MyActor {
     async fn handle(
         &mut self,
         _state: HandlerState<'_, Self>,
-        Envelope {
-            msg: _,
-            req: handle,
-        }: Envelope<GetHealth>,
+        _msg: GetHealth,
+        req: Request<Health>,
     ) -> Result<(), Report> {
-        handle.reply(Health::healthy().with_debug_repr(&self)).ok();
+        req.reply(Health::healthy().with_debug_repr(&self)).ok();
 
         self.scheduler.schedule_msg(async move {
             tokio::time::sleep(Duration::from_secs(1)).await;
@@ -159,10 +161,8 @@ impl Handle<GetChildren> for MyActor {
     async fn handle(
         &mut self,
         _: HandlerState<'_, Self>,
-        Envelope {
-            msg: _,
-            req: handle,
-        }: Envelope<GetChildren>,
+        _msg: GetChildren,
+        handle: Request<Vec<ChildDescription>>,
     ) -> Result<(), Report> {
         handle.reply(vec![]).ok();
         Ok(())

@@ -150,7 +150,8 @@ pub trait Handle<M: Message>: Handler {
     fn handle(
         &mut self,
         state: HandlerState<'_, Self>,
-        env: Envelope<M>,
+        msg: M,
+        req: M::Resolver,
     ) -> impl Future<Output = Result<(), Report>> + Send;
 }
 
@@ -185,7 +186,8 @@ impl<H: Handler> Handle<Infallible> for H {
     fn handle(
         &mut self,
         _state: HandlerState<'_, Self>,
-        _env: Envelope<Infallible>,
+        _msg: Infallible,
+        _req: <Infallible as Message>::Resolver,
     ) -> impl Future<Output = Result<(), Report>> + Send {
         async { unreachable!("Infallible") }
     }

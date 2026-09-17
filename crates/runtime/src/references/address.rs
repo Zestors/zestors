@@ -1,18 +1,8 @@
 use crate::registry::Registry;
 use crate::*;
-use eyeball::{ObservableWriteGuard, SharedObservable};
 use std::{
-    any::TypeId,
-    convert::Infallible,
-    fmt::Debug,
-    hash::Hash,
-    marker::PhantomData,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
+    any::TypeId, convert::Infallible, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc,
 };
-use tokio::{select, sync::Notify, time::Instant};
 
 /// A weak reference to an actor's channel, which can be used to send
 /// messages and signals to it without keeping it alive.
@@ -42,13 +32,7 @@ impl<C: Context> Address<C> {
     }
 
     pub(crate) fn decr_strong_count(&self) {
-        let prev_count = self.data().strong_count.fetch_sub(1, Ordering::Release);
-
-        // fetch_sub returns the PREVIOUS value. If it was 1, it is now 0.
-        if prev_count == 1 {
-            // Synchronize memory access from other threads before cleaning up
-            std::sync::atomic::fence(Ordering::Acquire);
-
+        if self.data().decr_strong_count() {
             let removed_address = Registry::local().remove(self.pid());
 
             if removed_address.is_none() {
@@ -68,13 +52,7 @@ impl<C: Context> Address<C> {
     }
 
     pub(crate) fn incr_strong_count(&self) {
-        // Relaxed is sufficient because the caller already owns a strong reference
-        let prev_count = self.data().strong_count.fetch_add(1, Ordering::Relaxed);
-
-        // Prevent integer overflow attack/bug
-        if prev_count > usize::MAX / 2 {
-            std::process::abort();
-        }
+        self.data().incr_strong_count();
     }
 
     pub(crate) fn data(&self) -> &Channel<dyn DynamicQueue> {
@@ -82,194 +60,39 @@ impl<C: Context> Address<C> {
     }
 
     pub(crate) fn try_push_msg<M: Message>(&self, msg: M) -> Result<M::Receipt, NotAccepted<M>> {
-        self.data().msg_queue.try_push_msg(msg)
+        self.data().try_push_msg(msg)
     }
 
     pub(crate) fn msg_notify_one(&self) {
-        self.data().msg_notifier.notify_one();
+        self.data().msg_notify_one();
     }
 
     #[expect(unused)]
     pub(crate) fn pop_dyn(&self) -> Result<AnyEnvelope, PopError> {
-        self.data().msg_queue.pop_dyn()
-    }
-
-    pub(crate) fn update_status<F, T>(&self, f: F) -> T
-    where
-        F: FnOnce(ActorStatus) -> (Option<ActorStatus>, T),
-    {
-        let mut observer = self.data().status_observer.write();
-        let prev_status = *observer;
-
-        let (new_status, result) = f(prev_status.clone());
-
-        let Some(new_status) = new_status else {
-            return result;
-        };
-
-        ObservableWriteGuard::set(&mut observer, new_status);
-
-        result
+        self.data().pop_dyn()
     }
 
     pub(crate) fn register_spawned(&self) -> Result<(), InvalidStatusUpdate> {
-        tracing::debug!("Process spawned");
-
-        // Spawn is only valid if the actor is dead.
-        self.update_status(|status| match status {
-            ActorStatus::Exited(_) => (Some(ActorStatus::Initializing), Ok(())),
-            ActorStatus::Exiting
-            | ActorStatus::Initializing
-            | ActorStatus::Running
-            | ActorStatus::Suspended => (
-                None,
-                Err(InvalidStatusUpdate::new(status, ActorStatus::Initializing)),
-            ),
-        })?;
-
-        let mut spawned_at = self.data().spawns.write().unwrap();
-
-        if spawned_at.len() > KEEP_N_SPAWNS {
-            _ = spawned_at.remove(0);
-        }
-
-        spawned_at.push(Instant::now());
-
-        Ok(())
+        self.data().register_spawned()
     }
 
     pub(crate) fn register_exited(&self, reason: Result<(), ExitError>) -> bool {
-        // Exit is always valid, but doesn't always do something.
-        let updated = self.update_status(|status| match status {
-            ActorStatus::Exited(_) => (None, false),
-            ActorStatus::Exiting
-            | ActorStatus::Initializing
-            | ActorStatus::Running
-            | ActorStatus::Suspended => (
-                Some(ActorStatus::Exited(ExitStatus::from_result(reason.clone()))),
-                true,
-            ),
-        });
-
-        match updated {
-            true => {
-                match &reason {
-                    Ok(()) => tracing::debug!("Process exited normally"),
-                    Err(err) => tracing::warn!("Process exited with error: {:?}", err),
-                }
-
-                let mut exited_at = self.data().exits.write().unwrap();
-
-                if exited_at.len() > KEEP_N_EXITS {
-                    _ = exited_at.remove(0);
-                }
-
-                exited_at.push((Instant::now(), reason));
-
-                true
-            }
-            false => false,
-        }
+        self.data().register_exited(reason)
     }
 
     pub(crate) fn register_initialized(&self) -> Result<bool, InvalidStatusUpdate> {
-        let updated = self.update_status(|status| match status {
-            ActorStatus::Exiting | ActorStatus::Exited(_) => (
-                None,
-                Err(InvalidStatusUpdate::new(status, ActorStatus::Running)),
-            ),
-            ActorStatus::Initializing => (Some(ActorStatus::Running), Ok(true)),
-            ActorStatus::Running | ActorStatus::Suspended => (None, Ok(false)),
-        })?;
-
-        match updated {
-            true => {
-                tracing::debug!("Process initialized");
-                Ok(true)
-            }
-            false => Ok(false),
-        }
-    }
-
-    pub(crate) fn register_suspended(&self) -> Result<bool, InvalidStatusUpdate> {
-        let updated = self.update_status(|status| match status {
-            ActorStatus::Exiting | ActorStatus::Exited(_) | ActorStatus::Initializing => (
-                None,
-                Err(InvalidStatusUpdate::new(status, ActorStatus::Suspended)),
-            ),
-            ActorStatus::Suspended => (None, Ok(false)),
-            ActorStatus::Running => (Some(ActorStatus::Suspended), Ok(true)),
-        })?;
-
-        if updated {
-            tracing::debug!("Process suspended");
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    pub(crate) fn register_resumed(&self) -> Result<bool, InvalidStatusUpdate> {
-        let updated = self.update_status(|status| match status {
-            ActorStatus::Exiting | ActorStatus::Exited(_) | ActorStatus::Initializing => (
-                None,
-                Err(InvalidStatusUpdate::new(status, ActorStatus::Running)),
-            ),
-            ActorStatus::Running => (None, Ok(false)),
-            ActorStatus::Suspended => (Some(ActorStatus::Running), Ok(true)),
-        })?;
-
-        if updated {
-            tracing::debug!("Process resumed");
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        self.data().register_initialized()
     }
 
     pub(crate) fn register_exiting(&self) -> Result<bool, InvalidStatusUpdate> {
-        let updated = self.update_status(|status| match status {
-            ActorStatus::Exited(_) => (
-                None,
-                Err(InvalidStatusUpdate::new(status, ActorStatus::Exiting)),
-            ),
-            ActorStatus::Exiting => (None, Ok(false)),
-            ActorStatus::Initializing | ActorStatus::Running | ActorStatus::Suspended => {
-                (Some(ActorStatus::Exiting), Ok(true))
-            }
-        })?;
-
-        match updated {
-            true => {
-                tracing::debug!("Process exiting");
-                Ok(true)
-            }
-            false => Ok(false),
-        }
+        self.data().register_exiting()
     }
 
     pub(crate) fn raw_queue(&self) -> Option<&ConcurrentQueue<C>>
     where
         C: Interface,
     {
-        if self.is_interface::<C>() {
-            // SAFETY: We just checked that the channel's message queue is of type `ConcurrentQueue<C>`.
-            Some(unsafe { self.raw_queue_unchecked() })
-        } else {
-            None
-        }
-    }
-
-    /// # Safety
-    /// This function is unsafe because it assumes that the channel's message queue is of type
-    /// `ConcurrentQueue<T>`. If this assumption is incorrect, it may lead to undefined behavior.
-    unsafe fn raw_queue_unchecked(&self) -> &ConcurrentQueue<C>
-    where
-        C: Interface,
-    {
-        unsafe {
-            &*(&self.data().msg_queue as *const dyn DynamicQueue as *const ConcurrentQueue<C>)
-        }
+        self.data().raw_queue::<C>()
     }
 
     pub(crate) fn backpressure(&self) -> &BackPressure {
@@ -277,43 +100,7 @@ impl<C: Context> Address<C> {
     }
 
     pub(crate) async fn delay_for_backpressure(&self) {
-        let len = self.data().msg_queue.len();
-        let limit = self.data().msg_backpressure_limit;
-
-        if let Some(delay) = self.backpressure().delay(
-            self.data().msg_queue.len(),
-            self.data().msg_backpressure_limit,
-        ) {
-            tracing::warn!(
-                "Backpressure applied: queue occupancy = {:.2}%, delay = {:?}",
-                len as f32 / limit as f32 * 100.0,
-                delay
-            );
-            tokio::time::sleep(delay).await;
-        }
-    }
-
-    fn _signal(&self, signal: SignalInterface) -> bool {
-        if matches!(self.status(), ActorStatus::Exited(_) | ActorStatus::Exiting) {
-            return false;
-        }
-
-        match self.data().signal_queue.push(signal) {
-            Ok(_) => {
-                self.data().signal_notifier.notify_one();
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Signal queue for {} contains more than {} signals. The signal has been lost. Error: {:?}",
-                    std::any::type_name::<Self>(),
-                    SIGNAL_QUEUE_CAPACITY,
-                    e
-                );
-                return false;
-            }
-        }
-
-        true
+        self.data().delay_for_backpressure().await
     }
 
     pub(crate) fn ref_count(&self) -> usize {
@@ -328,19 +115,11 @@ impl<I: Interface> Address<I> {
             false => MSG_QUEUE_CAPACITY,
         };
 
-        let inner: Arc<Channel<dyn DynamicQueue>> = Arc::new(Channel {
+        let inner: Arc<Channel<dyn DynamicQueue>> = Arc::new(Channel::new(
             pid,
-            msg_notifier: Notify::new(),
-            msg_backpressure_limit: BACKPRESSURE_LIMIT,
-            signal_queue: ConcurrentQueue::bounded(SIGNAL_QUEUE_CAPACITY),
-            signal_notifier: Notify::new(),
-            status_observer: SharedObservable::new(ActorStatus::Exited(ExitStatus::Normal)),
-            msg_queue: ConcurrentQueue::<I>::bounded(msg_queue_capacity),
-            created_at: Instant::now(),
-            spawns: Default::default(),
-            exits: Default::default(),
-            strong_count: AtomicUsize::new(strong_count),
-        });
+            strong_count,
+            ConcurrentQueue::<I>::bounded(msg_queue_capacity),
+        ));
 
         Self {
             inner,
@@ -349,30 +128,11 @@ impl<I: Interface> Address<I> {
     }
 
     pub(crate) async fn next_msg(&self) -> Option<I> {
-        let raw_queue = self
-            .raw_queue()
-            .expect("Channel is not of the expected interface type");
-
-        let mut notify = pin!(self.data().msg_notifier.notified());
-
-        loop {
-            notify.as_mut().enable();
-
-            if let Ok(msg) = raw_queue.pop() {
-                return Some(msg);
-            }
-
-            notify.as_mut().await;
-            notify.set(self.data().msg_notifier.notified());
-        }
+        self.data().next_msg::<I>().await
     }
 
     pub(crate) fn pop_msg(&self) -> Option<I> {
-        let raw_queue = self
-            .raw_queue()
-            .expect("Channel is not of the expected interface type");
-
-        raw_queue.pop().ok()
+        self.data().pop_msg::<I>()
     }
 
     pub(crate) fn drain_messages_and_signals(&self) {
@@ -386,67 +146,11 @@ impl<I: Interface> Address<I> {
     }
 
     pub(crate) async fn next_signal(&self) -> Option<Signal> {
-        let mut notify = pin!(self.data().signal_notifier.notified());
-
-        loop {
-            notify.as_mut().enable();
-
-            if let Some(signal) = self.pop_signal() {
-                return Some(signal);
-            }
-
-            notify.as_mut().await;
-
-            notify.set(self.data().signal_notifier.notified());
-        }
+        self.data().next_signal().await
     }
 
     pub(crate) fn pop_signal(&self) -> Option<Signal> {
-        loop {
-            match self.data().signal_queue.pop() {
-                Ok(signal) => match self.handle_signal(signal) {
-                    Some(event) => return Some(event),
-                    None => continue,
-                },
-                Err(e) => {
-                    return match e {
-                        PopError::Empty => None,
-                        PopError::Closed => unreachable!("Queue should never be closed"),
-                    };
-                }
-            }
-        }
-    }
-
-    fn handle_signal(&self, signal: SignalInterface) -> Option<Signal> {
-        match signal {
-            SignalInterface::Shutdown(_) => {
-                self.register_exiting().ok();
-                Some(Signal::Shutdown)
-            }
-            SignalInterface::Suspend(_) => {
-                if self.status() == ActorStatus::Exiting {
-                    tracing::warn!("Actor is exiting, cannot suspend");
-                    None
-                } else {
-                    self.register_suspended().ok();
-                    Some(Signal::Suspend)
-                }
-            }
-            SignalInterface::Resume(_) => {
-                if self.status() != ActorStatus::Suspended {
-                    tracing::warn!("Actor is not suspended, cannot resume");
-                    None
-                } else {
-                    self.register_resumed().ok();
-                    Some(Signal::Resume)
-                }
-            }
-            SignalInterface::Ping(envelope) => {
-                let _ = envelope.req.reply(());
-                None
-            }
-        }
+        self.data().pop_signal()
     }
 
     pub(crate) async fn next_event(&self, while_exiting: bool) -> Option<InboxEvent<I>> {
@@ -458,7 +162,7 @@ impl<I: Interface> Address<I> {
             ActorStatus::Exiting if self.msg_is_empty() && !while_exiting => None,
 
             _ => {
-                select! {
+                tokio::select! {
                     biased;
 
                     Some(signal) = self.next_signal() => Some(InboxEvent::Signal(signal)),
@@ -518,9 +222,9 @@ impl<T: Context> Clone for Address<T> {
 impl<C: Context> Debug for Address<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Address")
-            .field("pid", &self.data().pid)
-            .field("status", &self.data().status_observer.get())
-            .field("len", &self.data().msg_queue.len())
+            .field("pid", &self.data().pid())
+            .field("status", &self.data().status())
+            .field("len", &self.data().msg_len())
             .finish()
     }
 }
@@ -528,12 +232,12 @@ impl<C: Context> Debug for Address<C> {
 impl<C: Context> Eq for Address<C> {}
 impl<C: Context> PartialEq for Address<C> {
     fn eq(&self, other: &Self) -> bool {
-        self.data().pid == other.data().pid
+        self.data().pid() == other.data().pid()
     }
 }
 impl<C: Context> Hash for Address<C> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.data().pid.hash(state);
+        self.data().pid().hash(state);
     }
 }
 

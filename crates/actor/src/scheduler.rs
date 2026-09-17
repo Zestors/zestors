@@ -102,9 +102,10 @@ impl<H: Handler> Handle<HandlerMessage<H>> for H {
     async fn handle(
         &mut self,
         state: HandlerState<'_, Self>,
-        env: Envelope<HandlerMessage<H>>,
+        msg: HandlerMessage<H>,
+        _req: <HandlerMessage<H> as Message>::Resolver,
     ) -> Result<(), Report> {
-        env.msg.msg.handle_dyn(state, self).await
+        msg.msg.handle_dyn(state, self).await
     }
 }
 
@@ -134,7 +135,7 @@ impl<M: Message, H: Handle<M>> DynErasedMessage<H> for M {
         Box::pin(async move {
             let (resolver, receipt) = <M::Resolver as Resolver>::new();
             std::mem::drop(receipt);
-            actor.handle(state, Envelope::new(*self, resolver)).await?;
+            actor.handle(state, *self, resolver).await?;
             Ok(())
         })
     }
@@ -163,9 +164,10 @@ impl<H: Handler> Handle<HandlerCallback<H>> for H {
     async fn handle(
         &mut self,
         state: HandlerState<'_, Self>,
-        env: Envelope<HandlerCallback<H>>,
+        msg: HandlerCallback<H>,
+        _req: (),
     ) -> Result<(), Report> {
-        (env.msg.f)(self, state)
+        (msg.f)(self, state)
     }
 }
 
@@ -198,7 +200,6 @@ where
     ) -> impl Future<Output = Result<(), Report>> + Send {
         let (resolver, receipt) = <M::Resolver as Resolver>::new();
         std::mem::drop(receipt);
-        let envelope = Envelope::new(self, resolver);
-        actor.handle(state, envelope)
+        actor.handle(state, self, resolver)
     }
 }
