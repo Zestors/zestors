@@ -162,12 +162,12 @@ impl<T: Interface> Inbox<T> {
     /// Transitions the channel to [`ActorStatus::Exiting`], as if a
     /// [`Signal::Shutdown`] had been received. Returns `false` if the channel
     /// was already exiting or dead.
-    pub fn register_stopping(&mut self) -> bool {
-        self.channel().register_stopping().unwrap_or(false)
+    pub fn register_exiting(&mut self) -> bool {
+        self.channel().register_exiting().unwrap_or(false)
     }
 
     /// Returns `true` if the channel is in the [`ActorStatus::Exiting`] state.
-    pub fn is_shutting_down(&self) -> bool {
+    pub fn is_exiting(&self) -> bool {
         self.status() == ActorStatus::Exiting
     }
 
@@ -188,7 +188,7 @@ impl<T: Interface> Inbox<T> {
         &mut self,
         fut: impl Future<Output = O> + Send,
     ) -> Result<O, Cancelled> {
-        if self.is_shutting_down() {
+        if self.is_exiting() {
             return Err(Cancelled);
         }
 
@@ -198,7 +198,7 @@ impl<T: Interface> Inbox<T> {
             // If we are currently suspended, pause before polling `fut` again
             if self.status() == ActorStatus::Suspended {
                 self.wait_resume().await;
-                if self.is_shutting_down() {
+                if self.is_exiting() {
                     return Err(Cancelled);
                 }
             }
@@ -209,7 +209,7 @@ impl<T: Interface> Inbox<T> {
                     Some(Signal::Shutdown) | None => return Err(Cancelled),
                     Some(Signal::Suspend) => {
                         self.wait_resume().await;
-                        if self.is_shutting_down() {
+                        if self.is_exiting() {
                             return Err(Cancelled);
                         }
                     }

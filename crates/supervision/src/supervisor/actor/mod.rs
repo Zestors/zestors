@@ -155,7 +155,7 @@ impl SupervisorInner {
     /// other, so it tears them down one at a time instead (see
     /// `RestForOneSupervisor::shutdown`).
     pub(super) fn shutdown(&mut self, exiting: &mut IndexSet<Pid>) -> ControlFlow<()> {
-        self.register_stopping();
+        self.register_exiting();
 
         exiting.extend(self.supervisees.stop_all());
 
@@ -168,8 +168,8 @@ impl SupervisorInner {
 
     /// Pulls this supervisor's own inbox into `Exiting`, so e.g. `add_spec`
     /// starts rejecting new children and external watchers see it exiting.
-    pub(super) fn register_stopping(&mut self) {
-        self.inbox.register_stopping();
+    pub(super) fn register_exiting(&mut self) {
+        self.inbox.register_exiting();
     }
 
     pub(super) fn handle_initialized(&mut self, initializing: &mut IndexSet<Pid>, pid: &Pid) {

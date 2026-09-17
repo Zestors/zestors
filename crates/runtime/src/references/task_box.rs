@@ -37,7 +37,7 @@ impl TaskBox {
 
     /// Waits for a [`Signal::Shutdown`] signal to be received, and then returns.
     pub async fn wait_shutdown(&mut self) {
-        if self.is_shutting_down() {
+        if self.is_exiting() {
             return;
         }
 
@@ -49,7 +49,7 @@ impl TaskBox {
     }
 
     /// Returns `true` if the channel is in the [`ActorStatus::Exiting`] state.
-    pub fn is_shutting_down(&self) -> bool {
+    pub fn is_exiting(&self) -> bool {
         self.status() == ActorStatus::Exiting
     }
 

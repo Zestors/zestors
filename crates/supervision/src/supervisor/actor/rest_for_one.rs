@@ -480,7 +480,7 @@ impl<'a> RestForOneSupervisor<'a> {
             return ControlFlow::Continue(());
         }
 
-        self.inner.register_stopping();
+        self.inner.register_exiting();
 
         // Kept in start order; `advance_shutdown` pops from the back, so
         // the last-started supervisee is the first one told to stop (same

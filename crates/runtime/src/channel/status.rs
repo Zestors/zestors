@@ -39,7 +39,9 @@ impl ActorStatus {
         matches!(self, ActorStatus::Suspended)
     }
 
-    pub fn is_shutting_down(&self) -> bool {
+    /// Returns `true` if the status is [`ActorStatus::Exiting`], i.e. the
+    /// actor is shutting down but hasn't finished yet.
+    pub fn is_exiting(&self) -> bool {
         matches!(self, ActorStatus::Exiting)
     }
 

@@ -12,7 +12,7 @@ use std::{
 };
 use tokio::time::{error::Elapsed, timeout};
 use zestors_runtime::{
-    ActorRef, Channel, Child, Dyn, ExitStatus, ExitingChild, Pid,
+    ActorRef, Channel, Child, Dyn, ExitStatus, Pid, ShutdownChild,
     errors::{JoinError, StartOnError},
 };
 
@@ -286,7 +286,7 @@ enum SuperviseeState {
 
     /// The supervisee is exiting, and is in the process of shutting down.
     ShuttingDown {
-        child: ExitingChild,
+        child: ShutdownChild,
     },
 
     /// The supervisee has exited, and is no longer running.

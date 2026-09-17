@@ -225,7 +225,7 @@ impl<C: Context> Channel<C> {
         }
     }
 
-    pub(crate) fn register_stopping(&self) -> Result<bool, InvalidStatusUpdate> {
+    pub(crate) fn register_exiting(&self) -> Result<bool, InvalidStatusUpdate> {
         let updated = self.update_status(|status| match status {
             ActorStatus::Exited(_) => (
                 None,
@@ -239,7 +239,7 @@ impl<C: Context> Channel<C> {
 
         match updated {
             true => {
-                tracing::debug!("Process stopping");
+                tracing::debug!("Process exiting");
                 Ok(true)
             }
             false => Ok(false),
@@ -415,7 +415,7 @@ impl<I: Interface> Channel<I> {
     fn handle_signal(&self, signal: SignalInterface) -> Option<Signal> {
         match signal {
             SignalInterface::Shutdown(_) => {
-                self.register_stopping().ok();
+                self.register_exiting().ok();
                 Some(Signal::Shutdown)
             }
             SignalInterface::Suspend(_) => {

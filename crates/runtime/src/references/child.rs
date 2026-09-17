@@ -102,10 +102,10 @@ impl<E, C: Context> Child<E, C> {
         }
     }
 
-    /// Signals a shutdown to the child process and returns an [`ExitingChild`]
+    /// Signals a shutdown to the child process and returns an [`ShutdownChild`]
     /// future, which aborts the child if it hasn't exited within `duration`.
-    pub fn into_shutdown(self, duration: Duration) -> ExitingChild<E, C> {
-        ExitingChild::new(self, duration)
+    pub fn into_shutdown(self, duration: Duration) -> ShutdownChild<E, C> {
+        ShutdownChild::new(self, duration)
     }
 }
 
@@ -174,12 +174,12 @@ impl<T, R: Context> Debug for Child<T, R> {
 /// hasn't exited by the time this future resolves.
 ///
 /// Created via [`Child::into_shutdown`].
-pub struct ExitingChild<E = (), C: Context = Dyn> {
+pub struct ShutdownChild<E = (), C: Context = Dyn> {
     child: Child<E, C>,
     abort_after: Pin<Box<tokio::time::Sleep>>,
 }
 
-impl<E, C: Context> ExitingChild<E, C> {
+impl<E, C: Context> ShutdownChild<E, C> {
     /// Signals a shutdown to `child` and returns a future that aborts it if it
     /// hasn't exited within `duration`.
     pub fn new(child: Child<E, C>, duration: Duration) -> Self {
@@ -191,7 +191,7 @@ impl<E, C: Context> ExitingChild<E, C> {
         }
     }
 
-    /// Consumes the [`ExitingChild`] and returns the wrapped [`Child`].
+    /// Consumes the [`ShutdownChild`] and returns the wrapped [`Child`].
     pub fn into_inner(self) -> Child<E, C> {
         self.child
     }
@@ -207,7 +207,7 @@ impl<E, C: Context> ExitingChild<E, C> {
     }
 }
 
-impl<E, C: Context> Future for ExitingChild<E, C> {
+impl<E, C: Context> Future for ShutdownChild<E, C> {
     type Output = Result<E, JoinError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
@@ -227,9 +227,9 @@ impl<E, C: Context> Future for ExitingChild<E, C> {
     }
 }
 
-impl<E, C: Context> Debug for ExitingChild<E, C> {
+impl<E, C: Context> Debug for ShutdownChild<E, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ExitingChild")
+        f.debug_struct("ShutdownChild")
             .field("child", &self.child)
             .field("abort_after", &self.abort_after)
             .finish()

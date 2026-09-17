@@ -150,8 +150,7 @@ where
             }
 
             let status = self.status();
-            if !status.accepts_messages() && !(options.ignore_exiting && status.is_shutting_down())
-            {
+            if !status.accepts_messages() && !(options.ignore_exiting && status.is_exiting()) {
                 return Err(TryCastError::Closed(msg));
             }
 
