@@ -35,3 +35,6 @@ pub mod prelude {
     pub use crate::strategy::SupervisionStrategy;
     pub use crate::supervisor::{SupervisorBlueprint, SupervisorInterface};
 }
+
+mod intensity;
+pub use intensity::*;

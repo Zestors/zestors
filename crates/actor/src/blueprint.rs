@@ -1,4 +1,4 @@
-use crate::{Actor, RestartIntensity, RestartMode};
+use crate::{Actor, RestartMode};
 use std::{fmt::Debug, future::Future, time::Duration};
 
 /// A reusable recipe for producing an [`Actor`], together with the default
@@ -28,12 +28,6 @@ pub trait ActorBlueprint: Debug + Send + Sync + 'static {
     /// The default [`RestartMode`] to use for this actor.
     fn default_restart_mode(&self) -> RestartMode {
         RestartMode::default()
-    }
-
-    /// The default [`RestartIntensity`] to use for this actor, or `None` for
-    /// no restart-rate limit.
-    fn default_restart_intensity(&self) -> Option<RestartIntensity> {
-        None
     }
 }
 

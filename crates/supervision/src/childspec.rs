@@ -39,7 +39,7 @@ impl ChildConfig {
             abort_timeout: blueprint.default_abort_timeout(),
             init_timeout: blueprint.default_init_timeout(),
             start_timeout: blueprint.default_instantiation_timeout(),
-            intensity: blueprint.default_restart_intensity(),
+            intensity: None,
         }
     }
 }

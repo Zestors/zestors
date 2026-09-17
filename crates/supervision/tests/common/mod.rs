@@ -11,12 +11,13 @@ use std::{
     },
     time::Duration,
 };
-use zestors_actor::{Actor, RestartIntensity, RestartMode, fn_blueprint};
+use zestors_actor::{Actor, RestartMode, fn_blueprint};
 use zestors_codegen::{Interface, Message};
 use zestors_interface::Envelope;
 use zestors_runtime::{Dyn, prelude::*};
 use zestors_supervision::{
-    BlueprintSupervisionExt as _, ChildConfig, ChildSpec, SupervisorBlueprint, SupervisorInterface,
+    BlueprintSupervisionExt as _, ChildConfig, ChildSpec, RestartIntensity, SupervisorBlueprint,
+    SupervisorInterface,
 };
 
 /// Tells a [`TestActor`] to exit with an error, simulating an unhandled crash.
