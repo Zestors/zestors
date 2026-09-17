@@ -47,3 +47,6 @@ reqwest = { version = "0.13" }
 axum-typed-routing = { version = "0.4.6" }
 streamunordered = "0.5"
 
+
+[workspace.metadata.release]
+rate-limit = { existing-packages = 10 }
