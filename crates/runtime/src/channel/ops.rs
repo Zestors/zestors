@@ -44,24 +44,24 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
             }
 
             handle
-                .cast_now_dyn_with(msg, options)
+                .try_cast_dyn_with(msg, options)
                 .map_err(|e| e.into_cast_error_dbg_assert())
         }
     }
 
     /// Same as [`Sends::send_now`], but checks whether the message type is accepted by the channel.
-    fn cast_now_dyn_with<M: Message>(
+    fn try_cast_dyn_with<M: Message>(
         &self,
         msg: M,
         options: CastOptions,
-    ) -> Result<M::Receipt, CastNowDynError<M>> {
+    ) -> Result<M::Receipt, TryCastDynError<M>> {
         if !options.ignore_backpressure && self.reached_backpressure() {
-            return Err(CastNowDynError::Full(msg));
+            return Err(TryCastDynError::Full(msg));
         }
 
         let status = self.status();
         if !status.accepts_messages() && !(options.ignore_exiting && status.is_shutting_down()) {
-            return Err(CastNowDynError::Closed(msg));
+            return Err(TryCastDynError::Closed(msg));
         }
 
         let output = self.channel().try_push_msg(msg)?;

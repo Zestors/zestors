@@ -5,7 +5,7 @@ use thiserror::Error;
 use zestors_interface::ReceiptError;
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, Hash)]
-pub enum CastNowError<T> {
+pub enum TryCastError<T> {
     #[error("Channel is closed")]
     Closed(T),
 
@@ -13,20 +13,20 @@ pub enum CastNowError<T> {
     Full(T),
 }
 
-impl<T> CastNowError<T> {
+impl<T> TryCastError<T> {
     pub fn into_inner(self) -> T {
         match self {
-            CastNowError::Closed(t) => t,
-            CastNowError::Full(t) => t,
+            TryCastError::Closed(t) => t,
+            TryCastError::Full(t) => t,
         }
     }
 
     pub fn into_cast_error_dbg_assert(self) -> CastError<T> {
         match self {
-            CastNowError::Closed(t) => CastError(t),
-            CastNowError::Full(t) => {
-                debug_assert!(false, "Cannot convert CastNowError::Full into CastError");
-                tracing::error!("Cannot convert CastNowError::Full into CastError");
+            TryCastError::Closed(t) => CastError(t),
+            TryCastError::Full(t) => {
+                debug_assert!(false, "Cannot convert TryCastError::Full into CastError");
+                tracing::error!("Cannot convert TryCastError::Full into CastError");
                 CastError(t)
             }
         }
@@ -56,7 +56,7 @@ impl<T> CastDynError<T> {
 }
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, Hash)]
-pub enum CastNowDynError<T> {
+pub enum TryCastDynError<T> {
     #[error("Channel is closed")]
     Closed(T),
 
@@ -71,34 +71,34 @@ pub enum CastNowDynError<T> {
 #[error("Message type not accepted by channel")]
 pub struct NotAccepted<T>(pub T);
 
-impl<T> CastNowDynError<T> {
+impl<T> TryCastDynError<T> {
     pub fn into_inner(self) -> T {
         match self {
-            CastNowDynError::Closed(t) => t,
-            CastNowDynError::Full(t) => t,
-            CastNowDynError::NotAccepted(t) => t,
+            TryCastDynError::Closed(t) => t,
+            TryCastDynError::Full(t) => t,
+            TryCastDynError::NotAccepted(t) => t,
         }
     }
 
     pub(crate) fn into_cast_error_dbg_assert(self) -> CastDynError<T> {
         match self {
-            CastNowDynError::Closed(t) => CastDynError::Closed(t),
-            CastNowDynError::NotAccepted(t) => CastDynError::NotAccepted(t),
-            CastNowDynError::Full(t) => {
+            TryCastDynError::Closed(t) => CastDynError::Closed(t),
+            TryCastDynError::NotAccepted(t) => CastDynError::NotAccepted(t),
+            TryCastDynError::Full(t) => {
                 debug_assert!(
                     false,
-                    "Cannot convert CastNowDynError::Full into CastDynError"
+                    "Cannot convert TryCastDynError::Full into CastDynError"
                 );
-                tracing::error!("Cannot convert CastNowDynError::Full into CastDynError");
+                tracing::error!("Cannot convert TryCastDynError::Full into CastDynError");
                 CastDynError::NotAccepted(t)
             }
         }
     }
 }
 
-impl<T> From<CastError<T>> for CastNowError<T> {
+impl<T> From<CastError<T>> for TryCastError<T> {
     fn from(err: CastError<T>) -> Self {
-        CastNowError::Closed(err.0)
+        TryCastError::Closed(err.0)
     }
 }
 
@@ -165,45 +165,45 @@ impl<M> From<CallError<M>> for CallCheckedError<M> {
     }
 }
 
-impl<T> From<PushError<T>> for CastNowError<T> {
+impl<T> From<PushError<T>> for TryCastError<T> {
     fn from(err: PushError<T>) -> Self {
         match err {
-            PushError::Closed(t) => CastNowError::Closed(t),
-            PushError::Full(t) => CastNowError::Full(t),
+            PushError::Closed(t) => TryCastError::Closed(t),
+            PushError::Full(t) => TryCastError::Full(t),
         }
     }
 }
 
-impl<T> From<CastDynError<T>> for CastNowDynError<T> {
+impl<T> From<CastDynError<T>> for TryCastDynError<T> {
     fn from(err: CastDynError<T>) -> Self {
         match err {
-            CastDynError::Closed(t) => CastNowDynError::Closed(t),
-            CastDynError::NotAccepted(t) => CastNowDynError::NotAccepted(t),
+            CastDynError::Closed(t) => TryCastDynError::Closed(t),
+            CastDynError::NotAccepted(t) => TryCastDynError::NotAccepted(t),
         }
     }
 }
 
-impl<T> From<PushError<T>> for CastNowDynError<T> {
+impl<T> From<PushError<T>> for TryCastDynError<T> {
     fn from(err: PushError<T>) -> Self {
         match err {
-            PushError::Closed(t) => CastNowDynError::Closed(t),
-            PushError::Full(t) => CastNowDynError::Full(t),
+            PushError::Closed(t) => TryCastDynError::Closed(t),
+            PushError::Full(t) => TryCastDynError::Full(t),
         }
     }
 }
 
-impl<T> From<CastNowError<T>> for CastNowDynError<T> {
-    fn from(err: CastNowError<T>) -> Self {
+impl<T> From<TryCastError<T>> for TryCastDynError<T> {
+    fn from(err: TryCastError<T>) -> Self {
         match err {
-            CastNowError::Closed(t) => CastNowDynError::Closed(t),
-            CastNowError::Full(t) => CastNowDynError::Full(t),
+            TryCastError::Closed(t) => TryCastDynError::Closed(t),
+            TryCastError::Full(t) => TryCastDynError::Full(t),
         }
     }
 }
 
-impl<T> From<NotAccepted<T>> for CastNowDynError<T> {
+impl<T> From<NotAccepted<T>> for TryCastDynError<T> {
     fn from(err: NotAccepted<T>) -> Self {
-        CastNowDynError::NotAccepted(err.0)
+        TryCastDynError::NotAccepted(err.0)
     }
 }
 
