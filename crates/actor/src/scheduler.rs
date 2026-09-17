@@ -13,7 +13,14 @@ pub struct BasicScheduler<H: Handler> {
     futures: FuturesUnordered<BoxFuture<'static, Result<Option<HandlerMessage<H>>, Report>>>,
 }
 
+impl<H: Handler> Default for BasicScheduler<H> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<H: Handler> BasicScheduler<H> {
+    /// Creates a new, empty scheduler.
     pub fn new() -> Self {
         Self {
             futures: FuturesUnordered::new(),
@@ -85,6 +92,7 @@ impl<H: Handler> HandlerMessage<H> {
         Self::from_box(Box::new(msg))
     }
 
+    /// Same as [`HandlerMessage::new`], but for a message that is already boxed.
     pub fn from_box<M>(msg: Box<M>) -> Self
     where
         H: Handle<M>,
@@ -117,7 +125,7 @@ impl<H: Handler> std::fmt::Debug for HandlerMessage<H> {
     }
 }
 
-/// Internal trait for [`ErasedMessage`] to handle the message without knowing its concrete type.
+/// Internal trait for [`HandlerMessage`] to handle the message without knowing its concrete type.
 trait DynErasedMessage<H: Handler>: Send + 'static {
     fn handle_dyn<'a>(
         self: Box<Self>,
@@ -173,7 +181,7 @@ impl<H: Handler> Handle<HandlerCallback<H>> for H {
 
 impl<H: Handler> std::fmt::Debug for HandlerCallback<H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CallbackMessage")
+        f.debug_struct("HandlerCallback")
             .field("f", &"<dyn FnOnce>")
             .finish()
     }
@@ -181,6 +189,8 @@ impl<H: Handler> std::fmt::Debug for HandlerCallback<H> {
 
 /// A trait for types that can be handled by a [`Handler`].
 pub trait HandledBy<H: Handler>: Send + 'static {
+    /// Handles `self`, constructing a fresh resolver/receipt pair and
+    /// discarding the receipt since the caller has no way to wait on it.
     fn handle(
         self,
         state: HandlerState<'_, H>,

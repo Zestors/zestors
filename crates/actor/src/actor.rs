@@ -7,17 +7,30 @@ use zestors_runtime::{
     {TaskBox, errors::DuplicatePidError},
 };
 
+/// The core trait for an actor's behavior: given an [`Inbox`], runs until it exits.
+///
+/// Most actors are more conveniently implemented via a [`Handler`](crate::Handler),
+/// which implements `Actor` automatically. Implement `Actor` directly for full
+/// control over the actor's event loop.
 pub trait Actor: Send + Sized + 'static {
+    /// The [`Interface`] of messages this actor accepts.
     type Interface: Interface;
+
+    /// The value produced once this actor's [`Actor::run`] completes.
     type Exit: Send + 'static;
 
+    /// Runs the actor to completion, receiving messages and signals through `inbox`.
     fn run(
         self,
         inbox: Inbox<Self::Interface>,
     ) -> impl Future<Output = Result<Self::Exit, Report>> + Send + 'static;
 }
 
+/// Combinators for adapting an [`Actor`]'s behavior, and for spawning it.
+/// Implemented automatically for every [`Actor`].
 pub trait ActorExt: Actor {
+    /// Wraps this actor so that `map_exit` transforms its exit value once
+    /// [`Actor::run`] completes.
     fn map_actor_exit<F, R>(self, map_exit: F) -> MapActor<Self, F>
     where
         F: FnOnce(Result<Self::Exit, Report>) -> Result<R, Report> + Send + 'static,
@@ -26,6 +39,8 @@ pub trait ActorExt: Actor {
         MapActor::new(self, map_exit)
     }
 
+    /// Wraps this actor so that `mapper` runs instead of [`Actor::run`],
+    /// given the original actor and its [`Inbox`].
     fn wrap_actor<F, Fut, E>(self, mapper: F) -> WrapActor<Self, F>
     where
         F: FnOnce(Self, Inbox<Self::Interface>) -> Fut + Send + 'static,
@@ -35,16 +50,22 @@ pub trait ActorExt: Actor {
         WrapActor::new(self, mapper)
     }
 
+    /// Spawns this actor under a specific [`Pid`], returning a [`Child`] that
+    /// owns its task. Fails if `pid` is already registered.
     fn spawn_with(self, pid: Pid) -> Result<Child<Self::Exit, Self::Interface>, DuplicatePidError> {
         spawn_with(pid, |inbox| self.run(inbox))
     }
 
+    /// Spawns this actor under a freshly generated [`Pid`], returning a
+    /// [`Child`] that owns its task.
     fn spawn(self) -> Child<Self::Exit, Self::Interface> {
         spawn(|inbox| self.run(inbox))
     }
 }
 impl<T: Actor> ActorExt for T {}
 
+/// Creates a signal-only [`Actor`] (no messages, only [`Signal`]s) from `f`,
+/// which receives a [`TaskBox`] instead of a typed [`Inbox`].
 pub fn fn_task<F, Fut, E>(f: F) -> FnTask<F, Fut, E>
 where
     F: FnOnce(TaskBox) -> Fut + Send + 'static,
@@ -54,6 +75,7 @@ where
     FnTask::new(f)
 }
 
+/// Creates an [`Actor`] from `f`, which receives the actor's [`Inbox`] directly.
 pub fn fn_actor<F, Fut, I, E>(f: F) -> FnActor<F, Fut, I, E>
 where
     F: FnOnce(Inbox<I>) -> Fut + Send + 'static,
@@ -67,6 +89,7 @@ where
 mod _hidden {
     use super::*;
 
+    /// The [`Actor`] returned by [`ActorExt::map_actor_exit`].
     #[derive(Clone)]
     pub struct MapActor<T, F> {
         inner: T,
@@ -114,6 +137,7 @@ mod _hidden {
         }
     }
 
+    /// The [`Actor`] returned by [`ActorExt::wrap_actor`].
     #[derive(Clone)]
     pub struct WrapActor<T, F> {
         inner: T,
@@ -163,6 +187,7 @@ mod _hidden {
         }
     }
 
+    /// The [`Actor`] returned by [`fn_actor`](crate::fn_actor).
     pub struct FnActor<F, Fut, I, E>
     where
         F: FnOnce(Inbox<I>) -> Fut + Send + 'static,
@@ -237,6 +262,7 @@ mod _hidden {
         }
     }
 
+    /// The [`Actor`] returned by [`fn_task`](crate::fn_task).
     pub struct FnTask<F, Fut, E>
     where
         F: FnOnce(TaskBox) -> Fut + Send + 'static,

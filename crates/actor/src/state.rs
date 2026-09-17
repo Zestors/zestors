@@ -106,23 +106,23 @@ impl<H: Handler> FullHandlerState<H> {
             InboxEvent::Signal(signal) => match signal {
                 Signal::Resume => {
                     handler.on_resume(&self.address).await?;
-                    return Ok(RunOnce::Continue);
+                    Ok(RunOnce::Continue)
                 }
 
                 Signal::Suspend => {
                     handler.on_suspend(&self.address).await?;
-                    return Ok(RunOnce::Continue);
+                    Ok(RunOnce::Continue)
                 }
 
                 Signal::Shutdown => {
                     handler.on_shutdown(&self.address).await?;
-                    return Ok(RunOnce::Continue);
+                    Ok(RunOnce::Continue)
                 }
             },
 
             InboxEvent::Message(msg) => {
                 msg.handle_with(state, handler).await?;
-                return Ok(RunOnce::Continue);
+                Ok(RunOnce::Continue)
             }
         }
     }
@@ -155,28 +155,12 @@ enum RunOnce {
     ExitNormal,
 }
 
+/// The [`Handler`]'s view of its own actor, passed to lifecycle hooks and
+/// message handlers. Gives access to the actor's own [`Address`] via
+/// [`ActorRef`]/[`ActorOps`](zestors_runtime::ActorOps).
 pub struct HandlerState<'a, H: Handler> {
     address: &'a Address<H::Interface>,
 }
-
-// impl<'a, H: Handler> HandlerState<'a, H> {
-//     /// Schedule a future that will produce a [`Message`] to be handled by the actor.
-//     pub fn schedule_msg<F, M>(&mut self, future_message: F)
-//     where
-//         F: Future<Output = Result<M, Report>> + Send + 'static,
-//         M: Message,
-//         H: Handle<M>,
-//     {
-//         self.scheduler.schedule_msg(future_message);
-//     }
-
-//     pub fn schedule_fut<F>(&mut self, future_message: F)
-//     where
-//         F: Future<Output = Result<(), Report>> + Send + 'static,
-//     {
-//         self.scheduler.schedule_fut(future_message);
-//     }
-// }
 
 impl<'a, H: Handler> ActorRef for HandlerState<'a, H> {
     type Ctx = H::Interface;
