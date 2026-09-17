@@ -188,6 +188,9 @@ impl<H: Handler> std::fmt::Debug for HandlerCallback<H> {
 }
 
 /// A trait for types that can be handled by a [`Handler`].
+///
+/// Automatically implemented for any type that implements [`Message`] and has a
+/// corresponding [`Handle`] implementation for the given handler.
 pub trait HandledBy<H: Handler>: Send + 'static {
     /// Handles `self`, constructing a fresh resolver/receipt pair and
     /// discarding the receipt since the caller has no way to wait on it.

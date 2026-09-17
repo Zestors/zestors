@@ -1,3 +1,25 @@
+//! Declarative actor implementation on top of `zestors-runtime`.
+//!
+//! An actor is any type implementing [`Actor`], whose [`Actor::run`] owns the
+//! actor's event loop end to end. [`ActorExt`] provides the ergonomics built
+//! on top of it: [`ActorExt::spawn`]/[`ActorExt::spawn_with`] to start the
+//! actor, and [`ActorExt::map_actor_exit`]/[`ActorExt::wrap_actor`] to adapt
+//! its behavior.
+//!
+//! Most actors are easier to write via [`Handler`], which implements
+//! [`Actor`] automatically from a set of lifecycle hooks ([`Handler::init`],
+//! [`Handler::exit`], [`Handler::on_shutdown`],
+//! [`on_suspend`](Handler::on_suspend), [`on_resume`](Handler::on_resume))
+//! and per-message [`Handle<M>`] implementations. Each call is given a
+//! [`HandlerContext`], the handler's view of its own actor.
+//! [`Handler::next_event`] (optionally backed by [`BasicScheduler`]) lets a
+//! handler additionally react to arbitrary futures alongside its messages and
+//! signals.
+//!
+//! An [`ActorBlueprint`] is a reusable recipe for producing an actor,
+//! together with the default restart policy ([`RestartMode`]/
+//! [`RestartIntensity`]) a supervisor should apply to it.
+
 mod actor;
 use std::{collections::VecDeque, time::Duration};
 

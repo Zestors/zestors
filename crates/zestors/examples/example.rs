@@ -103,7 +103,7 @@ impl Handle<u32> for MyActor {
         self.nr += msg;
 
         if msg == 301 {
-            state.signal_shutdown();
+            ctx.signal_shutdown();
         }
 
         Ok(())
