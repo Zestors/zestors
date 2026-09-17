@@ -32,6 +32,7 @@ impl Actor for Supervisor {
             supervisees: self.supervisees,
             inbox,
             source: self.source,
+            restarter: RestartLimiter::new(self.restart_intensity),
         }
         .run(self.strategy)
         .await
@@ -62,6 +63,7 @@ struct SupervisorInner {
     supervisees: SuperviseeMap,
     inbox: Inbox<SupervisorInterface>,
     source: Option<Arc<dyn SupervisorSource>>,
+    restarter: RestartLimiter,
 }
 
 impl SupervisorInner {

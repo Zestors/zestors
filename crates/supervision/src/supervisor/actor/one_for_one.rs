@@ -131,7 +131,7 @@ impl<'a> OneForOneSupervisor<'a> {
             return ControlFlow::Continue(());
         }
 
-        match supervisee.acquire_restart_permit() {
+        match self.inner.restarter.acquire_permit() && supervisee.acquire_restart_permit() {
             true => {
                 if let Err(e) = supervisee.start() {
                     tracing::error!(%e, "Failed to restart supervisee");

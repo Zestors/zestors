@@ -23,8 +23,8 @@ pub trait Blueprint: Debug + Send + Sync + 'static {
         RestartMode::default()
     }
 
-    fn default_restart_intensity(&self) -> RestartIntensity {
-        RestartIntensity::default()
+    fn default_restart_intensity(&self) -> Option<RestartIntensity> {
+        None
     }
 }
 

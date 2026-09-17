@@ -149,7 +149,7 @@ impl<'a> OneForAllSupervisor<'a> {
             return ControlFlow::Continue(());
         }
 
-        if !supervisee.acquire_restart_permit() {
+        if !self.inner.restarter.acquire_permit() || !supervisee.acquire_restart_permit() {
             return self.shutdown();
         }
 

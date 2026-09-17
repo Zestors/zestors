@@ -125,7 +125,7 @@ pub fn test_child(mode: RestartMode) -> (ChildSpec, Address<TestInterface>, Arc<
         // quick, self-healing retries (surfaced as an ordinary start
         // failure). A generous intensity keeps that from tripping the
         // restart limiter and shutting the test's supervisor down early.
-        intensity: RestartIntensity::new(100, Duration::from_secs(30)),
+        intensity: Some(RestartIntensity::restarts(100).within(Duration::from_secs(30))),
         abort_timeout: Duration::from_secs(1),
         init_timeout: Duration::from_secs(1),
         start_timeout: Duration::from_secs(1),

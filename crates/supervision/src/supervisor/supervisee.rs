@@ -20,7 +20,7 @@ use zestors_runtime::{
 pub(crate) struct Supervisee {
     spec: ChildSpec,
     state: SuperviseeState,
-    restarter: RestartLimiter,
+    restarter: Option<RestartLimiter>,
     /// The waker from this supervisee's most recent poll. `start`/`stop`
     /// mutate `state` from outside of a poll (e.g. in response to a
     /// sibling's exit), which on its own doesn't get this supervisee's
@@ -34,7 +34,7 @@ pub(crate) struct Supervisee {
 impl Supervisee {
     pub(crate) fn new(spec: ChildSpec) -> Self {
         Self {
-            restarter: RestartLimiter::new(spec.cfg().intensity.clone()),
+            restarter: spec.cfg().intensity.clone().map(RestartLimiter::new),
             spec,
             state: SuperviseeState::idle(),
             waker: None,
@@ -85,7 +85,10 @@ impl Supervisee {
     /// Whether the restart-limiter allows the child to be restarted
     #[must_use]
     pub(crate) fn acquire_restart_permit(&mut self) -> bool {
-        self.restarter.acquire_permit()
+        self.restarter
+            .as_mut()
+            .map(|r| r.acquire_permit())
+            .unwrap_or(true)
     }
 
     pub(crate) fn start(&mut self) -> Result<bool, SuperviseeIsShuttingDown> {

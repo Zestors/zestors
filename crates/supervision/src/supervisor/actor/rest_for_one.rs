@@ -202,7 +202,8 @@ impl<'a> RestForOneSupervisor<'a> {
             return ControlFlow::Continue(());
         }
 
-        if !supervisee.acquire_restart_permit() {
+        // Here we check both permit of the supervisee as well as the supervisor
+        if !self.inner.restarter.acquire_permit() || !supervisee.acquire_restart_permit() {
             return self.shutdown();
         }
 

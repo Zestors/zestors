@@ -8,7 +8,7 @@ use zestors_runtime::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChildConfig {
     pub restart_mode: RestartMode,
-    pub intensity: RestartIntensity,
+    pub intensity: Option<RestartIntensity>,
     pub abort_timeout: Duration,
     pub init_timeout: Duration,
     pub start_timeout: Duration,
@@ -18,7 +18,7 @@ impl Default for ChildConfig {
     fn default() -> Self {
         Self {
             restart_mode: RestartMode::Always,
-            intensity: RestartIntensity::default(),
+            intensity: Default::default(),
             abort_timeout: Duration::from_secs(5),
             init_timeout: Duration::from_secs(5),
             start_timeout: Duration::from_secs(5),

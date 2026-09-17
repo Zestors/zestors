@@ -94,6 +94,18 @@ impl RestartIntensity {
         true
     }
 
+    pub fn restarts(max_restarts: u16) -> Self {
+        Self {
+            max_restarts,
+            within: Duration::from_mins(5),
+        }
+    }
+
+    pub fn within(mut self, within: Duration) -> Self {
+        self.within = within;
+        self
+    }
+
     pub fn new(max_restarts: u16, within: Duration) -> Self {
         Self {
             max_restarts,
