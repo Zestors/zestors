@@ -85,7 +85,7 @@ impl<C: Context> AsDyn for StrongAddress<C> {
 impl<C: Context> ActorRef for StrongAddress<C> {
     type Ctx = C;
 
-    fn as_address(&self) -> &Address<Self::Ctx> {
+    fn actor_ref(&self) -> &Address<Self::Ctx> {
         &self.address
     }
 }

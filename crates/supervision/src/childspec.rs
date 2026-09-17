@@ -121,8 +121,8 @@ impl<T: Start> ChildSpec<T> {
 impl<T: Start> ActorRef for ChildSpec<T> {
     type Ctx = T::Ctx;
 
-    fn as_address(&self) -> &Address<Self::Ctx> {
-        self.channel.as_address()
+    fn actor_ref(&self) -> &Address<Self::Ctx> {
+        self.channel.actor_ref()
     }
 }
 

@@ -490,7 +490,7 @@ impl<I: Interface> Address<I> {
 impl<C: Context> ActorRef for Address<C> {
     type Ctx = C;
 
-    fn as_address(&self) -> &Address<Self::Ctx> {
+    fn actor_ref(&self) -> &Address<Self::Ctx> {
         self
     }
 }

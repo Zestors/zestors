@@ -242,8 +242,8 @@ impl Stream for Supervisee {
 impl ActorRef for Supervisee {
     type Ctx = Dyn;
 
-    fn as_address(&self) -> &Address<Self::Ctx> {
-        self.spec.as_address()
+    fn actor_ref(&self) -> &Address<Self::Ctx> {
+        self.spec.actor_ref()
     }
 }
 

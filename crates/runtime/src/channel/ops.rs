@@ -16,7 +16,7 @@ pub trait ActorRef {
     /// Returns a reference to the [`Address`] of the associated actor. See
     /// [`ActorOps::address`] for the same thing, re-exposed on the trait
     /// that's part of the [`prelude`](crate::prelude).
-    fn as_address(&self) -> &Address<Self::Ctx>;
+    fn actor_ref(&self) -> &Address<Self::Ctx>;
 }
 
 /// The core trait for interacting with actors through their [`Address`].
@@ -41,7 +41,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         msg: M,
         mut options: CastOptions,
     ) -> impl Future<Output = Result<M::Receipt, CastDynError<M>>> + Send {
-        let handle = self.as_address();
+        let handle = self.actor_ref();
 
         async move {
             if !options.ignore_backpressure {
@@ -78,8 +78,8 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
             return Err(TryCastDynError::Closed(msg));
         }
 
-        let output = self.as_address().try_push_msg(msg)?;
-        self.as_address().msg_notify_one();
+        let output = self.actor_ref().try_push_msg(msg)?;
+        self.actor_ref().msg_notify_one();
         Ok(output)
     }
 
@@ -99,7 +99,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         msg: M,
         options: CastOptions,
     ) -> impl Future<Output = Result<M::Output, CallDynError<M>>> + Send {
-        let handle = self.as_address();
+        let handle = self.actor_ref();
         async move { Ok(handle.cast_dyn_with(msg, options).await?.wait().await?) }
     }
 
@@ -228,7 +228,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// sending would incur a delay (via [`Cast::cast`]) or fail with
     /// [`TryCastError::Full`] (via [`Cast::try_cast`]).
     fn reached_backpressure(&self) -> bool {
-        let handle = self.as_address();
+        let handle = self.actor_ref();
 
         handle
             .backpressure()
@@ -273,7 +273,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     fn ping(&self) -> Reply<()> {
         let (tx, rx) = Request::new();
 
-        self.as_address()
+        self.actor_ref()
             .data()
             .signal(SignalInterface::Ping(Envelope::new(signals::Ping, tx)));
 
@@ -339,7 +339,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// This amount should only be used as an indication of the number of
     /// active references to the channel.
     fn ref_count(&self) -> usize {
-        self.as_address().ref_count()
+        self.actor_ref().ref_count()
     }
 
     /// The amount of [`Address`]es in existence for this channel.
@@ -351,16 +351,16 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     }
 
     /// Returns a reference to the [`Address`] of the associated actor. Same
-    /// as [`ActorRef::as_address`], re-exposed here since [`ActorRef`] itself
+    /// as [`ActorRef::actor_ref`], re-exposed here since [`ActorRef`] itself
     /// is not part of the [`prelude`](crate::prelude).
     fn address(&self) -> &Address<Self::Ctx> {
-        self.as_address()
+        self.actor_ref()
     }
 
     /// Attempts to obtain a [`StrongAddress`] to the channel, returning
     /// `None` if it is permanently dead (see [`ActorOps::is_permanently_dead`]).
     fn upgrade(&self) -> Option<StrongAddress<Self::Ctx>> {
-        StrongAddress::from_address_ref(self.as_address())
+        StrongAddress::from_address_ref(self.actor_ref())
     }
 }
 
@@ -393,7 +393,7 @@ impl Clock {
 
 trait ChannelAccess: ActorRef {
     fn data(&self) -> &Channel<dyn DynamicQueue> {
-        self.as_address().data()
+        self.actor_ref().data()
     }
 }
 impl<T: ActorRef + ?Sized> ChannelAccess for T {}

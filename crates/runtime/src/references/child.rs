@@ -112,8 +112,8 @@ impl<E, C: Context> Child<E, C> {
 impl<T, R: Context> ActorRef for Child<T, R> {
     type Ctx = R;
 
-    fn as_address(&self) -> &Address<Self::Ctx> {
-        self.address.as_address()
+    fn actor_ref(&self) -> &Address<Self::Ctx> {
+        self.address.actor_ref()
     }
 }
 

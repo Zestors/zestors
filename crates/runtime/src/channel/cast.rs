@@ -87,7 +87,7 @@ where
     Address<T::Ctx>: _Cast<M>,
 {
     async fn cast_with(&self, msg: M, options: CastOptions) -> Result<M::Receipt, CastError<M>> {
-        self.as_address()._cast_with(msg, options).await
+        self.actor_ref()._cast_with(msg, options).await
     }
 
     fn try_cast(&self, msg: M) -> Result<M::Receipt, TryCastError<M>> {
@@ -95,7 +95,7 @@ where
     }
 
     fn try_cast_with(&self, msg: M, options: CastOptions) -> Result<M::Receipt, TryCastError<M>> {
-        self.as_address()._try_cast_with(msg, options)
+        self.actor_ref()._try_cast_with(msg, options)
     }
 }
 
