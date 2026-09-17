@@ -15,8 +15,6 @@
 //! | [`api_server`] | HTTP introspection: `ApiServer` exposes `/processes`, `/snapshots`, and `/health` for a running tree. |
 //! | `zestors_inspector` | The `zestors-inspector` GUI — a separate workspace crate, not re-exported here — visualizes the same tree data that [`api_server`] exposes. |
 
-pub use zestors_api_server as api_server;
-
 /// The items you usually need, re-exported from each sub-crate plus the
 /// codegen macros.
 pub mod prelude {
@@ -30,8 +28,20 @@ pub mod prelude {
     pub use zestors_supervisor::prelude::*;
 }
 
+#[doc(inline)]
+pub use zestors_api_server as api_server;
+
+#[doc(inline)]
 pub use zestors_actor as actor;
+
+#[doc(inline)]
 pub use zestors_interface as interface;
+
+#[doc(inline)]
 pub use zestors_runtime as runtime;
+
+#[doc(inline)]
 pub use zestors_supervision as supervision;
+
+#[doc(inline)]
 pub use zestors_supervisor as supervisor;

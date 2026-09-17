@@ -82,6 +82,7 @@ impl Channel<dyn DynamicQueue> {
             panic!("Queue was full or empty {}", std::any::type_name::<Self>());
         }
 
+        self.msg_notify_one();
         Ok(receipt)
     }
 

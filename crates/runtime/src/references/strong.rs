@@ -22,17 +22,23 @@ impl<T: Context> StrongAddress<T> {
     where
         T: Interface,
     {
-        let this = StrongAddress {
-            address: Address::new(pid, 1),
-        };
+        // Register the plain `Address` first, and only wrap it into a
+        // `StrongAddress` once that succeeds. `Address` has no `Drop` of its
+        // own, but `StrongAddress` does: it removes its pid's entry from the
+        // registry once its strong count reaches zero. Wrapping eagerly
+        // (before knowing whether registration succeeded) meant a *rejected*
+        // duplicate-pid attempt would still construct and then drop a full
+        // `StrongAddress`, deregistering the entry actually owned by the
+        // pre-existing address under that pid.
+        let address = Address::new(pid, 1);
 
         Registry::local()
-            .register(this.address.clone())
+            .register(address.clone())
             .map_err(|_e| DuplicatePidError {
-                pid: this.pid().clone(),
+                pid: address.pid().clone(),
             })?;
 
-        Ok(this)
+        Ok(StrongAddress { address })
     }
 
     pub(crate) fn from_address_ref(handle: &Address<T>) -> Option<Self> {

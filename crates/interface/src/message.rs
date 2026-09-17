@@ -25,6 +25,25 @@ pub trait Message: Send + 'static + Sized {
 
     /// The output of the receipt after being resolved.
     type Output: Send + 'static;
+
+    // type Kind: MessageKind;
+}
+
+pub trait MessageKind<O> {
+    type Receipt: Receipt<Output = O, Resolver = Self::Resolver>;
+    type Resolver: Resolver<Receipt = Self::Receipt>;
+}
+
+pub struct Call;
+pub struct Cast;
+
+impl<O: Send + 'static> MessageKind<O> for Call {
+    type Receipt = Reply<O>;
+    type Resolver = Request<O>;
+}
+impl MessageKind<()> for Cast {
+    type Receipt = ();
+    type Resolver = ();
 }
 
 /// The value returned to the sender after sending a [`Message`]; can be
