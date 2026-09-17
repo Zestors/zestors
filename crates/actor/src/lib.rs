@@ -20,7 +20,7 @@ pub mod prelude {
     pub use crate::blueprint::ActorBlueprint;
     pub use crate::handler::Handler;
     pub use crate::scheduler::HandledBy;
-    pub use crate::state::HandlerState;
+    pub use crate::state::HandlerContext;
 }
 
 use serde::{Deserialize, Serialize};

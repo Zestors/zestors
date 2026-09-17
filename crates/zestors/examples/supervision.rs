@@ -3,7 +3,8 @@ use rootcause::Report;
 use std::{sync::Arc, time::Duration};
 use zestors::{
     actor::{
-        BasicScheduler, Handle, Handler, HandlerExit, HandlerState, fn_actor, fn_blueprint, fn_task,
+        BasicScheduler, Handle, Handler, HandlerContext, HandlerExit, fn_actor, fn_blueprint,
+        fn_task,
     },
     api_server::ApiServer,
     prelude::*,
@@ -40,7 +41,7 @@ struct Tick;
 impl Handler for MyActor {
     type Interface = MyInterface;
 
-    async fn init(&mut self, _state: HandlerState<'_, MyActor>) -> Result<(), Report> {
+    async fn init(&mut self, _ctx: HandlerContext<'_, MyActor>) -> Result<(), Report> {
         tokio::time::sleep(Duration::from_secs(3)).await;
 
         self.scheduler.schedule_msg(async move {
@@ -54,7 +55,7 @@ impl Handler for MyActor {
 
     async fn exit(
         &mut self,
-        _state: HandlerState<'_, Self>,
+        _ctx: HandlerContext<'_, Self>,
         reason: HandlerExit,
     ) -> Result<(), Report> {
         tokio::time::sleep(Duration::from_secs(3)).await;
@@ -71,7 +72,7 @@ impl Handler for MyActor {
 impl Handle<Tick> for MyActor {
     async fn handle(
         &mut self,
-        _state: HandlerState<'_, Self>,
+        _ctx: HandlerContext<'_, Self>,
         _msg: Tick,
         _req: (),
     ) -> Result<(), Report> {
@@ -89,7 +90,7 @@ impl Handle<Tick> for MyActor {
 impl Handle<u32> for MyActor {
     async fn handle(
         &mut self,
-        _state: HandlerState<'_, Self>,
+        _ctx: HandlerContext<'_, Self>,
         msg: u32,
         _req: (),
     ) -> Result<(), Report> {
@@ -101,7 +102,7 @@ impl Handle<u32> for MyActor {
 impl Handle<String> for MyActor {
     async fn handle(
         &mut self,
-        _state: HandlerState<'_, Self>,
+        _ctx: HandlerContext<'_, Self>,
         msg: String,
         _req: (),
     ) -> Result<(), Report> {

@@ -1,4 +1,4 @@
-use crate::{Actor, FullHandlerState, HandledBy, HandlerState};
+use crate::{Actor, FullHandlerContext, HandledBy, HandlerContext};
 use futures::future::ready;
 use rootcause::{Report, report};
 use std::{convert::Infallible, fmt::Debug};
@@ -50,7 +50,7 @@ pub trait Handler: Debug + Sized + Send + 'static {
     /// [`HandlerExit::InitCancelled`].
     fn init(
         &mut self,
-        _state: HandlerState<'_, Self>,
+        _ctx: HandlerContext<'_, Self>,
     ) -> impl Future<Output = Result<(), Report>> + Send {
         async { Ok(()) }
     }
@@ -62,7 +62,7 @@ pub trait Handler: Debug + Sized + Send + 'static {
     /// exiting.
     fn exit(
         &mut self,
-        _state: HandlerState<'_, Self>,
+        _ctx: HandlerContext<'_, Self>,
         exit: HandlerExit,
     ) -> impl Future<Output = Result<(), Report>> + Send {
         async { exit.into_result() }
@@ -160,7 +160,7 @@ pub trait Handle<M: Message>: Handler {
     /// Handles a message of type `M`.
     fn handle(
         &mut self,
-        state: HandlerState<'_, Self>,
+        ctx: HandlerContext<'_, Self>,
         msg: M,
         req: M::Resolver,
     ) -> impl Future<Output = Result<(), Report>> + Send;
@@ -169,7 +169,7 @@ pub trait Handle<M: Message>: Handler {
 impl<H: Handler> Handle<Infallible> for H {
     async fn handle(
         &mut self,
-        _state: HandlerState<'_, Self>,
+        _ctx: HandlerContext<'_, Self>,
         _msg: Infallible,
         _req: <Infallible as Message>::Resolver,
     ) -> Result<(), Report> {
@@ -186,7 +186,7 @@ pub trait HandlerInterface<H: Handler>: Interface {
     /// Handle the interface using the provided [`Handler`].
     fn handle_with(
         self,
-        state: HandlerState<'_, H>,
+        ctx: HandlerContext<'_, H>,
         actor: &mut H,
     ) -> impl Future<Output = Result<(), Report>> + Send;
 }
@@ -239,6 +239,6 @@ impl<H: Handler> Actor for H {
     type Exit = ();
 
     async fn run(mut self, state: Inbox<Self::Interface>) -> Result<Self::Exit, Report> {
-        FullHandlerState::new(state).run(&mut self).await
+        FullHandlerContext::new(state).run(&mut self).await
     }
 }

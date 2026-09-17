@@ -3,7 +3,7 @@ use rootcause::Report;
 use zestors_codegen::Message;
 use zestors_interface::{Resolver, prelude::*};
 
-use crate::{Handle, Handler, HandlerState};
+use crate::{Handle, Handler, HandlerContext};
 
 /// A basic scheduler that allows scheduling futures to be run concurrently with the actor's message
 /// processing. Add the scheduler to the actor's state, and call [`next`](Self::next) inside the
@@ -43,7 +43,7 @@ impl<H: Handler> BasicScheduler<H> {
     /// a callback to be executed in the context of the actor.
     pub fn schedule_callback<F>(&mut self, fut: impl Future<Output = F> + Send + 'static)
     where
-        F: FnOnce(&mut H, HandlerState<'_, H>) -> Result<(), Report> + Send + 'static,
+        F: FnOnce(&mut H, HandlerContext<'_, H>) -> Result<(), Report> + Send + 'static,
     {
         self.futures.push(Box::pin(async move {
             let callback = fut.await;
@@ -101,19 +101,19 @@ impl<H: Handler> HandlerMessage<H> {
         Self { msg }
     }
 
-    pub async fn handle(self, state: HandlerState<'_, H>, actor: &mut H) -> Result<(), Report> {
-        self.msg.handle_dyn(state, actor).await
+    pub async fn handle(self, ctx: HandlerContext<'_, H>, actor: &mut H) -> Result<(), Report> {
+        self.msg.handle_dyn(ctx, actor).await
     }
 }
 
 impl<H: Handler> Handle<HandlerMessage<H>> for H {
     async fn handle(
         &mut self,
-        state: HandlerState<'_, Self>,
+        ctx: HandlerContext<'_, Self>,
         msg: HandlerMessage<H>,
         _req: <HandlerMessage<H> as Message>::Resolver,
     ) -> Result<(), Report> {
-        msg.msg.handle_dyn(state, self).await
+        msg.msg.handle_dyn(ctx, self).await
     }
 }
 
@@ -129,7 +129,7 @@ impl<H: Handler> std::fmt::Debug for HandlerMessage<H> {
 trait DynErasedMessage<H: Handler>: Send + 'static {
     fn handle_dyn<'a>(
         self: Box<Self>,
-        state: HandlerState<'a, H>,
+        ctx: HandlerContext<'a, H>,
         actor: &'a mut H,
     ) -> BoxFuture<'a, Result<(), Report>>;
 }
@@ -137,13 +137,13 @@ trait DynErasedMessage<H: Handler>: Send + 'static {
 impl<M: Message, H: Handle<M>> DynErasedMessage<H> for M {
     fn handle_dyn<'a>(
         self: Box<Self>,
-        state: HandlerState<'a, H>,
+        ctx: HandlerContext<'a, H>,
         actor: &'a mut H,
     ) -> BoxFuture<'a, Result<(), Report>> {
         Box::pin(async move {
             let (resolver, receipt) = <M::Resolver as Resolver>::new();
             std::mem::drop(receipt);
-            actor.handle(state, *self, resolver).await?;
+            actor.handle(ctx, *self, resolver).await?;
             Ok(())
         })
     }
@@ -157,12 +157,12 @@ impl<M: Message, H: Handle<M>> DynErasedMessage<H> for M {
 #[derive(Message)]
 #[msg(path = "zestors_interface")]
 pub struct HandlerCallback<H: Handler> {
-    f: Box<dyn FnOnce(&mut H, HandlerState<'_, H>) -> Result<(), Report> + Send + 'static>,
+    f: Box<dyn FnOnce(&mut H, HandlerContext<'_, H>) -> Result<(), Report> + Send + 'static>,
 }
 
 impl<H: Handler> HandlerCallback<H> {
     pub fn new(
-        f: impl FnOnce(&mut H, HandlerState<'_, H>) -> Result<(), Report> + Send + 'static,
+        f: impl FnOnce(&mut H, HandlerContext<'_, H>) -> Result<(), Report> + Send + 'static,
     ) -> Self {
         Self { f: Box::new(f) }
     }
@@ -171,11 +171,11 @@ impl<H: Handler> HandlerCallback<H> {
 impl<H: Handler> Handle<HandlerCallback<H>> for H {
     async fn handle(
         &mut self,
-        state: HandlerState<'_, Self>,
+        ctx: HandlerContext<'_, Self>,
         msg: HandlerCallback<H>,
         _req: (),
     ) -> Result<(), Report> {
-        (msg.f)(self, state)
+        (msg.f)(self, ctx)
     }
 }
 
@@ -193,7 +193,7 @@ pub trait HandledBy<H: Handler>: Send + 'static {
     /// discarding the receipt since the caller has no way to wait on it.
     fn handle(
         self,
-        state: HandlerState<'_, H>,
+        ctx: HandlerContext<'_, H>,
         actor: &mut H,
     ) -> impl Future<Output = Result<(), Report>> + Send;
 }
@@ -205,11 +205,11 @@ where
 {
     fn handle(
         self,
-        state: HandlerState<'_, H>,
+        ctx: HandlerContext<'_, H>,
         actor: &mut H,
     ) -> impl Future<Output = Result<(), Report>> + Send {
         let (resolver, receipt) = <M::Resolver as Resolver>::new();
         std::mem::drop(receipt);
-        actor.handle(state, self, resolver)
+        actor.handle(ctx, self, resolver)
     }
 }

@@ -4,7 +4,7 @@ use rootcause::Report;
 use std::time::Duration;
 use zestors::{
     actor::{
-        BasicScheduler, Handle, HandledBy, Handler, HandlerCallback, HandlerMessage, HandlerState,
+        BasicScheduler, Handle, HandledBy, Handler, HandlerCallback, HandlerContext, HandlerMessage,
     },
     prelude::*,
     supervision::{GetChildren, GetHealth, Health},
@@ -94,7 +94,7 @@ impl Handler for MyActor {
 impl Handle<u32> for MyActor {
     async fn handle(
         &mut self,
-        state: HandlerState<'_, Self>,
+        ctx: HandlerContext<'_, Self>,
         msg: u32,
         _req: (),
     ) -> Result<(), Report> {
@@ -113,7 +113,7 @@ impl Handle<u32> for MyActor {
 impl Handle<String> for MyActor {
     async fn handle(
         &mut self,
-        _: HandlerState<'_, Self>,
+        _: HandlerContext<'_, Self>,
         msg: String,
         _req: (),
     ) -> Result<(), Report> {
@@ -125,7 +125,7 @@ impl Handle<String> for MyActor {
 impl Handle<IntervalTick> for MyActor {
     async fn handle(
         &mut self,
-        _: HandlerState<'_, Self>,
+        _: HandlerContext<'_, Self>,
         _: IntervalTick,
         _: (),
     ) -> Result<(), Report> {
@@ -137,7 +137,7 @@ impl Handle<IntervalTick> for MyActor {
 impl Handle<GetHealth> for MyActor {
     async fn handle(
         &mut self,
-        _state: HandlerState<'_, Self>,
+        _ctx: HandlerContext<'_, Self>,
         _msg: GetHealth,
         req: Request<Health>,
     ) -> Result<(), Report> {
@@ -160,7 +160,7 @@ impl Handle<GetHealth> for MyActor {
 impl Handle<GetChildren> for MyActor {
     async fn handle(
         &mut self,
-        state: HandlerState<'_, Self>,
+        ctx: HandlerContext<'_, Self>,
         msg: GetChildren,
         req: <GetChildren as Message>::Resolver,
     ) -> Result<(), Report> {

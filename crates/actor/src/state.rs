@@ -8,12 +8,12 @@ use tokio::select;
 use zestors_runtime::Signal;
 use zestors_runtime::{ActorRef, InboxEvent, prelude::*};
 
-pub(super) struct FullHandlerState<H: Handler> {
+pub(super) struct FullHandlerContext<H: Handler> {
     inbox: Inbox<H::Interface>,
     address: Address<H::Interface>,
 }
 
-impl<H: Handler> FullHandlerState<H> {
+impl<H: Handler> FullHandlerContext<H> {
     pub(super) fn new(inbox: Inbox<H::Interface>) -> Self {
         Self {
             address: inbox.address().clone(),
@@ -21,10 +21,10 @@ impl<H: Handler> FullHandlerState<H> {
         }
     }
 
-    pub(super) fn split(&mut self) -> (&mut Inbox<H::Interface>, HandlerState<'_, H>) {
+    pub(super) fn split(&mut self) -> (&mut Inbox<H::Interface>, HandlerContext<'_, H>) {
         (
             &mut self.inbox,
-            HandlerState {
+            HandlerContext {
                 address: &self.address,
             },
         )
@@ -128,7 +128,7 @@ impl<H: Handler> FullHandlerState<H> {
     }
 }
 
-impl<H: Handler> ActorRef for FullHandlerState<H> {
+impl<H: Handler> ActorRef for FullHandlerContext<H> {
     type Ctx = H::Interface;
 
     fn actor_ref(&self) -> &Address<Self::Ctx> {
@@ -158,11 +158,11 @@ enum RunOnce {
 /// The [`Handler`]'s view of its own actor, passed to lifecycle hooks and
 /// message handlers. Gives access to the actor's own [`Address`] via
 /// [`ActorRef`]/[`ActorOps`](zestors_runtime::ActorOps).
-pub struct HandlerState<'a, H: Handler> {
+pub struct HandlerContext<'a, H: Handler> {
     address: &'a Address<H::Interface>,
 }
 
-impl<'a, H: Handler> ActorRef for HandlerState<'a, H> {
+impl<'a, H: Handler> ActorRef for HandlerContext<'a, H> {
     type Ctx = H::Interface;
 
     fn actor_ref(&self) -> &Address<Self::Ctx> {
