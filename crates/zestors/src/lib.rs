@@ -264,62 +264,6 @@
 //! automatically, so it can go directly into a `ChildSpec`, and several of
 //! them into a [`SupervisorBlueprint`](supervisor::SupervisorBlueprint):
 //!
-//! ```
-//! use zestors::interface::{Envelope, Interface, Message};
-//! use zestors::prelude::*;
-//! use zestors::supervision::ChildSpec;
-//! use zestors::supervision::messages::GetChildren;
-//! use zestors::supervisor::Supervisor;
-//!
-//! #[derive(Message, Debug)]
-//! struct Ping;
-//!
-//! #[derive(Interface, HandlerInterface, Debug)]
-//! enum WorkerInterface {
-//!     Ping(Envelope<Ping>),
-//! }
-//!
-//! #[derive(Debug, Clone)]
-//! struct Worker;
-//!
-//! impl Handler for Worker {
-//!     type Interface = WorkerInterface;
-//! }
-//!
-//! impl Handle<Ping> for Worker {
-//!     async fn handle(
-//!         &mut self,
-//!         _ctx: HandlerContext<'_, Self>,
-//!         _msg: Ping,
-//!         _req: (),
-//!     ) -> Result<(), rootcause::Report> {
-//!         Ok(())
-//!     }
-//! }
-//!
-//! # #[tokio::main]
-//! # async fn main() {
-//! let supervisor = Supervisor::blueprint()
-//!     .child(Worker.pid("worker-a").unwrap())
-//!     .child(Worker.pid("worker-b").unwrap())
-//!     .start("supervisor")
-//!     .await
-//!     .unwrap();
-//!
-//! // Unlike `Node`, `.start(pid)` is awaited directly, so the supervisor
-//! // has already been spawned by the time `.await` returns - no race to
-//! // wait out here.
-//! supervisor.watch_init().await.unwrap();
-//!
-//! // A running supervisor answers `GetChildren`/`GetHealth` without
-//! // needing to be stopped to be inspected.
-//! let children = supervisor.call(GetChildren).await.unwrap();
-//! assert_eq!(children.len(), 2);
-//!
-//! supervisor.signal_shutdown();
-//! # }
-//! ```
-//!
 //! [`Node`](supervisor::Node) covers the common case of running one root
 //! supervisor as an entire program: starting it, restarting it on failure up
 //! to a configured budget, and shutting it down gracefully on
@@ -371,11 +315,7 @@
 //! let root = node.root_supervisor().address().clone();
 //! let node_task = tokio::spawn(node.run());
 //!
-//! // A freshly created channel's status looks exactly like "already
-//! // exited normally" until something actually spawns onto it, which
-//! // `node_task` hasn't necessarily done yet - wait for that first.
-//! root.watch(|status| (!status.is_dead()).then_some(())).await;
-//! root.watch_init().await.unwrap();
+//! root.watch_running().await;
 //!
 //! let children = root.call(GetChildren).await.unwrap();
 //! assert_eq!(children.len(), 1);

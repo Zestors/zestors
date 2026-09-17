@@ -138,7 +138,7 @@ impl Channel {
 
     pub(crate) async fn watch<T>(
         &self,
-        mut check_for: impl FnMut(ActorStatus) -> Option<T> + Send + 'static,
+        mut check_for: impl FnMut(ActorStatus) -> Option<T> + Send,
     ) -> T {
         let mut subscriber = self.status_observer.subscribe();
 

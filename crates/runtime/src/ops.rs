@@ -177,7 +177,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// subsequent status change, until `check_for` returns `Some`.
     fn watch<T>(
         &self,
-        check_for: impl FnMut(ActorStatus) -> Option<T> + Send + 'static,
+        check_for: impl FnMut(ActorStatus) -> Option<T> + Send,
     ) -> impl Future<Output = T> + Send {
         self.channel().watch(check_for)
     }
@@ -185,19 +185,27 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// Waits until the actor reaches [`ActorStatus::Running`] for the first
     /// time, returning `Err` with the actor's [`ExitStatus`] if it instead
     /// reaches [`ActorStatus::Exited`] beforehand.
-    fn watch_init(&self) -> impl Future<Output = Result<(), ExitStatus>> + Send {
-        self.watch(|status| match status {
-            ActorStatus::Running => return Some(Ok(())),
-            ActorStatus::Exited(exit) => {
-                return Some(Err(exit));
-            }
+    ///
+    /// A channel that has been created (e.g. via [`StrongAddress::create`])
+    /// but never actually spawned onto also reports [`ActorStatus::Exited`]
+    /// by default - that default is indistinguishable from a genuine exit by
+    /// status alone, so this also checks whether a spawn has ever actually
+    /// happened before treating an `Exited` status as a real one to report.
+    fn watch_init(&self) -> impl Future<Output = Result<(), ExitStatus>> + Send
+    where
+        Self: Sync,
+    {
+        self.watch(move |status| match status {
+            ActorStatus::Running => Some(Ok(())),
+            ActorStatus::Exited(exit) if self.last_spawned_at().is_some() => Some(Err(exit)),
             _ => None,
         })
     }
 
-    fn watch_running(&self) -> impl Future<Output = Result<(), ExitStatus>> + Send {
+    /// Waits until the actor reaches [`ActorStatus::Running`] for the first time.
+    fn watch_running(&self) -> impl Future<Output = ()> + Send {
         self.watch(|status| match status {
-            ActorStatus::Running => return Some(Ok(())),
+            ActorStatus::Running => return Some(()),
             _ => None,
         })
     }

@@ -155,11 +155,7 @@
 //! let root = node.root_supervisor().address().clone();
 //! let node_task = tokio::spawn(node.run());
 //!
-//! // A freshly created channel's status looks exactly like "already
-//! // exited normally" until something actually spawns onto it, which
-//! // `node_task` hasn't necessarily done yet - wait for that first.
-//! root.watch(|status| (!status.is_dead()).then_some(())).await;
-//! root.watch_init().await.unwrap();
+//! root.watch_running().await;
 //! let children = root.call(GetChildren).await.unwrap();
 //! assert_eq!(children.len(), 1);
 //!
