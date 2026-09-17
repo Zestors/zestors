@@ -14,7 +14,6 @@ tokio.workspace = true
 zestors-runtime.workspace = true
 indexmap.workspace = true
 rootcause.workspace = true
-serde.workspace = true
 zestors-actor.workspace = true
 zestors-interface.workspace = true
 zestors-supervision.workspace = true
@@ -24,6 +23,9 @@ thiserror.workspace = true
 
 [dev-dependencies]
 zestors = { path = "../zestors" }
+
+[package.metadata.cargo-machete]
+ignored = ["zestors"] # only used in doctests
 
 [features]
 _ra = []

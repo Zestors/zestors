@@ -17,11 +17,14 @@ tracing.workspace = true
 rootcause.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-type-sets.workspace = true
 serde.workspace = true
 smol_str.workspace = true
 jiff.workspace = true
 
 [dev-dependencies]
-tracing-subscriber.workspace = true
 zestors = { path = "../zestors" }
+
+[package.metadata.cargo-machete]
+# zestors: only used in doctests.
+# zestors-interface: referenced by string in `#[msg(path = "zestors_interface")]`.
+ignored = ["zestors", "zestors-interface"]

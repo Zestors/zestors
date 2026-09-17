@@ -19,7 +19,6 @@ zestors-supervisor.workspace = true
 [dev-dependencies]
 tracing-subscriber.workspace = true
 tokio.workspace = true
-serde.workspace = true
 futures.workspace = true
 tracing.workspace = true
 rootcause.workspace = true

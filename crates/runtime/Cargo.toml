@@ -14,7 +14,6 @@ thiserror.workspace = true
 type-sets.workspace = true
 futures.workspace = true
 rootcause.workspace = true
-zestors-codegen.workspace = true
 zestors-interface.workspace = true
 bs58.workspace = true
 smol_str.workspace = true
@@ -27,6 +26,9 @@ papaya.workspace = true
 
 [dev-dependencies]
 zestors = { path = "../zestors" }
+
+[package.metadata.cargo-machete]
+ignored = ["zestors"] # only used in doctests
 
 [features]
 _ra = []

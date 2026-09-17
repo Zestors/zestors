@@ -14,12 +14,13 @@ readme = "README.md"
 [dependencies]
 syn = { version = "3", features = ["full"] }
 quote = "1"
-proc-macro2 = "1"
-heck = "0.5"
 darling = { version = "0.24" }
 
 [dev-dependencies]
 zestors-interface = { path = "../interface" }
+
+[package.metadata.cargo-machete]
+ignored = ["zestors-interface"] # only used in doctests
 
 [lib]
 proc-macro = true

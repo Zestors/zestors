@@ -11,7 +11,6 @@ repository = "https://github.com/Zestors/zestors"
 eframe = { version = "0.36.1", features = ["glow", "__screenshot"] }
 env_logger = { version = "0.11", features = ["auto-color", "humantime"] }
 egui_extras = { version = "0.36", features = ["default", "image"] }
-egui_glow = { version = "0.36", features = [] }
 egui = { version = "0.36", features = [] }
 tokio = { workspace = true, features = ["full"] }
 rootcause = { workspace = true }

@@ -20,3 +20,6 @@ thiserror.workspace = true
 
 [dev-dependencies]
 zestors = { path = "../zestors" }
+
+[package.metadata.cargo-machete]
+ignored = ["zestors"] # only used in doctests
