@@ -8,6 +8,13 @@ use std::{
 use tokio::sync::oneshot;
 
 /// A request that expects a [`Reply`] to be sent.
+///
+/// This is the raw primitive behind a request-style [`Message`](crate::Message)
+/// (one declared with `#[msg(reply = T)]`): its [`Resolver`](crate::Resolver)
+/// is a `Request<T>`, and its [`Receipt`](crate::Receipt) is the matching
+/// [`Reply<T>`] - see [`Message`](crate::Message)'s example for that usual,
+/// higher-level path. `Request`/`Reply` can also be used directly, as a
+/// plain oneshot reply channel, without a [`Message`](crate::Message) at all.
 pub struct Request<T>(oneshot::Sender<T>);
 
 impl<T> Request<T> {
@@ -57,6 +64,16 @@ impl<T> Reply<T> {
     /// Returns the message immediately if it has already arrived, without
     /// blocking or yielding. Returns `Ok(None)` if the reply just hasn't
     /// arrived yet, or `Err` if the [`Request`] was dropped without replying.
+    ///
+    /// ```
+    /// # use zestors::interface::Request;
+    ///
+    /// let (request, mut reply) = Request::<u32>::new();
+    /// assert_eq!(reply.try_wait(), Ok(None));
+    ///
+    /// request.reply(42).unwrap();
+    /// assert_eq!(reply.try_wait(), Ok(Some(42)));
+    /// ```
     pub fn try_wait(&mut self) -> Result<Option<T>, ReceiptError> {
         match self.0.try_recv() {
             Ok(msg) => Ok(Some(msg)),

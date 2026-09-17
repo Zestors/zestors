@@ -11,10 +11,9 @@ use std::{
 };
 use tokio::time::{error::Elapsed, timeout};
 use zestors_runtime::{
-    ActorRef, Address, Child, Dyn, ExitStatus, Pid, ShutdownChild,
-    errors::{JoinError, StartOnError},
+    ActorRef, Address, Child, Dyn, ExitStatus, Pid, ShutdownChild, errors::JoinError,
 };
-use zestors_supervision::{ChildConfig, ChildDescription};
+use zestors_supervision::{ChildConfig, ChildDescription, StartOnError};
 
 #[derive(Debug)]
 pub(super) struct Supervisee {
@@ -344,7 +343,7 @@ impl From<StartOnError> for StartSuperviseeError {
     fn from(err: StartOnError) -> Self {
         match err {
             StartOnError::ConcurrentInbox => StartSuperviseeError::ConcurrentInbox,
-            StartOnError::Instantiation(e) => StartSuperviseeError::Instantiation(e.into()),
+            StartOnError::Instantiation(e) => StartSuperviseeError::Instantiation(e),
         }
     }
 }

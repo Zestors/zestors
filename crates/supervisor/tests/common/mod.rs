@@ -1,6 +1,7 @@
 //! Shared setup for the supervision strategy tests: a minimal, controllable
 //! actor plus small async-polling helpers, so the tests themselves only have
 //! to describe "who crashes" and "who should/shouldn't restart."
+#![allow(dead_code)]
 
 use rootcause::{Report, report};
 use std::{

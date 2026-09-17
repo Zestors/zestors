@@ -22,6 +22,10 @@ impl<I: Interface> Context for I {
 /// - `Dyn` / `Dyn<()>`: Doesn't accept any messages
 /// - `Dyn<(MsgA,)>`: Accepts only `MsgA`
 /// - `Dyn<(MsgA, .., MsgX)>`: Accepts messages A..X
+///
+/// See [`IntoDyn::into_dyn`]/[`IntoDyn::into_dyn_checked`] for converting an
+/// actor reference to one of these, and [`ActorOps::cast_dyn`] for sending
+/// without a statically-typed reference at all.
 pub struct Dyn<T = ()>(PhantomData<fn() -> T>);
 
 impl<S: AsTypeSet + 'static> Context for Dyn<S> {

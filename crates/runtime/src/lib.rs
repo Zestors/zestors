@@ -20,6 +20,43 @@
 //! Once you have a reference, [`Accepts`] and [`ActorOps`] (both re-exported
 //! through the [`prelude`]) provide the methods for interacting with the
 //! actor — sending and receiving messages, inspecting status, and more.
+//!
+//! # Example
+//!
+//! A minimal fire-and-forget actor: it accepts `()` messages (the simplest
+//! possible [`Interface`]) and counts how many it has seen.
+//!
+//! ```
+//! # use zestors::runtime::prelude::*;
+//! # use zestors::runtime::spawn_rand;
+//! # #[tokio::main]
+//! # async fn main() {
+//! let child = spawn_rand(|mut inbox: Inbox<()>| async move {
+//!     let mut count = 0;
+//!     while inbox.recv().await.is_some() {
+//!         count += 1;
+//!     }
+//!     Ok::<_, rootcause::Report>(count)
+//! });
+//!
+//! // `watch_init` waits for the actor's first `recv`, so it's guaranteed
+//! // to be running by the time we start sending it messages.
+//! child.watch_init().await.unwrap();
+//! for _ in 0..3 {
+//!     child.cast(()).await.unwrap();
+//! }
+//!
+//! // Ask it to shut down, then wait for it to actually exit and collect
+//! // its result.
+//! child.signal_shutdown();
+//! assert_eq!(child.await.unwrap(), 3);
+//! # }
+//! ```
+//!
+//! See [`Accepts::call`] for sending a message that expects a reply, which
+//! needs a richer [`Interface`] than plain `()` - usually generated with
+//! `#[derive(Interface)]` (re-exported from `zestors-interface`) rather than
+//! written by hand.
 
 use concurrent_queue::{ConcurrentQueue, PopError, PushError};
 pub(crate) use rootcause::Report;

@@ -1,9 +1,6 @@
 use crate::_prelude::*;
 use serde::{Deserialize, Serialize};
-use zestors_runtime::{
-    ActorRef, Address,
-    errors::{DuplicatePidError, StartOnError},
-};
+use zestors_runtime::{ActorRef, Address, errors::DuplicatePidError};
 
 /// The settings a `Supervisor` applies to one
 /// of its children: when to

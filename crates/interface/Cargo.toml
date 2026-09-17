@@ -13,3 +13,4 @@ tracing.workspace = true
 
 [dev-dependencies]
 zestors-codegen.workspace = true
+zestors = { path = "../zestors" }

@@ -21,6 +21,8 @@ impl Registry {
         }
     }
 
+    /// Returns every currently registered [`Address`], as a snapshot of the
+    /// registry at the moment this is called.
     pub async fn fetch_addresses(&'static self) -> Vec<Address> {
         tokio::task::spawn_blocking(|| {
             self.processes
@@ -123,11 +125,16 @@ impl<T: Context> std::fmt::Debug for RegistryAddError<T> {
     }
 }
 
+/// Returned by [`Registry::get_typed`]/[`Registry::get_dyn`].
 #[derive(thiserror::Error, Debug)]
 pub enum TypedRegistryError {
+    /// No process is registered under this [`Pid`] at all.
     #[error("Address not found for pid: {0}")]
     NotFound(Pid),
 
+    /// A process is registered under this [`Pid`], but its concrete
+    /// [`Interface`] doesn't match (for [`Registry::get_typed`]) or doesn't
+    /// accept the requested message set (for [`Registry::get_dyn`]).
     #[error("Address found for pid: {0} but type mismatch")]
     TypeMismatch(Pid),
 }

@@ -13,6 +13,42 @@ use crate::*;
 ///
 /// [`Accepts::call`] / [`Accepts::call_with`] build on `cast`/`cast_with` to
 /// additionally wait for the message's reply.
+///
+/// # Example
+///
+/// ```
+/// # use zestors::interface::{Envelope, Interface, Message};
+/// # use zestors::runtime::prelude::*;
+/// # use zestors::runtime::spawn_rand;
+///
+/// #[derive(Message, Debug)]
+/// #[msg(reply = u32)]
+/// # #[msg(path = "zestors::interface")]
+/// struct Double(u32);
+///
+/// #[derive(Interface, Debug)]
+/// # #[interface(path = "zestors::interface")]
+/// enum MyInterface {
+///     Double(Envelope<Double>),
+/// }
+///
+/// # #[tokio::main]
+/// # async fn main() {
+/// let child = spawn_rand(|mut inbox: Inbox<MyInterface>| async move {
+///     while let Some(MyInterface::Double(envelope)) = inbox.recv().await {
+///         let n = envelope.msg.0;
+///         let _ = envelope.reply(n * 2);
+///     }
+///     Ok::<_, rootcause::Report>(())
+/// });
+///
+/// // `call` sends the message and waits for its reply.
+/// let reply = child.call(Double(21)).await.unwrap();
+/// assert_eq!(reply, 42);
+///
+/// child.signal_shutdown();
+/// # }
+/// ```
 pub trait Accepts<M: Message>: Sync {
     /// Sends a message, waiting out backpressure first if the channel is
     /// under load.
@@ -98,6 +134,15 @@ where
 /// Options controlling how a [`Accepts`]/[`ActorOps`] sending method behaves.
 /// The default, used by [`Accepts::cast`]/[`Accepts::try_cast`]/etc., disables both
 /// options below.
+///
+/// Built with a small setter per field:
+///
+/// ```
+/// # use zestors::runtime::CallOptions;
+/// let options = CallOptions::new().ignore_exiting(true);
+/// assert!(options.ignore_exiting);
+/// assert!(!options.ignore_backpressure);
+/// ```
 #[derive(Debug, Clone, Copy)]
 pub struct CallOptions {
     /// If `true`, a message is still accepted while the channel is

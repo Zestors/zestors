@@ -14,7 +14,28 @@ struct PidInfo {
     parent: Option<Pid>,
 }
 
-/// Same as [`spawn`], but spawns a process that cannot accept messages.
+/// Same as [`spawn`], but spawns a process that cannot accept messages: its
+/// handler gets a [`TaskBox`] instead of an [`Inbox`], through which it can
+/// still receive [`Signal`]s (e.g. [`Signal::Shutdown`]) but no messages.
+///
+/// # Example
+///
+/// ```
+/// # use zestors::runtime::prelude::*;
+/// # use zestors::runtime::{TaskBox, spawn_task};
+///
+/// # #[tokio::main]
+/// # async fn main() {
+/// let child = spawn_task(Pid::new("background-job"), |mut task_box: TaskBox| async move {
+///     task_box.wait_shutdown().await;
+///     Ok::<_, rootcause::Report>(())
+/// })
+/// .unwrap();
+///
+/// child.signal_shutdown();
+/// child.await.unwrap();
+/// # }
+/// ```
 pub fn spawn_task<E, F>(
     pid: Pid,
     f: impl FnOnce(TaskBox) -> F,
@@ -41,6 +62,27 @@ where
 /// registers it in the [`Registry`].
 ///
 /// Can fail if the pid is already registered.
+///
+/// # Example
+///
+/// ```
+/// # use zestors::runtime::prelude::*;
+/// # use zestors::runtime::spawn;
+/// # #[tokio::main]
+/// # async fn main() {
+/// let pid = Pid::new("my-actor");
+/// let child = spawn(pid.clone(), |mut inbox: Inbox<()>| async move {
+///     while inbox.recv().await.is_some() {}
+///     Ok::<_, rootcause::Report>(())
+/// })
+/// .unwrap();
+///
+/// // A second actor can't reuse the same pid while this one is alive.
+/// assert!(spawn(pid, |_: Inbox<()>| async { Ok::<_, rootcause::Report>(()) }).is_err());
+///
+/// child.signal_shutdown();
+/// # }
+/// ```
 pub fn spawn<T, E, F>(
     pid: Pid,
     f: impl FnOnce(Inbox<T>) -> F,
@@ -67,6 +109,8 @@ where
 }
 
 impl StrongAddress<Infallible> {
+    /// Same as [`StrongAddress::spawn`], but for a signal-only process (see
+    /// [`spawn_task`]).
     pub fn spawn_task<E, F>(
         self,
         f: impl FnOnce(TaskBox) -> F,
@@ -80,6 +124,39 @@ impl StrongAddress<Infallible> {
 }
 
 impl<T: Context> StrongAddress<T> {
+    /// Spawns a process on this channel, keeping its [`Pid`] and registry
+    /// entry. Fails with [`ConcurrentInboxError`] if a process is already
+    /// running on it - so once one exits, [`StrongAddress`] is what lets you
+    /// spawn another one *on the same channel*, rather than creating a new
+    /// one from scratch with [`spawn`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use zestors::runtime::prelude::*;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// let strong: StrongAddress<()> = StrongAddress::create(Pid::rand()).unwrap();
+    ///
+    /// let first = strong.clone().spawn(|mut inbox: Inbox<()>| async move {
+    ///     while inbox.recv().await.is_some() {}
+    ///     Ok::<_, rootcause::Report>(())
+    /// })
+    /// .unwrap();
+    /// first.signal_shutdown();
+    /// first.watch_exit().await.unwrap();
+    ///
+    /// // The first process is gone, but the pid and registry entry live on,
+    /// // so a second process can now be spawned on the very same channel.
+    /// let second = strong.spawn(|mut inbox: Inbox<()>| async move {
+    ///     while inbox.recv().await.is_some() {}
+    ///     Ok::<_, rootcause::Report>(())
+    /// })
+    /// .unwrap();
+    /// second.signal_shutdown();
+    /// # }
+    /// ```
     pub fn spawn<R, F>(
         self,
         spawn_fn: impl FnOnce(Inbox<T>) -> F,

@@ -1,11 +1,32 @@
 use std::{fmt::Debug, sync::Arc};
 
 use futures::future::BoxFuture;
+use rootcause::Report;
 use zestors_actor::{Actor, ActorBlueprint, ActorExt as _};
 use zestors_runtime::{
     prelude::*,
-    {AsDyn as _, Context, Dyn, IntoDyn, errors::StartOnError},
+    {AsDyn as _, Context, Dyn, IntoDyn, errors::ConcurrentInboxError},
 };
+
+/// Returned by [`Start::start_on`]: either the channel already had a
+/// process running on it ([`ConcurrentInboxError`]), or instantiating the
+/// actor from its blueprint failed.
+#[derive(Debug, thiserror::Error)]
+pub enum StartOnError {
+    /// See [`ConcurrentInboxError`].
+    #[error("There is already an active process running on this channel.")]
+    ConcurrentInbox,
+
+    /// Constructing the actor from its blueprint failed.
+    #[error("Failed to instantiate actor from blueprint: {0}")]
+    Instantiation(Report),
+}
+
+impl From<ConcurrentInboxError> for StartOnError {
+    fn from(_: ConcurrentInboxError) -> Self {
+        StartOnError::ConcurrentInbox
+    }
+}
 
 /// A blueprint-like type that can spawn a task on an already-registered
 /// [`StrongAddress`], rather than creating its own. Implemented
@@ -39,7 +60,7 @@ impl<B: ActorBlueprint> Start for B {
         let actor = self
             .instantiate()
             .await
-            .map_err(|x| StartOnError::Instantiation(x.into()))?;
+            .map_err(StartOnError::Instantiation)?;
 
         channel.spawn(|inbox| actor.run(inbox)).map_err(Into::into)
     }
@@ -67,7 +88,7 @@ impl<R: ActorBlueprint> Spawnable for R {
             let runner = self
                 .instantiate()
                 .await
-                .map_err(|x| StartOnError::Instantiation(x.into()))?
+                .map_err(StartOnError::Instantiation)?
                 .map_actor_exit(|res| res.map(|_| ()));
 
             data.downcast_ref::<<R::Actor as Actor>::Interface>()

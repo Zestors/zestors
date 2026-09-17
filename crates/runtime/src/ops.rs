@@ -22,11 +22,62 @@ pub trait ActorRef {
 /// The core trait for interacting with actors through their [`Address`].
 /// This trait is sealed, and is implemented automatically for any type that
 /// implements [`ActorRef`].
+///
+/// # Example
+///
+/// ```
+/// # use zestors::runtime::prelude::*;
+/// # use zestors::runtime::spawn_rand;
+///
+/// # #[tokio::main]
+/// # async fn main() {
+/// let child = spawn_rand(|mut inbox: Inbox<()>| async move {
+///     while inbox.recv().await.is_some() {}
+///     Ok::<_, rootcause::Report>(())
+/// });
+///
+/// child.watch_init().await.unwrap();
+/// assert!(child.status().is_running());
+///
+/// let snapshot = child.snapshot();
+/// assert_eq!(snapshot.pid, *child.pid());
+/// assert_eq!(snapshot.msg_len, 0);
+///
+/// child.signal_shutdown();
+/// let outcome = child.watch_exit().await;
+/// assert!(outcome.is_ok());
+/// assert!(child.is_dead());
+/// # }
+/// ```
 pub trait ActorOps: ActorRef + sealed::Sealed {
     /// Same as [`Accepts::cast`], but works for any actor reference regardless of
     /// whether its [`Context`] statically guarantees that `M` is accepted:
     /// the check is performed at runtime instead, returning
     /// [`CastDynError::NotAccepted`] rather than failing to compile.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use zestors::runtime::errors::CastDynError;
+    /// # use zestors::runtime::prelude::*;
+    /// # use zestors::runtime::spawn_rand;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// // `Inbox<()>` only statically accepts `()`, but `cast_dyn` can still
+    /// // *try* to send any `Message`, checking acceptance at runtime.
+    /// let child = spawn_rand(|mut inbox: Inbox<()>| async move {
+    ///     while inbox.recv().await.is_some() {}
+    ///     Ok::<_, rootcause::Report>(())
+    /// });
+    /// child.watch_init().await.unwrap();
+    ///
+    /// assert!(child.cast_dyn(()).await.is_ok());
+    /// assert!(matches!(child.cast_dyn(7u8).await, Err(CastDynError::NotAccepted(7))));
+    ///
+    /// child.signal_shutdown();
+    /// # }
+    /// ```
     fn cast_dyn<M: Message>(
         &self,
         msg: M,

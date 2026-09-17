@@ -16,6 +16,25 @@ use std::{convert::Infallible, fmt::Debug};
 ///
 /// This trait must be implemented for any message that is sent in zestors.
 /// It can easily be [derived](derive@Message) as well.
+///
+/// # Example
+///
+/// ```
+/// # use zestors::interface::Message;
+///
+/// // Fire-and-forget: no `reply` attribute, so `Output`/`Receipt`/
+/// // `Resolver` all default to `()`.
+/// #[derive(Message, Debug)]
+/// # #[msg(path = "zestors::interface")]
+/// struct Greet(String);
+///
+/// // Request-style: `Output = u32`, `Receipt = Reply<u32>`,
+/// // `Resolver = Request<u32>`.
+/// #[derive(Message, Debug)]
+/// #[msg(reply = u32)]
+/// # #[msg(path = "zestors::interface")]
+/// struct CountLetters(String);
+/// ```
 pub trait Message: Send + 'static + Sized {
     /// The receipt associated with this message, that is returned after sending.
     type Receipt: Receipt<Output = Self::Output, Resolver = Self::Resolver>;
@@ -29,12 +48,18 @@ pub trait Message: Send + 'static + Sized {
     // type Kind: MessageKind;
 }
 
+/// Not yet part of [`Message`]'s public contract (see the commented-out
+/// `Kind` associated type above) - reserved for a future split between
+/// [`Call`] and [`Cast`] message kinds, mirroring the `Receipt`/`Resolver`
+/// pairing that `Message` already exposes directly.
 pub trait MessageKind<O> {
     type Receipt: Receipt<Output = O, Resolver = Self::Resolver>;
     type Resolver: Resolver<Receipt = Self::Receipt>;
 }
 
+/// Marker for the request-style [`MessageKind`]. See [`MessageKind`].
 pub struct Call;
+/// Marker for the fire-and-forget [`MessageKind`]. See [`MessageKind`].
 pub struct Cast;
 
 impl<O: Send + 'static> MessageKind<O> for Call {
@@ -48,6 +73,10 @@ impl MessageKind<()> for Cast {
 
 /// The value returned to the sender after sending a [`Message`]; can be
 /// awaited (or, for [`Reply`], blocked on) to obtain the message's outcome.
+///
+/// A fire-and-forget message's receipt is `()`, which resolves immediately
+/// to `Ok(())`; see [`Message`]'s example for the request-style case, where
+/// the receipt is a [`Reply<T>`] instead.
 pub trait Receipt: Debug + Send + Sized + Sealed {
     /// The output of the receipt after being resolved.
     type Output: Send + 'static;
@@ -142,6 +171,12 @@ mod sealed {
 //------------------------------------------------------------------------------------------------
 //  Message: Default implementations
 //------------------------------------------------------------------------------------------------
+// `Message` is implemented directly (fire-and-forget, `Output = Receipt =
+// Resolver = ()`) for a handful of common types below, so they can be used
+// as trivial notifications - e.g. `actor.cast(42u32)` - without needing a
+// `#[derive(Message)]` wrapper type. This does *not* extend to `Interface`:
+// an actor still only accepts these types if its `Interface` has a variant
+// for them.
 
 macro_rules! implement_message_for_base_types {
     ($(

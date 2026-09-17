@@ -131,13 +131,25 @@ impl<T: Context> Hash for StrongAddress<T> {
     }
 }
 
+/// A point-in-time snapshot of a channel's status and history, returned by
+/// [`ActorOps::snapshot`]. Unlike reading each piece individually through
+/// [`ActorOps`], every field here reflects the exact same instant.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChannelSnapshot {
+    /// The actor's [`Pid`].
     pub pid: Pid,
+    /// The actor's [`ActorStatus`] at the time of the snapshot.
     pub status: ActorStatus,
+    /// The number of signals queued at the time of the snapshot.
     pub signal_len: usize,
+    /// The number of messages queued at the time of the snapshot.
     pub msg_len: usize,
+    /// Timestamps of the most recent spawns on this channel, oldest first
+    /// (a bounded history - see [`ActorOps::spawned_at`]).
     pub spawns: Vec<Zoned>,
+    /// Timestamps and outcomes of the most recent exits on this channel,
+    /// oldest first (also a bounded history).
     pub exits: Vec<(Zoned, ExitStatus)>,
+    /// When the channel itself was created; see [`ActorOps::created_at`].
     pub created_at: Zoned,
 }

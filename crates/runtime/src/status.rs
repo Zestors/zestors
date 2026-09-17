@@ -20,10 +20,15 @@ pub enum ActorStatus {
 }
 
 impl ActorStatus {
+    /// Returns `true` if the actor is shutting down or has already exited
+    /// (`Exiting` or `Exited`).
     pub fn should_exit(&self) -> bool {
         matches!(self, ActorStatus::Exiting | ActorStatus::Exited(_))
     }
 
+    /// Returns `true` if a message or signal sent now would be accepted
+    /// (`Initializing`, `Running`, or `Suspended`) rather than rejected as
+    /// closed.
     pub fn accepts_messages(&self) -> bool {
         matches!(
             self,
@@ -31,10 +36,12 @@ impl ActorStatus {
         )
     }
 
+    /// Returns `true` if the status is [`ActorStatus::Running`].
     pub fn is_running(&self) -> bool {
         matches!(self, ActorStatus::Running)
     }
 
+    /// Returns `true` if the status is [`ActorStatus::Suspended`].
     pub fn is_suspended(&self) -> bool {
         matches!(self, ActorStatus::Suspended)
     }
@@ -45,10 +52,12 @@ impl ActorStatus {
         matches!(self, ActorStatus::Exiting)
     }
 
+    /// Returns `true` if the status is [`ActorStatus::Exited`].
     pub fn is_dead(&self) -> bool {
         matches!(self, ActorStatus::Exited(_))
     }
 
+    /// Returns `true` if the status is [`ActorStatus::Initializing`].
     pub fn is_initializing(&self) -> bool {
         matches!(self, ActorStatus::Initializing)
     }

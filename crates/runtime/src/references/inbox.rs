@@ -30,6 +30,8 @@ enum InitState {
 }
 
 impl Inbox<Infallible> {
+    /// Wraps this signal-only inbox as a [`TaskBox`]. Used internally by
+    /// [`spawn_task`]; rarely needed directly.
     pub fn into_task_box(self) -> TaskBox {
         TaskBox::new(self)
     }
@@ -229,7 +231,11 @@ impl<I: Interface> Drop for Inbox<I> {
     }
 }
 
+/// What [`Inbox::recv_event`] (and friends) can return: either a [`Signal`],
+/// or a message of the actor's [`Interface`] type.
 pub enum InboxEvent<M> {
+    /// A [`Signal`], always delivered ahead of any queued messages.
     Signal(Signal),
+    /// A message of the actor's own [`Interface`] type.
     Message(M),
 }

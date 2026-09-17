@@ -13,6 +13,29 @@ use std::{fmt::Debug, pin::Pin, task::Poll, time::Duration};
 ///
 /// It also tracks whether it is currently attached (see [`Child::attach`] /
 /// [`Child::detach`]).
+///
+/// The abort-on-drop default is easy to trip over - dropping a `Child` you
+/// meant to keep running (e.g. by only binding `_`) silently kills it:
+///
+/// ```
+/// # use zestors::runtime::prelude::*;
+/// # use zestors::runtime::spawn_rand;
+/// # #[tokio::main]
+/// # async fn main() {
+/// let mut child = spawn_rand(|mut inbox: Inbox<()>| async move {
+///     while inbox.recv().await.is_some() {}
+///     Ok::<_, rootcause::Report>(())
+/// });
+/// child.watch_init().await.unwrap();
+///
+/// let address = child.address().clone();
+/// child.detach(); // otherwise the `drop` below would abort it
+/// drop(child);
+///
+/// assert!(!address.is_dead());
+/// address.signal_shutdown();
+/// # }
+/// ```
 pub struct Child<E = (), C: Context = Dyn> {
     join: Option<tokio::task::JoinHandle<Result<E, Report>>>,
     address: StrongAddress<C>,

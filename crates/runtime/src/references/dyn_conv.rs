@@ -6,6 +6,39 @@ use type_sets::{AsTypeSet, Members, Subset};
 ///
 /// This is implemented for every actor reference type; [`Self::Ref`] is the
 /// same reference type, but parameterized over the new [`Context`].
+///
+/// ```
+/// # use zestors::interface::{Envelope, Interface, Message};
+/// # use zestors::runtime::prelude::*;
+/// # use zestors::runtime::{Dyn, spawn_rand};
+/// #[derive(Message, Debug)]
+/// # #[msg(path = "zestors::interface")]
+/// struct Ping;
+///
+/// #[derive(Interface, Debug)]
+/// # #[interface(path = "zestors::interface")]
+/// enum PingInterface {
+///     Ping(Envelope<Ping>),
+/// }
+///
+/// # #[tokio::main]
+/// # async fn main() {
+/// let child = spawn_rand(|mut inbox: Inbox<PingInterface>| async move {
+///     while inbox.recv().await.is_some() {}
+///     Ok::<_, rootcause::Report>(())
+/// });
+///
+/// // Widen to a `Dyn` address that only knows about `Ping`, e.g. to hand to
+/// // code that shouldn't need to know the actor's full `Interface`...
+/// let dyn_address: Address<Dyn<(Ping,)>> = child.address().clone().into_dyn();
+///
+/// // ...and narrow back to the concrete interface later.
+/// let concrete = dyn_address.downcast::<PingInterface>().unwrap();
+/// concrete.cast(Ping).await.unwrap();
+///
+/// child.signal_shutdown();
+/// # }
+/// ```
 pub trait IntoDyn: ActorRef + Sized {
     /// `Self`, but reparameterized over the [`Context`] `T`.
     type Ref<T: Context>;

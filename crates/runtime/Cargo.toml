@@ -21,5 +21,8 @@ rand.workspace = true
 jiff.workspace = true
 papaya.workspace = true
 
+[dev-dependencies]
+zestors = { path = "../zestors" }
+
 [features]
 _ra = []
