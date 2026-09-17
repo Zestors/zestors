@@ -5,23 +5,26 @@ use std::{any::TypeId, future::Future};
 use tokio::time::Instant;
 use zestors_interface::{Reply, Request};
 
-/// A trait that provides access to the [`ActorHandle`] of an actor.
+/// A trait that provides access to the [`Channel`] of an actor.
 ///
-/// Implement this trait, and [`ActorOpsExt`] is automatically implemented for your
+/// Implement this trait, and [`ActorOps`] is automatically implemented for your
 /// type.
 pub trait ActorRef {
     /// The [`Context`] of the associated actor.
     type Ctx: Context;
 
-    /// Returns a reference to the [`ActorHandle`] of the associated actor.
+    /// Returns a reference to the [`Channel`] of the associated actor.
     fn channel(&self) -> &Channel<Self::Ctx>;
 }
 
-/// The core trait for interacting with actors through their [`ActorHandle`].
+/// The core trait for interacting with actors through their [`Channel`].
 /// This trait is sealed, and is implemented automatically for any type that
-/// implements [`ActorOps`].
+/// implements [`ActorRef`].
 pub trait ActorOps: ActorRef + sealed::Sealed {
-    /// Same as [`Sends::send`], but checks whether the message type is accepted by the channel.
+    /// Same as [`Cast::cast`], but works for any actor reference regardless of
+    /// whether its [`Context`] statically guarantees that `M` is accepted:
+    /// the check is performed at runtime instead, returning
+    /// [`CastDynError::NotAccepted`] rather than failing to compile.
     fn cast_dyn<M: Message>(
         &self,
         msg: M,
@@ -29,7 +32,8 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.cast_dyn_with(msg, Default::default())
     }
 
-    /// Same as [`Sends::send`], but checks whether the message type is accepted by the channel.
+    /// Same as [`Cast::cast_with`], but see [`ActorOps::cast_dyn`] for how it
+    /// differs from [`Cast::cast_with`].
     fn cast_dyn_with<M: Message>(
         &self,
         msg: M,
@@ -49,7 +53,11 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         }
     }
 
-    /// Same as [`Sends::send_now`], but checks whether the message type is accepted by the channel.
+    /// Same as [`Cast::try_cast_with`], but checks at runtime whether `M` is
+    /// accepted by the channel (returning [`TryCastDynError::NotAccepted`]
+    /// rather than failing to compile), and always checks backpressure
+    /// (unless `options.ignore_backpressure` is `true`) regardless of whether
+    /// the actor reference is statically or dynamically typed.
     fn try_cast_dyn_with<M: Message>(
         &self,
         msg: M,
@@ -69,6 +77,8 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         Ok(output)
     }
 
+    /// Same as [`Cast::call`], but see [`ActorOps::cast_dyn`] for how it
+    /// differs from [`Cast::cast`].
     fn call_dyn<M: Message>(
         &self,
         msg: M,
@@ -76,6 +86,8 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.call_dyn_with(msg, Default::default())
     }
 
+    /// Same as [`Cast::call_with`], but see [`ActorOps::cast_dyn`] for how it
+    /// differs from [`Cast::cast_with`].
     fn call_dyn_with<M: Message>(
         &self,
         msg: M,
@@ -239,7 +251,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.data().strong_count()
     }
 
-    /// The total amount of references to this channel, including [`ChannelHandle`]s, [`Inbox`]es and [`Address`]es.
+    /// The total amount of references to this channel, including [`Channel`]s, [`StrongAddress`]es, [`Inbox`]es, [`Child`]ren and [`Address`]es.
     ///
     /// This amount should only be used as an indication of the number of
     /// active references to the channel.
@@ -303,9 +315,19 @@ mod sealed {
     impl<T: super::ActorRef> Sealed for T {}
 }
 
+/// Options controlling how a [`Cast`]/[`ActorOps`] sending method behaves.
+/// The default, used by [`Cast::cast`]/[`Cast::try_cast`]/etc., disables both
+/// options below.
 #[derive(Debug, Clone, Copy)]
 pub struct CastOptions {
+    /// If `true`, a message is still accepted while the channel is
+    /// [`ActorStatus::Exiting`]. Has no effect once the channel is fully
+    /// [`ActorStatus::Exited`], which always rejects new messages.
     pub ignore_exiting: bool,
+    /// If `true`, backpressure is ignored entirely: waiting methods (e.g.
+    /// [`Cast::cast`]) skip their delay, and non-waiting methods (e.g.
+    /// [`Cast::try_cast`]) skip the check that would otherwise return a
+    /// full-channel error.
     pub ignore_backpressure: bool,
 }
 
@@ -316,6 +338,7 @@ impl Default for CastOptions {
 }
 
 impl CastOptions {
+    /// Creates a new [`CastOptions`] with both options disabled.
     pub fn new() -> Self {
         Self {
             ignore_exiting: false,
@@ -323,11 +346,13 @@ impl CastOptions {
         }
     }
 
+    /// Sets [`CastOptions::ignore_exiting`].
     pub fn ignore_exiting(mut self, ignore: bool) -> Self {
         self.ignore_exiting = ignore;
         self
     }
 
+    /// Sets [`CastOptions::ignore_backpressure`].
     pub fn ignore_backpressure(mut self, ignore: bool) -> Self {
         self.ignore_backpressure = ignore;
         self

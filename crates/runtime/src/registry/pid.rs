@@ -4,18 +4,28 @@ use smol_str::SmolStr;
 use std::{borrow::Cow, fmt::Display, sync::Arc};
 use type_sets::{AsTypeSet, Members};
 
+/// A process identifier: a cheaply-cloneable, human-readable string that
+/// uniquely names an actor in the local [`Registry`].
+///
+/// A `Pid` is stable across restarts: creating a new [`StrongAddress`] with a
+/// given `Pid` (see [`StrongAddress::create`]) reuses the same registry entry,
+/// which is what allows an actor to be restarted on the same [`Channel`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Pid(SmolStr);
 
 impl Pid {
+    /// Creates a `Pid` from any type that converts into one (a `String`,
+    /// `&'static str`, etc.).
     pub fn new<T: Into<Self>>(s: T) -> Self {
         s.into()
     }
 
+    /// Creates a `Pid` from a `&'static str` without allocating.
     pub fn new_static(s: &'static str) -> Self {
         Pid(SmolStr::new_static(s))
     }
 
+    /// Generates a new `Pid` from random bytes, base58-encoded.
     pub fn rand() -> Self {
         let rand: [u8; 11] = rand::random();
 
@@ -29,14 +39,20 @@ impl Pid {
         Self::new(val)
     }
 
+    /// Looks up the untyped [`Address`] registered for this `Pid`, or `None`
+    /// if no actor with this `Pid` is currently registered.
     pub fn address(&self) -> Option<Address> {
         Registry::local().get(&self)
     }
 
+    /// Looks up the [`Address`] registered for this `Pid`, downcast to the
+    /// given [`Interface`]. See [`Registry::get_typed`].
     pub fn typed_address<I: Interface>(&self) -> Result<Address<I>, TypedRegistryError> {
         Registry::local().get_typed::<I>(self)
     }
 
+    /// Looks up the [`Address`] registered for this `Pid`, downcast to the
+    /// given dynamic message set. See [`Registry::get_dyn`].
     pub fn dyn_address<S>(&self) -> Result<Address<Dyn<S>>, TypedRegistryError>
     where
         S: AsTypeSet + 'static + Members,
@@ -44,10 +60,15 @@ impl Pid {
         Registry::local().get_dyn::<S>(self)
     }
 
+    /// Returns the [`Pid`] of the actor currently running on this task, or
+    /// `None` if not called from within an actor's task.
     pub fn current() -> Option<Self> {
         crate::current_pid()
     }
 
+    /// Returns the [`Pid`] of the actor that spawned the actor currently
+    /// running on this task, or `None` if not called from within an actor's
+    /// task, or if that actor has no parent.
     pub fn parent() -> Option<Self> {
         crate::parent_pid()
     }

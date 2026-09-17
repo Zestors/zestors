@@ -40,9 +40,3 @@ impl BackPressure {
         DEFAULT_BACKPRESSURE.get_or_init(|| Self::new(0.5, Duration::from_millis(10)))
     }
 }
-
-impl Default for BackPressure {
-    fn default() -> Self {
-        Self::new(0.75, Duration::from_millis(10))
-    }
-}

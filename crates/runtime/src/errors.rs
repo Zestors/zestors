@@ -226,7 +226,6 @@ pub enum ExitError {
 }
 
 #[derive(Debug, Error)]
-#[error("Failed to spawn process: {0}")]
 pub enum StartOnError {
     #[error("There is already an active process running on this channel.")]
     ConcurrentInbox,

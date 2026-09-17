@@ -1,12 +1,12 @@
 use super::*;
 
-/// Represents the status of an actor in it's lifecycle.
+/// Represents the status of an actor in its lifecycle.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Copy)]
 pub enum ActorStatus {
-    /// The actor is not running. This is either the initial state of the actor, or the actor has exited. It is does not accept messages or signals in this state.
+    /// The actor is not running. This is either the initial state of the actor, or the actor has exited. It does not accept messages or signals in this state.
     Exited(ExitStatus),
 
-    /// The actor is in the process of initializing. Once the actor calls [`Inbox::next`] for the first time, it will transition to the [`ActorStatus::Running`] state. It accepts messages and signals in this state, but will not process messages until
+    /// The actor is in the process of initializing. Once the actor calls [`Inbox::recv_event`] (or a related receiving method) for the first time, it will transition to the [`ActorStatus::Running`] state. It accepts messages and signals in this state, but they will not be processed until that transition happens.
     Initializing,
 
     /// The actor is running and processing messages.

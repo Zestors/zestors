@@ -6,17 +6,26 @@ use std::convert::Infallible;
 /// This is a strong reference ([`StrongAddress`]) to the channel, which means that it will keep
 /// the channel alive as long as it exists.
 ///
-/// See the [`Inbox::next`] method for receiving messages and signals from the channel.
+/// See the [`Inbox::recv_event`] method for receiving messages and signals from the channel.
 #[derive(Debug)]
 pub struct Inbox<T: Interface> {
     channel: StrongAddress<T>,
     init: InitState,
 }
 
+/// Controls when an [`Inbox`] transitions its channel from
+/// [`ActorStatus::Initializing`] to [`ActorStatus::Running`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InitState {
+    /// The default: the transition happens automatically, the first time any
+    /// `recv*`/`try_recv` method is called.
     Auto,
+    /// Set via [`Inbox::set_manual_init`]: the automatic transition is
+    /// suppressed, and the caller is responsible for calling
+    /// [`Inbox::register_initialized`] once the actor considers itself ready
+    /// (e.g. after a supervisor has finished starting its initial children).
     Manual,
+    /// The transition has already happened; further calls are no-ops.
     Completed,
 }
 
@@ -43,12 +52,15 @@ impl<T: Interface> Inbox<T> {
     /// Returns the next event from the channel, or `None` if the channel has received
     /// a [`Signal::Shutdown`] signal and has no more messages to process.
     pub async fn recv_event(&mut self) -> Option<InboxEvent<T>> {
-        self.register_initialized();
+        self.maybe_auto_init();
         self.channel().next_event(false).await
     }
 
+    /// Same as [`Inbox::recv_event`], but keeps returning signals (as
+    /// [`InboxEvent::Signal`]) after a [`Signal::Shutdown`] has been received,
+    /// instead of returning `None` once the inbox is empty.
     pub async fn recv_event_always(&mut self) -> Option<InboxEvent<T>> {
-        self.register_initialized();
+        self.maybe_auto_init();
         self.channel().next_event(true).await
     }
 
@@ -56,7 +68,7 @@ impl<T: Interface> Inbox<T> {
     /// [`Signal::Shutdown`], the inbox will be closed, and all remaining messages
     /// are received until the inbox is empty.
     pub async fn recv(&mut self) -> Option<T> {
-        self.register_initialized();
+        self.maybe_auto_init();
 
         loop {
             match self.channel().next_event(false).await {
@@ -70,13 +82,16 @@ impl<T: Interface> Inbox<T> {
         }
     }
 
+    /// Non-blocking version of [`Inbox::recv_event`]: returns `None` immediately
+    /// if no message or signal is currently available.
     pub fn try_recv(&mut self) -> Option<InboxEvent<T>> {
-        self.register_initialized();
+        self.maybe_auto_init();
         self.channel().try_next_event()
     }
 
+    /// Block until the next signal becomes available, ignoring any queued messages.
     pub async fn recv_signal(&mut self) -> Option<Signal> {
-        self.register_initialized();
+        self.maybe_auto_init();
         self.channel().next_signal().await
     }
 
@@ -84,6 +99,25 @@ impl<T: Interface> Inbox<T> {
         self.init == InitState::Completed
     }
 
+    /// Completes initialization automatically, but only if it is still in the
+    /// default [`InitState::Auto`] mode. Called by every `recv*`/`try_recv`
+    /// method; a no-op once [`Inbox::set_manual_init`] has been called, or
+    /// once initialization has already completed.
+    fn maybe_auto_init(&mut self) {
+        if self.init == InitState::Auto {
+            self.register_initialized();
+        }
+    }
+
+    /// Switches to manual initialization: the channel will no longer
+    /// transition from [`ActorStatus::Initializing`] to
+    /// [`ActorStatus::Running`] automatically on the first `recv*`/`try_recv`
+    /// call. The caller becomes responsible for calling
+    /// [`Inbox::register_initialized`] once the actor is ready to be
+    /// considered running (for example, once a supervisor has finished
+    /// starting its initial children).
+    ///
+    /// Returns `false` without effect if initialization has already completed.
     pub fn set_manual_init(&mut self) -> bool {
         if self.init_completed() {
             return false;
@@ -93,6 +127,11 @@ impl<T: Interface> Inbox<T> {
         true
     }
 
+    /// Switches back to automatic initialization (the default): the next
+    /// `recv*`/`try_recv` call will complete initialization. See
+    /// [`Inbox::set_manual_init`].
+    ///
+    /// Returns `false` without effect if initialization has already completed.
     pub fn set_auto_init(&mut self) -> bool {
         if self.init_completed() {
             return false;
@@ -102,6 +141,15 @@ impl<T: Interface> Inbox<T> {
         true
     }
 
+    /// Explicitly completes initialization, transitioning the channel from
+    /// [`ActorStatus::Initializing`] to [`ActorStatus::Running`].
+    ///
+    /// Under the default auto-init mode (see [`Inbox::set_auto_init`]) this is
+    /// called automatically by every `recv*`/`try_recv` method and rarely
+    /// needs to be called directly. After [`Inbox::set_manual_init`], this is the only thing that
+    /// completes initialization.
+    ///
+    /// Returns `false` without effect if initialization has already completed.
     pub fn register_initialized(&mut self) -> bool {
         if self.init_completed() {
             return false;
@@ -111,10 +159,14 @@ impl<T: Interface> Inbox<T> {
         self.channel().register_initialized().unwrap_or(false)
     }
 
+    /// Transitions the channel to [`ActorStatus::Exiting`], as if a
+    /// [`Signal::Shutdown`] had been received. Returns `false` if the channel
+    /// was already exiting or dead.
     pub fn register_stopping(&mut self) -> bool {
         self.channel().register_stopping().unwrap_or(false)
     }
 
+    /// Returns `true` if the channel is in the [`ActorStatus::Exiting`] state.
     pub fn is_shutting_down(&self) -> bool {
         self.status() == ActorStatus::Exiting
     }
@@ -128,6 +180,10 @@ impl<T: Interface> Inbox<T> {
         }
     }
 
+    /// Runs `fut` to completion while responding to signals: a
+    /// [`Signal::Suspend`] pauses polling `fut` until a [`Signal::Resume`] or
+    /// [`Signal::Shutdown`] is received, and a [`Signal::Shutdown`] cancels
+    /// `fut` and returns [`Cancelled`].
     pub async fn run_until_shutdown<O>(
         &mut self,
         fut: impl Future<Output = O> + Send,

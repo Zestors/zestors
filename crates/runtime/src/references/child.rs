@@ -9,7 +9,10 @@ use std::{fmt::Debug, pin::Pin, task::Poll, time::Duration};
 /// - The [`tokio::task::JoinHandle`] of the child process, which can be used to await the
 ///   exit of the child process and retrieve its result.
 /// - The [`StrongAddress`] of the child process, which can be used to interact with the
-/// child process.
+///   child process.
+///
+/// It also tracks whether it is currently attached (see [`Child::attach`] /
+/// [`Child::detach`]).
 pub struct Child<E = (), C: Context = Dyn> {
     join: Option<tokio::task::JoinHandle<Result<E, Report>>>,
     address: StrongAddress<C>,
@@ -33,14 +36,19 @@ impl<E, C: Context> Child<E, C> {
         self.handle().abort();
     }
 
+    /// Consumes the [`Child`] and returns its [`tokio::task::JoinHandle`],
+    /// detaching it from the process (it will no longer be aborted on drop).
     pub fn into_handle(mut self) -> tokio::task::JoinHandle<Result<E, Report>> {
         self.join.take().unwrap()
     }
 
+    /// Returns a reference to the underlying [`tokio::task::JoinHandle`].
     pub fn handle(&self) -> &tokio::task::JoinHandle<Result<E, Report>> {
         self.join.as_ref().unwrap()
     }
 
+    /// Consumes the [`Child`] and returns its [`tokio::task::JoinHandle`] and
+    /// [`StrongAddress`] separately.
     pub fn into_parts(mut self) -> (tokio::task::JoinHandle<Result<E, Report>>, StrongAddress<C>) {
         (self.join.take().unwrap(), self.address.clone())
     }
@@ -57,7 +65,7 @@ impl<E, C: Context> Child<E, C> {
         self
     }
 
-    /// Attaches the [`Child`] to the parent, which will be aborted when dropped.``
+    /// Attaches the [`Child`] to the parent, which will be aborted when dropped.
     pub fn attach(&mut self) {
         self.attached = true;
     }
@@ -94,6 +102,8 @@ impl<E, C: Context> Child<E, C> {
         }
     }
 
+    /// Signals a shutdown to the child process and returns an [`ExitingChild`]
+    /// future, which aborts the child if it hasn't exited within `duration`.
     pub fn into_shutdown(self, duration: Duration) -> ExitingChild<E, C> {
         ExitingChild::new(self, duration)
     }
@@ -160,12 +170,18 @@ impl<T, R: Context> Debug for Child<T, R> {
     }
 }
 
+/// A [`Child`] that has been signaled to shut down, and will be aborted if it
+/// hasn't exited by the time this future resolves.
+///
+/// Created via [`Child::into_shutdown`].
 pub struct ExitingChild<E = (), C: Context = Dyn> {
     child: Child<E, C>,
     abort_after: Pin<Box<tokio::time::Sleep>>,
 }
 
 impl<E, C: Context> ExitingChild<E, C> {
+    /// Signals a shutdown to `child` and returns a future that aborts it if it
+    /// hasn't exited within `duration`.
     pub fn new(child: Child<E, C>, duration: Duration) -> Self {
         child.signal_shutdown();
 
@@ -175,14 +191,17 @@ impl<E, C: Context> ExitingChild<E, C> {
         }
     }
 
+    /// Consumes the [`ExitingChild`] and returns the wrapped [`Child`].
     pub fn into_inner(self) -> Child<E, C> {
         self.child
     }
 
+    /// Returns a reference to the wrapped [`Child`].
     pub fn child(&self) -> &Child<E, C> {
         &self.child
     }
 
+    /// Returns a mutable reference to the wrapped [`Child`].
     pub fn child_mut(&mut self) -> &mut Child<E, C> {
         &mut self.child
     }

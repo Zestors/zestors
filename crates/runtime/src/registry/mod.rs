@@ -111,7 +111,7 @@ impl Registry {
 /// Error returned when registering a [`Pid`] that already exists in the [`Registry`].
 #[derive(thiserror::Error)]
 #[error("Failed to add entry for pid {}", .address.pid())]
-pub struct RegistryAddError<T: Context = Dyn> {
+pub(crate) struct RegistryAddError<T: Context = Dyn> {
     address: Address<T>,
 }
 

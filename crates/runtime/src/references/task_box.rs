@@ -8,11 +8,14 @@ pub struct TaskBox {
 }
 
 impl TaskBox {
+    /// Wraps an [`Inbox<Infallible>`] as a [`TaskBox`].
     pub fn new(inbox: Inbox<Infallible>) -> Self {
         Self { inbox }
     }
 
-    /// Returns the next signal from the channel, or `None` if the channel has received
+    /// Returns the next signal from the channel, or `None` if the channel has
+    /// received a [`Signal::Shutdown`] signal and has no more signals to process.
+    ///
     /// On the first call to `next`, the channel's status will be set to
     /// [`Running`](ActorStatus::Running), and will count as a completion of the initialization
     /// phase.
@@ -23,6 +26,8 @@ impl TaskBox {
         }
     }
 
+    /// Non-blocking version of [`TaskBox::next`]: returns `None` immediately if
+    /// no signal is currently available.
     pub fn try_next(&mut self) -> Option<Signal> {
         match self.inbox.try_recv()? {
             InboxEvent::Signal(signal) => Some(signal),
@@ -43,10 +48,13 @@ impl TaskBox {
         }
     }
 
+    /// Returns `true` if the channel is in the [`ActorStatus::Exiting`] state.
     pub fn is_shutting_down(&self) -> bool {
         self.status() == ActorStatus::Exiting
     }
 
+    /// Runs `fut` to completion while responding to signals. See
+    /// [`Inbox::run_until_shutdown`].
     pub async fn run_until_shutdown<O>(
         &mut self,
         fut: impl Future<Output = O> + Send,

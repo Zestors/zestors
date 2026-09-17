@@ -1,6 +1,14 @@
 use crate::*;
 use std::{fmt::Debug, hash::Hash};
 
+/// A weak reference to a [`Channel`], which can be used to send messages and
+/// signals to an actor without keeping it alive.
+///
+/// Unlike [`StrongAddress`] (and the [`Inbox`]/[`Child`] built on top of it), an
+/// `Address` does not count toward the actor's strong reference count: once
+/// every strong reference is dropped, the actor is permanently gone even while
+/// `Address`es to it still exist. Use [`ActorOps::upgrade`] to attempt to
+/// obtain a [`StrongAddress`] from an `Address`.
 #[repr(transparent)]
 pub struct Address<C: Context = Dyn> {
     pub(super) channel: Channel<C>,

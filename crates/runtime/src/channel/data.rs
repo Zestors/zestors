@@ -482,31 +482,31 @@ impl<I: Interface> Channel<I> {
 }
 
 impl ChannelInner<dyn DynamicQueue> {
-    pub fn msg_len(&self) -> usize {
+    pub(crate) fn msg_len(&self) -> usize {
         self.msg_queue.len()
     }
 
-    pub fn signal_len(&self) -> usize {
+    pub(crate) fn signal_len(&self) -> usize {
         self.signal_queue.len()
     }
 
-    pub fn backpressure_limit(&self) -> usize {
+    pub(crate) fn backpressure_limit(&self) -> usize {
         self.msg_backpressure_limit
     }
 
-    pub fn pid(&self) -> &Pid {
+    pub(crate) fn pid(&self) -> &Pid {
         &self.pid
     }
 
-    pub fn status(&self) -> ActorStatus {
+    pub(crate) fn status(&self) -> ActorStatus {
         self.status_observer.get()
     }
 
-    pub fn members(&self) -> &'static [TypeId] {
+    pub(crate) fn members(&self) -> &'static [TypeId] {
         self.msg_queue.members()
     }
 
-    pub fn signal(&self, signal: SignalInterface) -> bool {
+    pub(crate) fn signal(&self, signal: SignalInterface) -> bool {
         if matches!(self.status(), ActorStatus::Exited(_) | ActorStatus::Exiting) {
             return false;
         }
@@ -529,25 +529,25 @@ impl ChannelInner<dyn DynamicQueue> {
         true
     }
 
-    pub fn created_at(&self) -> Instant {
+    pub(crate) fn created_at(&self) -> Instant {
         self.created_at
     }
 
-    pub fn last_spawned_at(&self) -> Option<Instant> {
+    pub(crate) fn last_spawned_at(&self) -> Option<Instant> {
         let spawned_at = self.spawns.read().unwrap();
         spawned_at.last().cloned()
     }
 
-    pub fn spawned_at(&self) -> Vec<Instant> {
+    pub(crate) fn spawned_at(&self) -> Vec<Instant> {
         let spawned_at = self.spawns.read().unwrap();
         spawned_at.clone()
     }
 
-    pub fn strong_count(&self) -> usize {
+    pub(crate) fn strong_count(&self) -> usize {
         self.strong_count.load(Ordering::Relaxed)
     }
 
-    pub async fn watch<T>(
+    pub(crate) async fn watch<T>(
         &self,
         mut check_for: impl FnMut(ActorStatus) -> Option<T> + Send + 'static,
     ) -> T {
@@ -570,11 +570,11 @@ impl ChannelInner<dyn DynamicQueue> {
         }
     }
 
-    pub fn is_interface<I: Interface>(&self) -> bool {
+    pub(crate) fn is_interface<I: Interface>(&self) -> bool {
         self.msg_queue.type_id() == TypeId::of::<ConcurrentQueue<I>>()
     }
 
-    pub fn exits(&self) -> Vec<(Instant, Result<(), ExitError>)> {
+    pub(crate) fn exits(&self) -> Vec<(Instant, Result<(), ExitError>)> {
         let exits = self.exits.read().unwrap();
         exits.clone()
     }
@@ -582,7 +582,7 @@ impl ChannelInner<dyn DynamicQueue> {
 
 impl<C: Context> Debug for Channel<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ChannelData")
+        f.debug_struct("Channel")
             .field("pid", &self.data().pid)
             .field("status", &self.data().status_observer.get())
             .field("len", &self.data().msg_queue.len())

@@ -2,65 +2,79 @@ use super::*;
 
 /// Provides message-sending operations for a channel.
 ///
-/// `Sends` exposes four levels of delivery semantics:
+/// `Cast` exposes two ways to send a message, both configurable through a
+/// shared [`CastOptions`]:
 ///
-/// - [`Sends::send`] applies backpressure and asynchronously waits when the
-///   channel is under load.
-/// - [`Sends::try_send`] applies backpressure but never waits, returning
-///   [`ClosedOrFull::Full`] when the channel is under backpressure.
-/// - [`Sends::send_now`] checks whether the channel is open but ignores
-///   backpressure.
-/// - [`Sends::force_send`] ignores both backpressure and the channel status.
+/// - [`Cast::cast`] / [`Cast::cast_with`] wait out backpressure before
+///   sending, and so only fail if the channel is closed.
+/// - [`Cast::try_cast`] / [`Cast::try_cast_with`] never wait: they fail
+///   immediately if the channel is closed, and may also fail if it is
+///   currently under backpressure (see [`Cast::try_cast_with`]).
+///
+/// [`Cast::call`] / [`Cast::call_with`] build on `cast`/`cast_with` to
+/// additionally wait for the message's reply.
 pub trait Cast<M: Message>: Sync {
-    /// Sends a message, applying backpressure when the channel is under load.
+    /// Sends a message, waiting out backpressure first if the channel is
+    /// under load.
     ///
-    /// This method waits asynchronously while backpressure is active. It
-    /// returns [`Closed`] if the channel is closed.
-    ///
-    /// Unlike [`Sends::try_send`], this method waits rather than returning
-    /// immediately when backpressure is active.
+    /// Equivalent to [`Cast::cast_with`] with the default [`CastOptions`].
     fn cast(&self, msg: M) -> impl Future<Output = Result<M::Receipt, CastError<M>>> + Send {
         self.cast_with(msg, Default::default())
     }
 
+    /// Same as [`Cast::cast`], with explicit [`CastOptions`].
+    ///
+    /// Unless `options.ignore_backpressure` is `true`, this first waits for as
+    /// long as the channel's current backpressure delay dictates (based on how
+    /// full the channel is), then sends regardless of backpressure. Because of
+    /// this, `cast_with` never fails due to the channel being full — its only
+    /// failure mode is [`CastError`], returned if the channel is closed (which,
+    /// unless `options.ignore_exiting` is `true`, includes a channel that is
+    /// [`ActorStatus::Exiting`]).
     fn cast_with(
         &self,
         msg: M,
         options: CastOptions,
     ) -> impl Future<Output = Result<M::Receipt, CastError<M>>> + Send;
 
-    /// Sends a message immediately if the channel is open.
+    /// Sends a message immediately, without waiting out backpressure.
     ///
-    /// This method ignores backpressure, but still checks whether the channel
-    /// is accepting messages. It returns [`Closed`] if the channel is closed.
-    ///
-    /// Use [`Sends::force_send`] when the channel status should also be
-    /// ignored.
+    /// Equivalent to [`Cast::try_cast_with`] with the default [`CastOptions`].
     fn try_cast(&self, msg: M) -> Result<M::Receipt, TryCastError<M>> {
         self.try_cast_with(msg, Default::default())
     }
 
+    /// Same as [`Cast::try_cast`], with explicit [`CastOptions`].
+    ///
+    /// Returns [`TryCastError::Closed`] if the channel is closed (which,
+    /// unless `options.ignore_exiting` is `true`, includes a channel that is
+    /// [`ActorStatus::Exiting`]).
+    ///
+    /// Returns [`TryCastError::Full`] if `options.ignore_backpressure` is
+    /// `false` and the channel is currently under backpressure. This check
+    /// only applies when sending through a dynamically-typed reference (a
+    /// [`Dyn`] [`Context`], e.g. [`Address<Dyn>`]): sending through a
+    /// statically-typed reference bypasses it entirely, and can only fail due
+    /// to the channel being closed.
     fn try_cast_with(&self, msg: M, options: CastOptions) -> Result<M::Receipt, TryCastError<M>>;
 
-    // fn try_cast_with(&self, msg: M, options: CastOptions) -> Result<M::Receipt, CastError<M>>;
-
-    // /// Sends a message immediately, ignoring backpressure and channel status.
-    // ///
-    // /// This is the lowest-level sending operation. The message is queued even
-    // /// when the channel is closed.
-    // ///
-    // /// If the underlying queue is at capacity, the message is dropped and the
-    // /// implementation may log the overflow.
-    // fn force_send(&self, msg: M) -> M::Receipt;
-
-    /// Sends a message and waits for a reply.
+    /// Sends a message via [`Cast::cast`] and waits for its reply.
     ///
-    /// This is the same as [`Sends::send`] with [`MessageOutput::receive`] called on the result. The resulting value is therefore [`Message::Output`] instead of
-    /// [`Message::Output`].
+    /// Equivalent to calling [`Cast::cast`] and then [`Receipt::wait`] on the
+    /// result, so it shares `cast`'s backpressure and closed-channel behavior.
+    /// The output is therefore [`Message::Output`] (the reply) rather than
+    /// [`Message::Receipt`] (the handle used to await it).
+    ///
+    /// Returns [`CallError::Closed`] if the channel was closed at the time of
+    /// sending, or [`CallError::NoResponse`] if no reply was ever received
+    /// (for example, because the actor exited, or dropped the request, before
+    /// replying).
     fn call(&self, msg: M) -> impl Future<Output = Result<M::Output, CallError<M>>> + Send {
         async move { Ok(self.cast(msg).await?.wait().await?) }
     }
 
+    /// Same as [`Cast::call`], with explicit [`CastOptions`] applied to the
+    /// underlying [`Cast::cast_with`] call.
     fn call_with(
         &self,
         msg: M,
@@ -89,19 +103,22 @@ where
     }
 }
 
-/// A private trait for implementation on [`ActorHandle`] only.
+/// A private trait for implementation on [`Channel`] only.
 ///
-/// There is a blacket-implementation of [`Sends`] for all types that implement
-/// [`ActorHandle`].
+/// There is a blanket implementation of [`Cast`] for all types that implement
+/// [`ActorRef`], provided their [`Channel`] implements this trait.
 pub(crate) trait _Cast<M: Message>: Sync {
+    /// The [`Channel`]-specific implementation backing [`Cast::cast_with`].
     fn _cast_with(
         &self,
         msg: M,
         options: CastOptions,
     ) -> impl Future<Output = Result<M::Receipt, CastError<M>>> + Send;
 
+    /// The [`Channel`]-specific implementation backing [`Cast::try_cast_with`].
     fn _try_cast_with(&self, msg: M, options: CastOptions) -> Result<M::Receipt, TryCastError<M>>;
 
+    /// The [`Channel`]-specific implementation backing [`Cast::call_with`].
     fn _call_with(
         &self,
         msg: M,
