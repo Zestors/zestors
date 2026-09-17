@@ -30,7 +30,7 @@ impl<C: Context> Address<C> {
         }
     }
 
-    pub(crate) fn _channel(&self) -> &Channel<dyn DynamicQueue> {
+    pub(crate) fn _channel(&self) -> &Arc<Channel<dyn DynamicQueue>> {
         &self.inner
     }
 }

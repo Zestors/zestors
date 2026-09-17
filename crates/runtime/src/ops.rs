@@ -1,7 +1,7 @@
 use super::*;
 use crate::signals;
 use jiff::{SignedDuration, Timestamp, Zoned, tz::TimeZone};
-use std::{any::TypeId, future::Future};
+use std::{any::TypeId, future::Future, sync::Arc};
 use tokio::time::Instant;
 use zestors_interface::{Reply, Request};
 
@@ -77,8 +77,8 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         msg: M,
         options: CallOptions,
     ) -> impl Future<Output = Result<M::Output, CallDynError<M>>> + Send {
-        let handle = self.actor_ref();
-        async move { Ok(handle.cast_dyn_with(msg, options).await?.wait().await?) }
+        let channel = self.channel();
+        async move { Ok(channel.cast_dyn_with(msg, options).await?.wait().await?) }
     }
 
     /// Returns the actor's [`Pid`].
@@ -179,14 +179,14 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     }
 
     /// Returns `true` if the channel accepts messages of type `M`.
-    fn can_send<M: Message>(&self) -> bool {
-        self.can_send_type_id(TypeId::of::<M>())
+    fn accepts<M: Message>(&self) -> bool {
+        self.accepts_id(TypeId::of::<M>())
     }
 
-    /// The [`TypeId`]-based primitive behind [`ActorOps::can_send`], for use
+    /// The [`TypeId`]-based primitive behind [`ActorOps::accepts`], for use
     /// where the message type isn't statically known. See
     /// [`ActorOps::is_superset_of`].
-    fn can_send_type_id(&self, type_id: TypeId) -> bool {
+    fn accepts_id(&self, type_id: TypeId) -> bool {
         self.members().contains(&type_id)
     }
 
@@ -194,7 +194,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// `type_ids`. Used internally by [`IntoDyn::into_dyn_checked`] and
     /// [`AsDyn::as_dyn_checked`].
     fn is_superset_of(&self, type_ids: &[TypeId]) -> bool {
-        type_ids.iter().all(|id| self.can_send_type_id(*id))
+        type_ids.iter().all(|id| self.accepts_id(*id))
     }
 
     /// Returns `true` if the channel's concrete message type is exactly `I`.
@@ -246,8 +246,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     fn ping(&self) -> Reply<()> {
         let (tx, rx) = Request::new();
 
-        self.actor_ref()
-            ._channel()
+        self.channel()
             .signal(SignalInterface::Ping(Envelope::new(signals::Ping, tx)));
 
         rx
@@ -312,7 +311,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// This amount should only be used as an indication of the number of
     /// active references to the channel.
     fn ref_count(&self) -> usize {
-        self.actor_ref().ref_count()
+        self.channel().ref_count()
     }
 
     /// The amount of [`Address`]es in existence for this channel.
@@ -320,7 +319,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// This amount should only be used as an indication of the number of
     /// active references to the channel.
     fn weak_count(&self) -> usize {
-        self.ref_count().saturating_sub(self.strong_count())
+        self.channel().weak_count()
     }
 
     /// Returns a reference to the [`Address`] of the associated actor. Same
@@ -333,7 +332,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// Attempts to obtain a [`StrongAddress`] to the channel, returning
     /// `None` if it is permanently dead (see [`ActorOps::is_permanently_dead`]).
     fn upgrade(&self) -> Option<StrongAddress<Self::Ctx>> {
-        StrongAddress::from_address_ref(self.actor_ref())
+        StrongAddress::from_address_ref(self.address())
     }
 }
 
@@ -365,7 +364,7 @@ impl Clock {
 }
 
 pub(crate) trait ChannelAccess: ActorRef {
-    fn channel(&self) -> &Channel<dyn DynamicQueue> {
+    fn channel(&self) -> &Arc<Channel<dyn DynamicQueue>> {
         self.actor_ref()._channel()
     }
 }

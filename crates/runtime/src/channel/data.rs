@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::*;
 use eyeball::ObservableWriteGuard;
 
@@ -97,6 +99,14 @@ impl Channel<dyn DynamicQueue> {
 
     pub(crate) fn strong_count(&self) -> usize {
         self.strong_count.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn weak_count(self: &Arc<Self>) -> usize {
+        self.ref_count().saturating_sub(self.strong_count())
+    }
+
+    pub(crate) fn ref_count(self: &Arc<Self>) -> usize {
+        Arc::strong_count(self)
     }
 
     /// Increments the strong reference count. The caller must already own a

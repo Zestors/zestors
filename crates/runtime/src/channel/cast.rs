@@ -1,25 +1,26 @@
 use super::*;
 
 impl Channel<dyn DynamicQueue> {
-    pub(crate) fn try_cast_dyn_with<M: Message>(
+    // Statically sends a message
+    pub(crate) async fn cast_with<M, I>(
         &self,
         msg: M,
-        options: CallOptions,
-    ) -> Result<M::Receipt, TryCastDynError<M>> {
-        if !options.ignore_backpressure && self.reached_backpressure() {
-            return Err(TryCastDynError::Full(msg));
+        mut options: CallOptions,
+    ) -> Result<M::Receipt, CastError<M>>
+    where
+        M: Message,
+        I: Interface + TryInto<Envelope<M>> + From<Envelope<M>> + Send + 'static,
+    {
+        if !options.ignore_backpressure {
+            self.delay_for_backpressure().await;
+            options.ignore_backpressure = true;
         }
 
-        let status = self.status();
-        if !status.accepts_messages() && !(options.ignore_exiting && status.is_exiting()) {
-            return Err(TryCastDynError::Closed(msg));
-        }
-
-        let output = self.try_push_msg(msg)?;
-        self.msg_notify_one();
-        Ok(output)
+        self.try_cast_with::<M, I>(msg, options)
+            .map_err(|e| e.into_cast_error_dbg_assert())
     }
 
+    // Dynamically sends a message
     pub(crate) fn cast_dyn_with<M: Message>(
         &self,
         msg: M,
@@ -36,6 +37,10 @@ impl Channel<dyn DynamicQueue> {
         }
     }
 
+    /// Tries to statically send a message through the channel, not waiting for space
+    /// to become available in the channel's queue.
+    ///
+    /// This method falls back to the dynamic implementation if the static queue for the message type is not available.
     pub(crate) fn try_cast_with<M, I>(
         &self,
         msg: M,
@@ -80,22 +85,25 @@ impl Channel<dyn DynamicQueue> {
         Ok(receipt)
     }
 
-    pub(crate) async fn cast_with<M, I>(
+    /// Tries to dynamically send a message through the channel, not waiting for space
+    /// to become available in the channel's queue.
+    pub(crate) fn try_cast_dyn_with<M: Message>(
         &self,
         msg: M,
-        mut options: CallOptions,
-    ) -> Result<M::Receipt, CastError<M>>
-    where
-        M: Message,
-        I: Interface + TryInto<Envelope<M>> + From<Envelope<M>> + Send + 'static,
-    {
-        if !options.ignore_backpressure {
-            self.delay_for_backpressure().await;
-            options.ignore_backpressure = true;
+        options: CallOptions,
+    ) -> Result<M::Receipt, TryCastDynError<M>> {
+        if !options.ignore_backpressure && self.reached_backpressure() {
+            return Err(TryCastDynError::Full(msg));
         }
 
-        self.try_cast_with::<M, I>(msg, options)
-            .map_err(|e| e.into_cast_error_dbg_assert())
+        let status = self.status();
+        if !status.accepts_messages() && !(options.ignore_exiting && status.is_exiting()) {
+            return Err(TryCastDynError::Closed(msg));
+        }
+
+        let output = self.try_push_msg(msg)?;
+        self.msg_notify_one();
+        Ok(output)
     }
 }
 
