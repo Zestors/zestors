@@ -60,18 +60,18 @@ impl Pid {
         Registry::local().get_dyn::<S>(self)
     }
 
-    /// Returns the [`Pid`] of the actor currently running on this task, or
-    /// `None` if not called from within an actor's task.
-    pub fn current() -> Option<Self> {
-        crate::current_pid()
-    }
+    // /// Returns the [`Pid`] of the actor currently running on this task, or
+    // /// `None` if not called from within an actor's task.
+    // pub fn current() -> Option<Self> {
+    //     crate::current_pid()
+    // }
 
-    /// Returns the [`Pid`] of the actor that spawned the actor currently
-    /// running on this task, or `None` if not called from within an actor's
-    /// task, or if that actor has no parent.
-    pub fn parent() -> Option<Self> {
-        crate::parent_pid()
-    }
+    // /// Returns the [`Pid`] of the actor that spawned the actor currently
+    // /// running on this task, or `None` if not called from within an actor's
+    // /// task, or if that actor has no parent.
+    // pub fn parent() -> Option<Self> {
+    //     crate::parent_pid()
+    // }
 }
 
 impl Default for Pid {

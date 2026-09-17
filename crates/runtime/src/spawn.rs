@@ -11,6 +11,7 @@ task_local! {
 #[derive(Clone, Debug)]
 struct PidInfo {
     this: Pid,
+    #[expect(unused)]
     parent: Option<Pid>,
 }
 
@@ -181,7 +182,7 @@ impl<T: Context> StrongAddress<T> {
                 .scope(
                     PidInfo {
                         this: self.pid().clone(),
-                        parent: Pid::current(),
+                        parent: current_pid(),
                     },
                     async move {
                         let spawn_result = spawn_future.await;
@@ -255,6 +256,7 @@ pub(crate) fn current_pid() -> Option<Pid> {
     PID_INFO.try_with(|info| info.this.clone()).ok()
 }
 
+#[expect(unused)]
 pub(crate) fn parent_pid() -> Option<Pid> {
     PID_INFO.try_with(|info| info.parent.clone()).ok().flatten()
 }
