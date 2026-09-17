@@ -28,7 +28,7 @@ struct PidInfo {
 /// # async fn main() {
 /// let child = spawn_task(Pid::new("background-job"), |mut task_box: TaskBox| async move {
 ///     task_box.wait_shutdown().await;
-///     Ok::<_, rootcause::Report>(())
+///     Ok(())
 /// })
 /// .unwrap();
 ///
@@ -73,12 +73,12 @@ where
 /// let pid = Pid::new("my-actor");
 /// let child = spawn(pid.clone(), |mut inbox: Inbox<()>| async move {
 ///     while inbox.recv().await.is_some() {}
-///     Ok::<_, rootcause::Report>(())
+///     Ok(())
 /// })
 /// .unwrap();
 ///
 /// // A second actor can't reuse the same pid while this one is alive.
-/// assert!(spawn(pid, |_: Inbox<()>| async { Ok::<_, rootcause::Report>(()) }).is_err());
+/// assert!(spawn(pid, |_: Inbox<()>| async { Ok(()) }).is_err());
 ///
 /// child.signal_shutdown();
 /// # }
@@ -141,7 +141,7 @@ impl<T: Context> StrongAddress<T> {
     ///
     /// let first = strong.clone().spawn(|mut inbox: Inbox<()>| async move {
     ///     while inbox.recv().await.is_some() {}
-    ///     Ok::<_, rootcause::Report>(())
+    ///     Ok(())
     /// })
     /// .unwrap();
     /// first.signal_shutdown();
@@ -151,7 +151,7 @@ impl<T: Context> StrongAddress<T> {
     /// // so a second process can now be spawned on the very same channel.
     /// let second = strong.spawn(|mut inbox: Inbox<()>| async move {
     ///     while inbox.recv().await.is_some() {}
-    ///     Ok::<_, rootcause::Report>(())
+    ///     Ok(())
     /// })
     /// .unwrap();
     /// second.signal_shutdown();

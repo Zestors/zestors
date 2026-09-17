@@ -33,7 +33,7 @@ pub trait ActorRef {
 /// # async fn main() {
 /// let child = spawn_rand(|mut inbox: Inbox<()>| async move {
 ///     while inbox.recv().await.is_some() {}
-///     Ok::<_, rootcause::Report>(())
+///     Ok(())
 /// });
 ///
 /// child.watch_init().await.unwrap();
@@ -68,7 +68,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// // *try* to send any `Message`, checking acceptance at runtime.
     /// let child = spawn_rand(|mut inbox: Inbox<()>| async move {
     ///     while inbox.recv().await.is_some() {}
-    ///     Ok::<_, rootcause::Report>(())
+    ///     Ok(())
     /// });
     /// child.watch_init().await.unwrap();
     ///
@@ -191,6 +191,13 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
             ActorStatus::Exited(exit) => {
                 return Some(Err(exit));
             }
+            _ => None,
+        })
+    }
+
+    fn watch_running(&self) -> impl Future<Output = Result<(), ExitStatus>> + Send {
+        self.watch(|status| match status {
+            ActorStatus::Running => return Some(Ok(())),
             _ => None,
         })
     }

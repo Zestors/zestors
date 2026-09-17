@@ -30,17 +30,22 @@
 //! [`SupervisionTree`](zestors_supervision::SupervisionTree) — all live in the
 //! `zestors-supervision` crate.
 //!
-//! # Example
+//! # Examples
 //!
-//! Building on `zestors-supervision`'s [`ChildSpec`](zestors_supervision::ChildSpec)
-//! example: a [`SupervisorBlueprint`] collects one or more specs, and
-//! instantiating it produces a [`Supervisor`] - an ordinary [`Actor`] like
-//! any other, so it's spawned and messaged the same way.
+//! ## A standalone `Supervisor`
+//!
+//! A [`SupervisorBlueprint`] collects one or more
+//! [`ChildSpec`](zestors_supervision::ChildSpec)s, each pairing a blueprint
+//! with the [`Pid`] it's registered under and the [`RestartMode`] the
+//! supervisor should apply to it. Instantiating the blueprint produces a
+//! [`Supervisor`] - an ordinary [`Actor`] like any other, so
+//! [`BlueprintExt::start`]/[`start_rand`](BlueprintExt::start_rand) start it
+//! the same way they would any other actor.
 //!
 //! ```
+//! use zestors::actor::RestartMode;
 //! use zestors::interface::{Envelope, Interface, Message};
 //! use zestors::prelude::*;
-//! use zestors::supervision::ChildSpec;
 //! use zestors::supervision::messages::GetChildren;
 //! use zestors::supervisor::Supervisor;
 //!
@@ -72,21 +77,104 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() {
-//! let blueprint = Supervisor::blueprint().child(ChildSpec::create_rand_pid(Worker));
-//! let supervisor = blueprint.instantiate().await.unwrap().spawn_rand();
+//! let blueprint = Supervisor::blueprint().children([
+//!     Worker.pid("worker-a").unwrap().with_mode(RestartMode::Always),
+//!     Worker.pid("worker-b").unwrap().with_mode(RestartMode::Never),
+//! ]);
+//! let supervisor = blueprint.start_rand().await.unwrap();
+//!
+//! // A `Supervisor` only reports itself as `Running` once every child it
+//! // started with has finished its own initialization.
+//! supervisor.watch_init().await.unwrap();
 //!
 //! // `SupervisorInterface` answers `GetChildren`/`GetHealth` (from
 //! // `zestors-supervision`) without needing to stop the tree to inspect it.
 //! let children = supervisor.call(GetChildren).await.unwrap();
-//! assert_eq!(children.len(), 1);
+//! assert_eq!(children.len(), 2);
 //!
 //! supervisor.signal_shutdown();
 //! # }
 //! ```
 //!
-//! This spawns the supervisor directly; [`Node`] is for the common case of
-//! running one *root* supervisor as an entire program, adding Ctrl+C/SIGTERM
-//! handling and a bounded shutdown on top.
+//! This spawns the supervisor directly. Reach for [`Node`] instead when the
+//! supervisor being started actually is the top of the tree for the whole
+//! program.
+//!
+//! ## Running one as a program with `Node`
+//!
+//! [`Node`] takes a [`ChildSpec<SupervisorBlueprint>`](zestors_supervision::ChildSpec)
+//! for a *root* supervisor and runs it as an entire program: [`Node::run`]
+//! starts it, restarts it up to a configured
+//! [`RestartIntensity`](zestors_supervision::RestartIntensity) if it exits
+//! with an error, and shuts it down gracefully - on a Ctrl+C/SIGTERM in a
+//! real program, or, as below, on an ordinary
+//! [`ActorOps::signal_shutdown`] sent to its address like any other actor.
+//!
+//! ```
+//! use zestors::interface::{Envelope, Interface, Message};
+//! use zestors::prelude::*;
+//! use zestors::supervision::messages::GetChildren;
+//! use zestors::supervisor::{Node, Supervisor};
+//!
+//! #[derive(Message, Debug)]
+//! struct Ping;
+//!
+//! #[derive(Interface, HandlerInterface, Debug)]
+//! enum WorkerInterface {
+//!     Ping(Envelope<Ping>),
+//! }
+//!
+//! #[derive(Debug, Clone)]
+//! struct Worker;
+//!
+//! impl Handler for Worker {
+//!     type Interface = WorkerInterface;
+//! }
+//!
+//! impl Handle<Ping> for Worker {
+//!     async fn handle(
+//!         &mut self,
+//!         _ctx: HandlerContext<'_, Self>,
+//!         _msg: Ping,
+//!         _req: (),
+//!     ) -> Result<(), rootcause::Report> {
+//!         Ok(())
+//!     }
+//! }
+//!
+//! # #[tokio::main]
+//! # async fn main() {
+//! let node = Node::new(
+//!     Supervisor::blueprint()
+//!         .child(Worker.pid("worker").unwrap())
+//!         .rand_pid(),
+//! );
+//!
+//! // `Node::run` consumes the `Node`, so keep a handle to the root
+//! // supervisor before handing it off.
+//! let root = node.root_supervisor().address().clone();
+//! let node_task = tokio::spawn(node.run());
+//!
+//! // A freshly created channel's status looks exactly like "already
+//! // exited normally" until something actually spawns onto it, which
+//! // `node_task` hasn't necessarily done yet - wait for that first.
+//! root.watch(|status| (!status.is_dead()).then_some(())).await;
+//! root.watch_init().await.unwrap();
+//! let children = root.call(GetChildren).await.unwrap();
+//! assert_eq!(children.len(), 1);
+//!
+//! // The root supervisor exiting on its own - here, because we asked it
+//! // to - is a normal, successful stop for the whole node.
+//! root.signal_shutdown();
+//! assert!(node_task.await.unwrap().is_ok());
+//! # }
+//! ```
+//!
+//! In a real program, `node.run()` is usually just `.await`ed directly from
+//! `main` instead of spawned onto a background task: the only reason to
+//! reach for the root supervisor's address at all here is to trigger and
+//! observe a controlled shutdown from the test itself, in place of the
+//! Ctrl+C/SIGTERM a real deployment would send.
 
 mod actor;
 mod source;

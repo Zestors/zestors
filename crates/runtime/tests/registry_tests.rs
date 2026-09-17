@@ -36,7 +36,11 @@ async fn get_finds_a_registered_actor_and_none_for_an_unknown_pid() {
     let found = Registry::local().get(&pid).expect("should be registered");
     assert_eq!(found.pid(), &pid);
 
-    assert!(Registry::local().get(&Pid::new("definitely_not_registered")).is_none());
+    assert!(
+        Registry::local()
+            .get(&Pid::new("definitely_not_registered"))
+            .is_none()
+    );
 
     child.signal_shutdown();
 }
@@ -61,7 +65,7 @@ async fn get_typed_succeeds_for_the_right_interface_and_errors_otherwise() {
     let pid = common::test_pid("registry_get_typed");
     let child = spawn(pid.clone(), |mut inbox: Inbox<PingInterface>| async move {
         while inbox.recv().await.is_some() {}
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     })
     .unwrap();
 
@@ -82,7 +86,7 @@ async fn get_dyn_succeeds_for_an_accepted_subset_and_errors_otherwise() {
     let pid = common::test_pid("registry_get_dyn");
     let child = spawn(pid.clone(), |mut inbox: Inbox<PingInterface>| async move {
         while inbox.recv().await.is_some() {}
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     })
     .unwrap();
 
@@ -197,9 +201,13 @@ async fn fetch_addresses_includes_every_currently_registered_actor() {
     }
 
     let addresses = Registry::local().fetch_addresses().await;
-    let fetched_pids: std::collections::HashSet<_> = addresses.iter().map(|a| a.pid().clone()).collect();
+    let fetched_pids: std::collections::HashSet<_> =
+        addresses.iter().map(|a| a.pid().clone()).collect();
     for pid in &pids {
-        assert!(fetched_pids.contains(pid), "fetch_addresses should include {pid}");
+        assert!(
+            fetched_pids.contains(pid),
+            "fetch_addresses should include {pid}"
+        );
     }
 
     for child in children {
@@ -232,7 +240,7 @@ async fn pid_address_and_typed_address_mirror_the_registry() {
     let pid = common::test_pid("pid_helper_methods");
     let child = spawn(pid.clone(), |mut inbox: Inbox<PingInterface>| async move {
         while inbox.recv().await.is_some() {}
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     })
     .unwrap();
 
@@ -266,7 +274,7 @@ async fn pid_current_and_parent_reflect_the_spawn_tree() {
                 assert_eq!(Pid::current(), Some(child_inbox.pid().clone()));
                 assert_eq!(Pid::parent(), Some(parent_pid));
                 while child_inbox.recv().await.is_some() {}
-                Ok::<_, rootcause::Report>(())
+                Ok(())
             }
         });
         child.watch_init().await.unwrap();
@@ -275,11 +283,17 @@ async fn pid_current_and_parent_reflect_the_spawn_tree() {
         let _ = tx.send(child_exit.is_ok());
 
         while inbox.recv().await.is_some() {}
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
 
-    assert!(rx.await.unwrap(), "the child's Pid::current/Pid::parent assertions must have held");
+    assert!(
+        rx.await.unwrap(),
+        "the child's Pid::current/Pid::parent assertions must have held"
+    );
 
     parent.signal_shutdown();
-    assert!(parent.watch_exit().await.is_ok(), "the parent's own assertions must have held too");
+    assert!(
+        parent.watch_exit().await.is_ok(),
+        "the parent's own assertions must have held too"
+    );
 }

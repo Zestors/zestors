@@ -46,7 +46,7 @@ async fn spawn_task_cannot_receive_messages_but_can_receive_signals() {
 #[tokio::test]
 async fn spawn_task_with_a_specific_pid_registers_it() {
     let pid = common::test_pid("spawn_task_specific");
-    let child = spawn_task(pid.clone(), |_task_box| async { Ok::<_, rootcause::Report>(()) }).unwrap();
+    let child = spawn_task(pid.clone(), |_task_box| async { Ok(()) }).unwrap();
 
     assert_eq!(child.pid(), &pid);
     assert!(zestors_runtime::Registry::local().contains(&pid));
@@ -58,7 +58,7 @@ async fn spawn_and_spawn_task_reject_a_duplicate_pid() {
     let child = spawn(pid.clone(), common::simplest_handler).unwrap();
 
     assert!(spawn(pid.clone(), common::simplest_handler).is_err());
-    assert!(spawn_task(pid.clone(), |_task_box| async { Ok::<_, rootcause::Report>(()) }).is_err());
+    assert!(spawn_task(pid.clone(), |_task_box| async { Ok(()) }).is_err());
 
     child.signal_shutdown();
 }

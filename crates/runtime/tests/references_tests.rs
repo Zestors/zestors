@@ -144,7 +144,7 @@ async fn manual_init_suppresses_the_automatic_running_transition() {
         proceed2.notified().await; // wait for the test to tell us to proceed
         assert!(inbox.register_initialized(), "the first call must still perform the transition");
         while inbox.recv().await.is_some() {}
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
 
     // Give the task a chance to run up to `notified().await` and register
@@ -167,7 +167,7 @@ async fn register_initialized_is_idempotent() {
         // Every subsequent call is a no-op reporting `false`.
         assert!(!inbox.register_initialized());
         while inbox.recv().await.is_some() {}
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
 
     child.watch_init().await.unwrap();
@@ -181,7 +181,7 @@ async fn try_recv_finds_a_message_queued_before_the_actor_started_polling() {
         let first = inbox.try_recv();
         assert!(matches!(first, Some(InboxEvent::Message(()))));
         assert!(inbox.try_recv().is_none(), "nothing should be left after that");
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
 
     // Spawning already leaves the channel `Initializing` synchronously
@@ -205,7 +205,7 @@ async fn recv_event_stops_but_recv_event_always_keeps_waiting_once_exiting_and_e
             Some(InboxEvent::Signal(Signal::Shutdown))
         ));
         assert!(inbox.recv_event().await.is_none());
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
     plain.watch_init().await.unwrap();
     plain.signal_shutdown();
@@ -223,7 +223,7 @@ async fn recv_event_stops_but_recv_event_always_keeps_waiting_once_exiting_and_e
             second.is_err(),
             "recv_event_always must not give up just because the queue emptied out while exiting"
         );
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
     always.watch_init().await.unwrap();
     always.signal_shutdown();
@@ -237,7 +237,7 @@ async fn dropping_the_inbox_drains_its_queue() {
     // queue. `Inbox::drop` must drain it rather than leaving it stuck.
     let child = spawn_rand(|mut inbox: Inbox<()>| async move {
         inbox.recv().await;
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
     child.watch_init().await.unwrap();
 
@@ -276,7 +276,7 @@ async fn task_box_wait_shutdown_is_immediate_if_already_exiting() {
         // The second call must take the `is_exiting()` early-return path
         // instead of waiting for another signal that will never come.
         task_box.wait_shutdown().await;
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
     child.watch_init().await.unwrap();
     child.signal_shutdown();
@@ -294,7 +294,7 @@ async fn run_until_shutdown_completes_normally_without_a_signal() {
     let child = spawn_rand(|mut inbox: Inbox<()>| async move {
         let outcome = inbox.run_until_shutdown(async { 42 }).await;
         assert!(matches!(outcome, Ok(42)));
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
 
     let result = tokio::time::timeout(Duration::from_secs(2), child).await;
@@ -308,7 +308,7 @@ async fn run_until_shutdown_cancels_a_pending_future_on_shutdown() {
             .run_until_shutdown(std::future::pending::<()>())
             .await;
         assert!(matches!(outcome, Err(Cancelled)));
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
 
     child.watch_init().await.unwrap();
@@ -346,7 +346,7 @@ async fn dropping_an_attached_child_aborts_it() {
     let child = spawn(pid.clone(), |mut inbox: Inbox<()>| async move {
         std::future::pending::<()>().await;
         while inbox.recv().await.is_some() {}
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     })
     .unwrap();
     // This handler blocks on `pending()` before ever touching the inbox, so
@@ -369,7 +369,7 @@ async fn detach_prevents_abort_on_drop() {
         // have kept it running for, if it weren't detached.
         tokio::time::sleep(Duration::from_millis(50)).await;
         while inbox.recv().await.is_some() {}
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
     child.watch_init().await.unwrap();
 
@@ -394,7 +394,7 @@ async fn abort_marks_the_exit_status_as_aborted() {
     let mut child = spawn_rand(|mut inbox: Inbox<()>| async move {
         std::future::pending::<()>().await;
         while inbox.recv().await.is_some() {}
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
     // Never reaches `Running` (it blocks before ever touching the inbox),
     // but the task must still be scheduled at least once before we abort it.
@@ -412,7 +412,7 @@ async fn shutdown_abort_gives_a_slow_actor_a_grace_period_then_aborts() {
         // stopped by an abort.
         std::future::pending::<()>().await;
         while inbox.recv().await.is_some() {}
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
     tokio::task::yield_now().await;
 

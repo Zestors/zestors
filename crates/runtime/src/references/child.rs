@@ -24,7 +24,7 @@ use std::{fmt::Debug, pin::Pin, task::Poll, time::Duration};
 /// # async fn main() {
 /// let mut child = spawn_rand(|mut inbox: Inbox<()>| async move {
 ///     while inbox.recv().await.is_some() {}
-///     Ok::<_, rootcause::Report>(())
+///     Ok(())
 /// });
 /// child.watch_init().await.unwrap();
 ///

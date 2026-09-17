@@ -74,7 +74,7 @@ async fn shutdown_still_drains_every_queued_message() {
         while inbox.recv().await.is_some() {
             c.increment();
         }
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
 
     child.watch_init().await.unwrap();
@@ -166,7 +166,7 @@ async fn suspend_prevents_processing_until_resumed() {
         while let Some(AckInterface::Ack(envelope)) = inbox.recv().await {
             let _ = envelope.reply(());
         }
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
     child.watch_init().await.unwrap();
 
@@ -197,7 +197,7 @@ async fn messages_queued_while_suspended_are_processed_exactly_once_after_resumi
         while inbox.recv().await.is_some() {
             c.increment();
         }
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
     child.watch_init().await.unwrap();
 
@@ -251,7 +251,7 @@ async fn ping_jumps_ahead_of_a_slow_message_backlog() {
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
         }
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
     child.watch_init().await.unwrap();
 

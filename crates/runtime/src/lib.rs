@@ -96,7 +96,7 @@
 //!             }
 //!         }
 //!     }
-//!     Ok::<_, rootcause::Report>(())
+//!     Ok(())
 //! });
 //!
 //! for _ in 0..5 {
@@ -125,7 +125,7 @@
 //! let pid = Pid::new("counter");
 //! let child = spawn(pid.clone(), |mut inbox: Inbox<()>| async move {
 //!     while inbox.recv().await.is_some() {}
-//!     Ok::<_, rootcause::Report>(())
+//!     Ok(())
 //! })
 //! .unwrap();
 //!

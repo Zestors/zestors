@@ -6,7 +6,9 @@
 use rootcause::Report;
 use std::time::Duration;
 use zestors_interface::{Envelope, Interface, Message};
-use zestors_runtime::errors::{CallDynError, CallError, CastDynError, TryCastDynError, TryCastError};
+use zestors_runtime::errors::{
+    CallDynError, CallError, CastDynError, TryCastDynError, TryCastError,
+};
 use zestors_runtime::prelude::*;
 use zestors_runtime::{CallOptions, spawn_rand};
 
@@ -113,7 +115,10 @@ async fn cast_and_try_cast_fail_once_the_actor_is_dead() {
     child.watch_exit().await.unwrap();
 
     assert!(matches!(child.cast(Bump).await, Err(_)));
-    assert!(matches!(child.try_cast(Bump), Err(TryCastError::Closed(Bump))));
+    assert!(matches!(
+        child.try_cast(Bump),
+        Err(TryCastError::Closed(Bump))
+    ));
 }
 
 #[tokio::test]
@@ -165,7 +170,10 @@ async fn call_fails_closed_on_a_dead_actor() {
     child.signal_shutdown();
     child.watch_exit().await.unwrap();
 
-    assert!(matches!(child.call(GetCount).await, Err(CallError::Closed(GetCount))));
+    assert!(matches!(
+        child.call(GetCount).await,
+        Err(CallError::Closed(GetCount))
+    ));
 }
 
 #[tokio::test]
@@ -176,7 +184,7 @@ async fn call_reports_no_response_if_the_request_is_dropped_unanswered() {
             // ever calling `reply`.
             drop(envelope);
         }
-        Ok::<_, rootcause::Report>(())
+        Ok(())
     });
     child.watch_init().await.unwrap();
 
@@ -255,7 +263,10 @@ async fn cast_waits_out_backpressure_instead_of_failing() {
     assert!(child.reached_backpressure());
 
     let result = tokio::time::timeout(Duration::from_secs(2), child.cast(Bump)).await;
-    assert!(result.is_ok(), "cast() should have waited out backpressure rather than erroring");
+    assert!(
+        result.is_ok(),
+        "cast() should have waited out backpressure rather than erroring"
+    );
     assert!(result.unwrap().is_ok());
 
     child.abort();

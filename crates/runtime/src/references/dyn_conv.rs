@@ -25,7 +25,7 @@ use type_sets::{AsTypeSet, Members, Subset};
 /// # async fn main() {
 /// let child = spawn_rand(|mut inbox: Inbox<PingInterface>| async move {
 ///     while inbox.recv().await.is_some() {}
-///     Ok::<_, rootcause::Report>(())
+///     Ok(())
 /// });
 ///
 /// // Widen to a `Dyn` address that only knows about `Ping`, e.g. to hand to

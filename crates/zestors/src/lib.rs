@@ -108,7 +108,7 @@
 //!             }
 //!         }
 //!     }
-//!     Ok::<_, rootcause::Report>(())
+//!     Ok(())
 //! });
 //!
 //! // `cast` sends a message without waiting for it to be handled.
@@ -306,7 +306,9 @@
 //!     .await
 //!     .unwrap();
 //!
-//! //
+//! // Unlike `Node`, `.start(pid)` is awaited directly, so the supervisor
+//! // has already been spawned by the time `.await` returns - no race to
+//! // wait out here.
 //! supervisor.watch_init().await.unwrap();
 //!
 //! // A running supervisor answers `GetChildren`/`GetHealth` without
@@ -319,9 +321,72 @@
 //! ```
 //!
 //! [`Node`](supervisor::Node) covers the common case of running one root
-//! supervisor as an entire program: starting it, restarting it on failure
-//! up to a configured budget, and shutting it down on Ctrl+C/SIGTERM with a
-//! bounded grace period.
+//! supervisor as an entire program: starting it, restarting it on failure up
+//! to a configured budget, and shutting it down gracefully on
+//! Ctrl+C/SIGTERM.
+//!
+//! ```
+//! use zestors::interface::{Envelope, Interface, Message};
+//! use zestors::prelude::*;
+//! use zestors::supervision::messages::GetChildren;
+//! use zestors::supervisor::{Node, Supervisor};
+//!
+//! #[derive(Message, Debug)]
+//! struct Ping;
+//!
+//! #[derive(Interface, HandlerInterface, Debug)]
+//! enum WorkerInterface {
+//!     Ping(Envelope<Ping>),
+//! }
+//!
+//! #[derive(Debug, Clone)]
+//! struct Worker;
+//!
+//! impl Handler for Worker {
+//!     type Interface = WorkerInterface;
+//! }
+//!
+//! impl Handle<Ping> for Worker {
+//!     async fn handle(
+//!         &mut self,
+//!         _ctx: HandlerContext<'_, Self>,
+//!         _msg: Ping,
+//!         _req: (),
+//!     ) -> Result<(), rootcause::Report> {
+//!         Ok(())
+//!     }
+//! }
+//!
+//! # #[tokio::main]
+//! # async fn main() {
+//! let node = Node::new(
+//!     Supervisor::blueprint()
+//!         .child(Worker.pid("worker").unwrap())
+//!         .rand_pid(),
+//! );
+//!
+//! // In a real program, `node.run()` is usually just awaited directly from
+//! // `main`. It's spawned onto its own task here only so the rest of this
+//! // example can also demonstrate signaling and observing its shutdown.
+//! let root = node.root_supervisor().address().clone();
+//! let node_task = tokio::spawn(node.run());
+//!
+//! // A freshly created channel's status looks exactly like "already
+//! // exited normally" until something actually spawns onto it, which
+//! // `node_task` hasn't necessarily done yet - wait for that first.
+//! root.watch(|status| (!status.is_dead()).then_some(())).await;
+//! root.watch_init().await.unwrap();
+//!
+//! let children = root.call(GetChildren).await.unwrap();
+//! assert_eq!(children.len(), 1);
+//!
+//! // The root supervisor exiting on its own is a normal, successful stop
+//! // for the whole node - triggered here with an ordinary shutdown signal,
+//! // in place of the Ctrl+C/SIGTERM a real deployment would send.
+//! root.signal_shutdown();
+//! assert!(node_task.await.unwrap().is_ok());
+//! # }
+//! ```
 //!
 //! ## Where to go next
 //!

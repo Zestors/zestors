@@ -39,7 +39,7 @@ use crate::*;
 ///         let n = envelope.msg.0;
 ///         let _ = envelope.reply(n * 2);
 ///     }
-///     Ok::<_, rootcause::Report>(())
+///     Ok(())
 /// });
 ///
 /// // `call` sends the message and waits for its reply.
