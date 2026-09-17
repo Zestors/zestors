@@ -1,5 +1,104 @@
 use super::*;
 
+impl Channel<dyn DynamicQueue> {
+    pub(crate) fn try_cast_dyn_with<M: Message>(
+        &self,
+        msg: M,
+        options: CallOptions,
+    ) -> Result<M::Receipt, TryCastDynError<M>> {
+        if !options.ignore_backpressure && self.reached_backpressure() {
+            return Err(TryCastDynError::Full(msg));
+        }
+
+        let status = self.status();
+        if !status.accepts_messages() && !(options.ignore_exiting && status.is_exiting()) {
+            return Err(TryCastDynError::Closed(msg));
+        }
+
+        let output = self.try_push_msg(msg)?;
+        self.msg_notify_one();
+        Ok(output)
+    }
+
+    pub(crate) fn cast_dyn_with<M: Message>(
+        &self,
+        msg: M,
+        mut options: CallOptions,
+    ) -> impl Future<Output = Result<M::Receipt, CastDynError<M>>> + Send {
+        async move {
+            if !options.ignore_backpressure {
+                self.delay_for_backpressure().await;
+                options.ignore_backpressure = true;
+            }
+
+            self.try_cast_dyn_with(msg, options)
+                .map_err(|e| e.into_cast_error_dbg_assert())
+        }
+    }
+
+    pub(crate) fn try_cast_with<M, I>(
+        &self,
+        msg: M,
+        options: CallOptions,
+    ) -> Result<M::Receipt, TryCastError<M>>
+    where
+        M: Message,
+        I: Interface + TryInto<Envelope<M>> + From<Envelope<M>> + Send + 'static,
+    {
+        // Fallback to dynamic implementation
+        let Some(queue) = self.raw_queue::<I>() else {
+            return match self.try_cast_dyn_with(msg, options) {
+                Ok(output) => Ok(output),
+                Err(TryCastDynError::Closed(msg)) => Err(TryCastError::Closed(msg)),
+                Err(TryCastDynError::Full(msg)) => Err(TryCastError::Full(msg)),
+                Err(TryCastDynError::NotAccepted(_)) => {
+                    panic!(
+                        "Message type {} not accepted by channel {}",
+                        std::any::type_name::<M>(),
+                        std::any::type_name::<Self>(),
+                    );
+                }
+            };
+        };
+
+        if !options.ignore_backpressure && self.reached_backpressure() {
+            return Err(TryCastError::Full(msg));
+        }
+
+        let status = self.status();
+        if !status.accepts_messages() && !(options.ignore_exiting && status.is_exiting()) {
+            return Err(TryCastError::Closed(msg));
+        }
+
+        let (envelope, receipt) = Envelope::new_pair(msg);
+        let interface = I::from(envelope);
+
+        if let Err(_e) = queue.push(interface) {
+            panic!("Queue was full or empty {}", std::any::type_name::<Self>());
+        }
+
+        Ok(receipt)
+    }
+
+    pub(crate) async fn cast_with<M, I>(
+        &self,
+        msg: M,
+        mut options: CallOptions,
+    ) -> Result<M::Receipt, CastError<M>>
+    where
+        M: Message,
+        I: Interface + TryInto<Envelope<M>> + From<Envelope<M>> + Send + 'static,
+    {
+        if !options.ignore_backpressure {
+            self.delay_for_backpressure().await;
+            options.ignore_backpressure = true;
+        }
+
+        self.try_cast_with::<M, I>(msg, options)
+            .map_err(|e| e.into_cast_error_dbg_assert())
+    }
+}
+
 /// A private trait for implementation on [`Address`] only.
 ///
 /// There is a blanket implementation of [`Accepts`] for all types that implement
