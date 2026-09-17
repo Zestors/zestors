@@ -1,104 +1,183 @@
-<div align="center"><p>
-  
-[![Crates.io version shield](https://img.shields.io/crates/v/zestors.svg)](https://crates.io/crates/zestors)
-[![Docs](https://docs.rs/zestors/badge.svg)](https://docs.rs/zestors)
-[![Crates.io license shield](https://img.shields.io/crates/l/zestors.svg)](https://crates.io/crates/zestors)
+# PolyBox
+[![crates.io](https://img.shields.io/crates/v/polybox.svg)](https://crates.io/crates/polybox)
+[![Documentation](https://docs.rs/polybox/badge.svg)](https://docs.rs/polybox)
 
-</p></div>
+`PolyBox` provides message-passing abstractions to make working with channels and actors a more seamless experience.
 
+The fundamental idea is that a `Sender<T>` should not have to care about the actor it is sending to. The only thing that it should care about is the messages that can be sent over the channel. A sender should not care whether it is talking to `ProcessA` or `ProcessB`, only that they both accept the same `Message`. This is exactly what a `PolyBox` provides.
 
-# Zestors
-A fast and flexible actor-framework for building fault-tolerant Rust applications, inspired by Erlang/OTP.
+In order for this to work, each `Message` must define if and what kind of reply an actor will send back. This guarantees that all actors handle messages uniformly. PolyBox provides `FireAndForget` and `Request<T>` messages. (Similar to cast and call from Erlang)
 
-## Getting started
-Zestors is thoroughly documented at [docs.rs](https://docs.rs/zestors) with guides covering most aspects of the system and a quick-start to get up and running. This is the recommended place to get started.
+Every actor has an `Interface`-enum, that defines which messages can be sent to the actor. This is done through a definition of the `Set` of messages (`Set![Msg1, Msg2, ...]`), and the conversions between the messages and the interface. This allows for both static-dispatch (`TokioInbox<T>` / `FlumeInbox<T>`) and dynamic dispatch (`DynInbox<Set![..]>`), and seemless conversions between the two.
 
-## Design choices
-### The Message and Protocol traits
-Central to the design of zestors is the definition of messages and protocols. While at first this seems like a of bloat, it was a deliberate choice:
-- The definition of messages makes sure that all actors handle the same message in the same way. 
-This allows you to write code that is generic over the messages an actor accepts.
-- The definition of a protocol allows you to write a custom, arbitrarily-complex event-loop for your actor. Without this option, writing more complex actors becomes impossible.
-- It is possible to write abstractions (i.e. `Handler`) that reduce bloat on top, while this is impossible the other way around.
+Check out the example below and docs.rs for more details.
 
-### Static and dynamic typing
-Most actor-systems in rust take the approach of `Actix`, which defines an address by the handler. You have to know who is receiving a message in order to be able to send it (though there are some [ugly workarounds](https://docs.rs/actix/0.13.0/actix/struct.Recipient.html)). Zestors allows you to send messages in this way, but also allows you to type an address based on the messages it receives, i.e. `Address<DynActor!(Msg1, Msg2)>`.
-
-Sending messages with a statically-defined actor reference is very similar in speed to spawning a tokio-task with an mpsc-channel and sending messages as enums. You only pay for dynamically-defined addresses when you actually use them.
-
-## Note
-Zestors is still early in development, and while the core parts of zestors have been stable for quite some time, from the `handler` module and beyond big changes are expected. Instead of perfecting everything privately, I would rather get it out there to see what people think. Certain parts of the system have been tested extensively but there are (very likely) bugs.
-
-If you have any feedback whether it is a bug, anything unclear or inspiration/ideas then I would appreciate to hear this! 
-
-## Future work
-1. Finalize design for the `handler` module and continue work on the (to be released) `supervision` crate.
-2. Continue with unit- and integration-tests and build out a few bigger examples.
-3. Start work and design for a distributed environment. Everything has been designed from the ground up with distribution in mind, but details have not been worked out.
-
-
-## Minimal example
+# Example
 ```rust
-#[macro_use]
-extern crate zestors;
-use zestors::{messaging::RecvError, prelude::*};
+use polybox::{
+    DynInbox, Interface, Message, Envelope, PolyboxExt as _, Sends, SendsExt as _,
+    inboxes::{FlumeInbox, TokioInbox},
+    type_sets::Set,
+};
 
-// Let's define a single request ..
-#[derive(Message, Envelope, Debug)]
-#[request(u32)]
-struct MyRequest {
-    param: String,
+// The following are messages defined for the NumberAdder and Printer actors.
+// Some messages have replies, while others are fire-and-forget.
+//
+// The Health and Exit messages are accepted by both actors, whilst the others
+// are specific to each actor.
+
+#[derive(Message, Debug)]
+#[msg(reply = Health)]
+pub struct GetHealth;
+
+#[derive(Debug)]
+pub enum Health {
+    Positive,
+    Negative,
 }
 
-// .. and create a protocol that accepts this request.
-#[protocol]
-enum MyProtocol {
-    MyRequest(MyRequest),
-    String(String),
+#[derive(Message, Debug)]
+pub struct Exit;
+
+#[derive(Message, Debug)]
+pub struct AddNumber(u32);
+
+#[derive(Message, Debug)]
+#[msg(reply = u32)]
+pub struct GetNumber;
+
+#[derive(Message, Debug)]
+pub struct Print(&'static str);
+
+/// A simple actor that adds numbers and can report its total.
+#[derive(Interface, Debug)]
+pub enum NumberAdder {
+    Health(Envelope<GetHealth>),
+    Exit(Envelope<Exit>),
+    Add(Envelope<AddNumber>),
+    Get(Envelope<GetNumber>),
 }
 
-#[tokio::main]
-async fn main() {
-    // Now we can spawn a simple actor ..
-    let (child, address) = spawn(|mut inbox: Inbox<MyProtocol>| async move {
-        loop {
-            match inbox.recv().await {
-                Ok(msg) => match msg {
-                    MyProtocol::MyRequest((request, tx)) => {
-                        println!("Received request: {:?}", request.param);
-                        tx.send(100).unwrap();
+impl NumberAdder {
+    fn spawn() -> (TokioInbox<NumberAdder>, tokio::task::JoinHandle<()>) {
+        let (inbox, mut receiver) = TokioInbox::<NumberAdder>::new(1000);
+
+        let handle = tokio::spawn(async move {
+            let mut total: u32 = 0;
+
+            while let Some(msg) = receiver.recv().await {
+                match msg {
+                    NumberAdder::Health((GetHealth, tx)) => {
+                        let _ = tx.send(Health::Positive);
                     }
-                    MyProtocol::String(string) => {
-                        println!("Received message: {:?}", string);
+                    NumberAdder::Exit(Exit) => {
+                        break;
                     }
-                },
-                Err(e) => match e {
-                    RecvError::Halted => break "Halted",
-                    RecvError::ClosedAndEmpty => break "Closed",
-                },
+                    NumberAdder::Add(envelope) => {
+                        total += envelope.0;
+                    }
+                    NumberAdder::Get((GetNumber, tx)) => {
+                        let _ = tx.send(total);
+                    }
+                }
             }
+        });
+
+        (inbox, handle)
+    }
+}
+
+/// A simple actor that prints messages.
+#[derive(Interface, Debug)]
+pub enum Printer {
+    Health(Envelope<GetHealth>),
+    Exit(Envelope<Exit>),
+    Print(Envelope<Print>),
+}
+
+impl Printer {
+    fn spawn() -> (FlumeInbox<Printer>, tokio::task::JoinHandle<()>) {
+        let (inbox, receiver) = FlumeInbox::<Printer>::new(1000);
+
+        let handle = tokio::spawn(async move {
+            while let Ok(msg) = receiver.recv_async().await {
+                match msg {
+                    Printer::Health((GetHealth, tx)) => {
+                        let _ = tx.send(Health::Positive);
+                    }
+                    Printer::Exit(Exit) => {
+                        break;
+                    }
+                    Printer::Print(envelope) => {
+                        println!("Printer received: {}", envelope.0);
+                    }
+                }
+            }
+        });
+
+        (inbox, handle)
+    }
+}
+
+#[tokio::test]
+pub async fn main() {
+    let (adder, adder_handle) = NumberAdder::spawn();
+    let (printer, printer_handle) = Printer::spawn();
+
+    // Convert the individual inboxes into their common subset.
+    // This even converts a FlumeInbox and TokioInbox into a common type.
+    let all_inboxes: Vec<DynInbox<Set![Exit, GetHealth]>> = vec![
+        adder.clone().into_dyn_subset(),
+        printer.clone().into_dyn_subset(),
+    ];
+
+    // Start a background task to monitor the health of all inboxes.
+    tokio::task::spawn({
+        let all_inboxes = all_inboxes.clone();
+        async move {
+            monitor_inboxes_in_background(&all_inboxes).await;
         }
     });
 
-    // .. and send it some messages!
-    address.send("Hi".to_string()).await.unwrap();
+    // Send some messages to the actors and check their responses.
+    adder.send(AddNumber(10)).await.unwrap();
+    adder.send(AddNumber(20)).await.unwrap();
+    let number = adder.request(GetNumber).await.unwrap();
+    assert_eq!(number, 30);
+    printer.send(Print("Hello!")).await.unwrap();
 
-    let response = address
-        .request(MyRequest {
-            param: "Hi".to_string(),
-        })
-        .await
-        .unwrap();
-    assert_eq!(response, 100);
+    // Wait for a moment to let the actors process the messages before exiting.
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    send_exit_to(&all_inboxes).await;
 
-    let response = address
-        .my_request("Hi".to_string())
-        .request()
-        .await
-        .unwrap();
-    assert_eq!(response, 100);
+    adder_handle.await.unwrap();
+    printer_handle.await.unwrap();
+}
 
-    child.halt();
-    assert_eq!(child.await.unwrap(), "Halted");
+/// A helper function to monitor the health of multiple inboxes in the background.
+pub async fn monitor_inboxes_in_background(inboxes: &[impl Sends<GetHealth>]) {
+    loop {
+        for inbox in inboxes {
+            let health = inbox.request(GetHealth).await.unwrap();
+
+            match health {
+                Health::Positive => {
+                    println!("Inbox is healthy");
+                }
+                Health::Negative => {
+                    println!("Inbox is unhealthy");
+                }
+            }
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+}
+
+pub async fn send_exit_to(inboxes: &[impl Sends<Exit>]) {
+    for inbox in inboxes {
+        inbox.send(Exit).await.unwrap();
+    }
 }
 ```
+(If the example is not compiling, look [here](polybox/tests/example.rs))

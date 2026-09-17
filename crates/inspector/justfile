@@ -1,0 +1,6 @@
+[private]
+default:
+    @just -l -u --list-submodules
+
+run:
+    @cargo run --release

@@ -1,0 +1,25 @@
+[package]
+name = "zestors-codegen"
+version = "0.0.2"
+edition = "2021"
+repository = "https://github.com/jvdwrf/polybox"
+homepage = "https://github.com/jvdwrf/polybox"
+authors = ["Jasper van der Werf"]
+license = "MIT OR Apache-2.0"
+description = "Message-passing abstractions to make working with channels and actors a more seamless experience"
+keywords = ["actor", "actor-system", "tokio"]
+categories = ["concurrency"]
+readme = "README.md"
+
+[dependencies]
+syn = { version = "3", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+heck = "0.5"
+darling = { version = "0.24" }
+
+[dev-dependencies]
+zestors-interface.workspace = true
+
+[lib]
+proc-macro = true
