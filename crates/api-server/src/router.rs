@@ -5,7 +5,10 @@ use futures::{StreamExt, stream};
 use indexmap::IndexMap;
 use std::time::Duration;
 use zestors_runtime::{ActorStatus, CastOptions, ChannelSnapshot, Context, Registry, prelude::*};
-use zestors_supervision::{ChildConfig, ChildDescription, GetChildren, GetHealth, Health};
+use zestors_supervision::{
+    ChildConfig, ChildDescription,
+    messages::{GetChildren, GetHealth, Health},
+};
 
 impl ApiServer {
     pub(super) fn create_router(&self) -> Router {

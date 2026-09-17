@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use zestors::supervision::Health;
+use zestors::supervision::messages::Health;
 
 use super::*;
 

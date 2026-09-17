@@ -1,6 +1,7 @@
 use crate::_prelude::*;
 use smol_str::{SmolStr, format_smolstr};
 use zestors_codegen::Message;
+use zestors_runtime::errors::DuplicatePidError;
 
 #[derive(Message, Debug)]
 #[msg(path = "zestors_interface", reply = "Vec<ChildDescription>")]
@@ -9,6 +10,14 @@ pub struct GetChildren;
 #[derive(Message, Debug)]
 #[msg(path = "zestors_interface", reply = Health)]
 pub struct GetHealth;
+
+#[derive(Message, Debug)]
+#[msg(path = "zestors_interface", reply = "Result<(), DuplicatePidError>")]
+pub struct RegisterChild(pub ChildSpec);
+
+#[derive(Message, Debug)]
+#[msg(path = "zestors_interface", reply = "Option<ChildDescription>")]
+pub struct DeregisterChild(pub Pid);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Health {

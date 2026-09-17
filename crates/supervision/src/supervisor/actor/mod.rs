@@ -227,6 +227,12 @@ mod one_for_all;
 mod one_for_one;
 mod rest_for_one;
 
+mod runner;
+use runner::Strategy;
+
+mod supervisee;
+use supervisee::*;
+
 mod interface;
 pub use interface::*;
 

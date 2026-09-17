@@ -5,7 +5,7 @@ use zestors_actor::{Actor, ActorBlueprint};
 use zestors_codegen::Interface;
 use zestors_interface::Envelope;
 use zestors_runtime::{Registry, prelude::*};
-use zestors_supervision::{GetChildren, GetHealth, Health};
+use zestors_supervision::messages::{GetChildren, GetHealth, Health};
 
 mod router;
 

@@ -17,7 +17,7 @@ use zestors_runtime::{
 };
 
 #[derive(Debug)]
-pub(crate) struct Supervisee {
+pub(super) struct Supervisee {
     spec: ChildSpec,
     state: SuperviseeState,
     restarter: Option<RestartLimiter>,
@@ -32,7 +32,7 @@ pub(crate) struct Supervisee {
 }
 
 impl Supervisee {
-    pub(crate) fn new(spec: ChildSpec) -> Self {
+    pub(super) fn new(spec: ChildSpec) -> Self {
         Self {
             restarter: spec.cfg().intensity.clone().map(RestartLimiter::new),
             spec,
@@ -47,7 +47,7 @@ impl Supervisee {
         }
     }
 
-    pub(crate) fn get_description(&self) -> ChildDescription {
+    pub(super) fn get_description(&self) -> ChildDescription {
         ChildDescription {
             pid: self.pid().clone(),
             cfg: self.spec.cfg().clone(),
@@ -56,7 +56,7 @@ impl Supervisee {
 
     /// Whether this type of exit requires the child to be restarted.
     #[must_use]
-    pub(crate) fn requires_restart(&self, exit: &SuperviseeExit) -> bool {
+    pub(super) fn requires_restart(&self, exit: &SuperviseeExit) -> bool {
         match (self.cfg().restart_mode, exit) {
             (RestartMode::Always, _) => true,
             (RestartMode::Never, _) => false,
@@ -73,7 +73,7 @@ impl Supervisee {
     /// successful completion, not a failure, even though it happened before
     /// the child reported itself as running.
     #[must_use]
-    pub(crate) fn requires_restart_for_init_exit(&self, status: &ExitStatus) -> bool {
+    pub(super) fn requires_restart_for_init_exit(&self, status: &ExitStatus) -> bool {
         match (self.cfg().restart_mode, status) {
             (RestartMode::Always, _) => true,
             (RestartMode::Never, _) => false,
@@ -84,14 +84,14 @@ impl Supervisee {
 
     /// Whether the restart-limiter allows the child to be restarted
     #[must_use]
-    pub(crate) fn acquire_restart_permit(&mut self) -> bool {
+    pub(super) fn acquire_restart_permit(&mut self) -> bool {
         self.restarter
             .as_mut()
             .map(|r| r.acquire_permit())
             .unwrap_or(true)
     }
 
-    pub(crate) fn start(&mut self) -> Result<bool, SuperviseeIsShuttingDown> {
+    pub(super) fn start(&mut self) -> Result<bool, SuperviseeIsShuttingDown> {
         let result = self.state.map(|state| match state {
             // If the supervisee is idle or dead, we can start it.
             SuperviseeState::Dead { .. } => {
@@ -120,7 +120,7 @@ impl Supervisee {
         result
     }
 
-    pub(crate) fn stop(&mut self) -> StopOutcome {
+    pub(super) fn stop(&mut self) -> StopOutcome {
         let outcome = self.state.map(|state| match state {
             // If the supervisee is dead or idle, there's nothing to do.
             SuperviseeState::Dead { .. } => (state, StopOutcome::Dead),
@@ -157,7 +157,7 @@ impl Supervisee {
         outcome
     }
 
-    pub(crate) async fn supervise(&mut self) -> SuperviseeItem {
+    pub(super) async fn supervise(&mut self) -> SuperviseeItem {
         match &mut self.state {
             SuperviseeState::Dead { .. } => future::pending().await,
 
@@ -248,20 +248,20 @@ impl ActorRef for Supervisee {
 }
 
 #[derive(Debug)]
-pub(crate) struct SuperviseeNext {
-    pub(crate) pid: Pid,
-    pub(crate) item: SuperviseeItem,
+pub(super) struct SuperviseeNext {
+    pub(super) pid: Pid,
+    pub(super) item: SuperviseeItem,
 }
 
 #[derive(Debug)]
-pub(crate) enum SuperviseeItem {
+pub(super) enum SuperviseeItem {
     Started(Result<(), StartSuperviseeError>),
     Initialized(Result<(), ExitStatus>),
     Exit(SuperviseeExit),
 }
 
 #[derive(Debug)]
-pub(crate) enum SuperviseeExit {
+pub(super) enum SuperviseeExit {
     JoinError(JoinError),
     NormalExit,
     NormalShutdown,
@@ -308,7 +308,7 @@ impl SuperviseeState {
 
 /// The result of calling [`Supervisee::stop`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StopOutcome {
+pub(super) enum StopOutcome {
     /// Was already dead (or idle); nothing happened, and there's no exit
     /// event to wait for.
     Dead,
@@ -323,13 +323,13 @@ pub(crate) enum StopOutcome {
 
 impl StopOutcome {
     /// Whether an exit event should still be waited for.
-    pub(crate) fn is_shutting_down(self) -> bool {
+    pub(super) fn is_shutting_down(self) -> bool {
         matches!(self, StopOutcome::ShuttingDown)
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum StartSuperviseeError {
+pub(super) enum StartSuperviseeError {
     #[error("Concurrent inbox error")]
     ConcurrentInbox,
 
@@ -357,7 +357,7 @@ impl From<Elapsed> for StartSuperviseeError {
 
 #[derive(Debug, thiserror::Error)]
 #[error("Cannot start supervisee: Currently shutting down")]
-pub(crate) struct SuperviseeIsShuttingDown;
+pub(super) struct SuperviseeIsShuttingDown;
 
 struct StartFuture(
     Pin<Box<dyn std::future::Future<Output = Result<Child, StartSuperviseeError>> + Send>>,

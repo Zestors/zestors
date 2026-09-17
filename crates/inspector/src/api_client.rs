@@ -3,7 +3,7 @@ use reqwest::StatusCode;
 use rootcause::report;
 use zestors::{
     runtime::{ActorStatus, ChannelSnapshot, Pid},
-    supervision::{ChildConfig, Health, SupervisionTree},
+    supervision::{ChildConfig, SupervisionTree, messages::Health},
 };
 
 pub struct Client {

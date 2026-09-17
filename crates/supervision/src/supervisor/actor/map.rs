@@ -1,5 +1,4 @@
 use super::*;
-use crate::SuperviseeNext;
 use std::{pin::Pin, task::ready};
 use streamunordered::{StreamUnordered, StreamYield};
 use zestors_runtime::errors::DuplicatePidError;

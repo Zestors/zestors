@@ -21,8 +21,8 @@ pub use start::*;
 mod strategy;
 pub use strategy::*;
 
-mod messages;
-pub use messages::*;
+pub mod messages;
+pub(crate) use messages::*;
 
 mod node;
 pub use node::*;
@@ -35,6 +35,3 @@ pub mod prelude {
     pub use crate::strategy::SupervisionStrategy;
     pub use crate::supervisor::{SupervisorBlueprint, SupervisorInterface};
 }
-
-mod intensity;
-pub use intensity::*;
