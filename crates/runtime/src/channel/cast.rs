@@ -1,6 +1,6 @@
 use super::*;
 
-impl Channel<dyn DynamicQueue> {
+impl Channel {
     // Statically sends a message
     pub(crate) async fn cast_with<M, I>(
         &self,

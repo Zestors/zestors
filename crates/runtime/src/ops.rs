@@ -415,7 +415,7 @@ impl Clock {
 }
 
 pub(crate) trait ChannelAccess: ActorRef {
-    fn channel(&self) -> &Arc<Channel<dyn DynamicQueue>> {
+    fn channel(&self) -> &Arc<Channel> {
         self.actor_ref()._channel()
     }
 }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::*;
 use eyeball::ObservableWriteGuard;
 
-pub(crate) struct Channel<Q: ?Sized> {
+pub(crate) struct Channel<Q: ?Sized = dyn DynamicQueue> {
     pid: Pid,
     signal_queue: ConcurrentQueue<SignalInterface>,
     signal_notifier: Notify,
@@ -17,8 +17,8 @@ pub(crate) struct Channel<Q: ?Sized> {
     msg_queue: Q,
 }
 
-impl<Q> Channel<Q> {
-    pub(crate) fn new(pid: Pid, strong_count: usize, msg_queue: Q) -> Self {
+impl<I: Interface> Channel<ConcurrentQueue<I>> {
+    pub(crate) fn new(pid: Pid, strong_count: usize, msg_queue: ConcurrentQueue<I>) -> Self {
         Self {
             pid,
             msg_notifier: Notify::new(),
@@ -35,7 +35,7 @@ impl<Q> Channel<Q> {
     }
 }
 
-impl Channel<dyn DynamicQueue> {
+impl Channel {
     pub(crate) fn msg_len(&self) -> usize {
         self.msg_queue.len()
     }

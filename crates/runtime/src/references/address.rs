@@ -18,7 +18,7 @@ use std::{
 /// [`Inbox`]/[`Child`] holding one) must be kept alive.
 #[repr(transparent)]
 pub struct Address<C: Context = Dyn> {
-    inner: Arc<Channel<dyn DynamicQueue>>,
+    inner: Arc<Channel>,
     _ctx: PhantomData<fn() -> C>,
 }
 
@@ -30,7 +30,7 @@ impl<C: Context> Address<C> {
         }
     }
 
-    pub(crate) fn _channel(&self) -> &Arc<Channel<dyn DynamicQueue>> {
+    pub(crate) fn _channel(&self) -> &Arc<Channel> {
         &self.inner
     }
 }
@@ -42,7 +42,7 @@ impl<I: Interface> Address<I> {
             false => MSG_QUEUE_CAPACITY,
         };
 
-        let inner: Arc<Channel<dyn DynamicQueue>> = Arc::new(Channel::new(
+        let inner: Arc<Channel> = Arc::new(Channel::new(
             pid,
             strong_count,
             ConcurrentQueue::<I>::bounded(msg_queue_capacity),
