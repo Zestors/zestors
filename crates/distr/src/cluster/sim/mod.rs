@@ -103,7 +103,7 @@ impl SimNetwork {
 
     /// A [`Backend`] that attaches a node to this network at `addr`, for
     /// running a real [`ClusterNode`](crate::ClusterNode) on it with
-    /// [`ClusterConfig::with_backend`](crate::ClusterConfig::with_backend).
+    /// [`ClusterConfig::new`](crate::ClusterConfig::new).
     ///
     /// Every node needs its own address. Nodes reach each other by the
     /// addresses they were started with.
@@ -134,10 +134,7 @@ impl SimNetwork {
         let cluster = Cluster::new(local.clone());
         let (links, _) = Starter::new(self.backend(addr))
             .start(
-                LocalNode {
-                    id: local.node.clone(),
-                    generation: self.generation,
-                },
+                LocalNode::new(local.node.clone(), self.generation),
                 self.link_timings.clone(),
             )
             .await

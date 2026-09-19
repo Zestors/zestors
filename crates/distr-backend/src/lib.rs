@@ -9,8 +9,8 @@
 //! the layer they are for.
 //!
 //! A cluster runs over any implementation of [`Backend`], [`Endpoint`] and
-//! [`Connection`], handed to
-//! [`ClusterConfig::with_backend`](crate::ClusterConfig::with_backend).
+//! [`Connection`], handed to `ClusterConfig::new` in `zestors-distr`. The QUIC
+//! backend is in the `zestors-distr-quic` crate.
 //!
 //! # What a backend must provide
 //!
@@ -28,7 +28,12 @@
 //! - **Datagrams**, if it has them. A backend without returns
 //!   [`DatagramError::Unsupported`], and the cluster uses streams instead.
 
-use crate::{NodeAddr, NodeId};
+mod node_addr;
+mod node_id;
+
+pub use node_addr::NodeAddr;
+pub use node_id::NodeId;
+
 use bytes::Bytes;
 use std::{future::Future, io, time::Duration};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -58,6 +63,13 @@ pub struct LocalNode {
     /// Which incarnation of the node this is: higher than that of any earlier
     /// run of the same node.
     pub generation: u64,
+}
+
+impl LocalNode {
+    /// Describes the node `id` in its incarnation `generation`.
+    pub fn new(id: NodeId, generation: u64) -> Self {
+        Self { id, generation }
+    }
 }
 
 /// A node's presence on the network: it connects to peers and accepts theirs.

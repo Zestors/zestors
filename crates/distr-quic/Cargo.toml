@@ -4,11 +4,11 @@ version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-description = "A QUIC backend for zestors-distr clusters"
+description = "A QUIC backend for zestors-distr clusters, see zestors-distr-backend"
 repository = "https://github.com/Zestors/zestors"
 
 [dependencies]
-zestors-distr.workspace = true
+zestors-distr-backend.workspace = true
 quinn.workspace = true
 rcgen.workspace = true
 rustls-webpki.workspace = true

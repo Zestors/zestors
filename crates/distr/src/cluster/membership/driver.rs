@@ -276,10 +276,7 @@ mod tests {
         let network = SimNetwork::new(1);
         let (links, _) = Starter::new(network.backend("node-a:7000"))
             .start(
-                LocalNode {
-                    id: NodeId::new("node-a"),
-                    generation: 1,
-                },
+                LocalNode::new(NodeId::new("node-a"), 1),
                 LinkTimings::default(),
             )
             .await

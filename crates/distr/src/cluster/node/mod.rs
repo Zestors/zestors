@@ -102,10 +102,7 @@ impl ClusterNode {
         let (links, addr) = config
             .backend
             .start(
-                LocalNode {
-                    id: config.node_id.clone(),
-                    generation,
-                },
+                LocalNode::new(config.node_id.clone(), generation),
                 config.link_timings.clone(),
             )
             .await

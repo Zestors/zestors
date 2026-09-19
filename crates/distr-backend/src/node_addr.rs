@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::{fmt, net::SocketAddr};
 
-/// Where a node can be reached, in terms its [backend](crate::backend) understands.
+/// Where a node can be reached, in terms its [backend](crate) understands.
 ///
 /// For the QUIC backend this is `host:port`: a socket address, or a host name
 /// that is resolved when connecting. Other backends define their own: a URL, a

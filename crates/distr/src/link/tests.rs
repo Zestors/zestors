@@ -1,14 +1,15 @@
-//! The links over the simulated network: what the layers above rely on, end to end.
+//! The links over real QUIC: what the layers above rely on, end to end.
 
 use super::*;
-use crate::{Member, sim::SimNetwork};
+use crate::Member;
 use std::time::Duration;
 use tokio::{sync::broadcast, time::timeout};
+use zestors_distr_quic::{Quic, Tls};
 
 /// A protocol for the tests to talk on.
 const TEST: Protocol = Protocol(20);
 
-/// A node bound to its own address, with its inbox for [`TEST`] and its peer reports.
+/// A node bound to a free port, with its inbox for [`TEST`] and its peer reports.
 struct TestNode {
     links: Links,
     inbox: mpsc::Receiver<Incoming>,
@@ -16,26 +17,13 @@ struct TestNode {
     member: Member,
 }
 
-/// The address a node of the tests listens on.
-fn addr_of(name: &str) -> NodeAddr {
-    NodeAddr::new(format!("sim:{name}"))
+async fn bind(name: &str) -> TestNode {
+    bind_at(name, "127.0.0.1:0".parse().unwrap(), LinkTimings::default()).await
 }
 
-async fn bind(net: &SimNetwork, name: &str) -> TestNode {
-    bind_at(net, name, addr_of(name), LinkTimings::default()).await
-}
-
-async fn bind_at(
-    net: &SimNetwork,
-    name: &str,
-    addr: NodeAddr,
-    timings: LinkTimings,
-) -> TestNode {
-    let backend = net.backend(addr);
-    let local = LocalNode {
-        id: NodeId::new(name),
-        generation: 1,
-    };
+async fn bind_at(name: &str, addr: std::net::SocketAddr, timings: LinkTimings) -> TestNode {
+    let backend = Quic::new(addr, Tls::insecure_dev().unwrap());
+    let local = LocalNode::new(NodeId::new(name), 1);
     let (links, addr) = Starter::new(backend).start(local, timings).await.unwrap();
     let peers = links.peer_events();
     let inbox = links.subscribe(TEST);
@@ -58,11 +46,10 @@ async fn next(inbox: &mut mpsc::Receiver<Incoming>) -> Incoming {
         .expect("links are open")
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn datagrams_arrive_small_or_big() {
-    let net = SimNetwork::new(1);
-    let a = bind(&net, "node-a").await;
-    let mut b = bind(&net, "node-b").await;
+    let a = bind("node-a").await;
+    let mut b = bind("node-b").await;
     let sender = a
         .links
         .sender(&b.member.node, &b.member.addr, TEST, Delivery::Datagram, 0);
@@ -80,11 +67,10 @@ async fn datagrams_arrive_small_or_big() {
     assert_eq!(next(&mut b.inbox).await.payload, large);
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn ordered_messages_arrive_in_order() {
-    let net = SimNetwork::new(1);
-    let a = bind(&net, "node-a").await;
-    let mut b = bind(&net, "node-b").await;
+    let a = bind("node-a").await;
+    let mut b = bind("node-b").await;
 
     let sender = a
         .links
@@ -108,11 +94,10 @@ async fn ordered_messages_arrive_in_order() {
     }
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn large_messages_get_through_and_oversized_ones_are_dropped() {
-    let net = SimNetwork::new(1);
-    let a = bind(&net, "node-a").await;
-    let mut b = bind(&net, "node-b").await;
+    let a = bind("node-a").await;
+    let mut b = bind("node-b").await;
     let sender = a
         .links
         .sender(&b.member.node, &b.member.addr, TEST, Delivery::Ordered, 0);
@@ -130,11 +115,10 @@ async fn large_messages_get_through_and_oversized_ones_are_dropped() {
     assert_eq!(next(&mut b.inbox).await.payload, "after");
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn protocols_do_not_mix() {
-    let net = SimNetwork::new(1);
-    let a = bind(&net, "node-a").await;
-    let mut b = bind(&net, "node-b").await;
+    let a = bind("node-a").await;
+    let mut b = bind("node-b").await;
     let mut other = b.links.subscribe(Protocol(21));
 
     for (protocol, payload) in [(TEST, "one"), (Protocol(21), "two"), (TEST, "three")] {
@@ -154,11 +138,10 @@ async fn protocols_do_not_mix() {
 
 /// Two nodes that start talking to each other at the same moment end up with
 /// one connection, and lose nothing that was sent afterwards.
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn nodes_dialing_each_other_at_once_settle_on_one_connection() {
-    let net = SimNetwork::new(1);
-    let mut a = bind(&net, "node-a").await;
-    let mut b = bind(&net, "node-b").await;
+    let mut a = bind("node-a").await;
+    let mut b = bind("node-b").await;
 
     let (to_b, to_a) = (
         a.links
@@ -188,11 +171,10 @@ async fn nodes_dialing_each_other_at_once_settle_on_one_connection() {
     }
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn losing_a_connection_is_reported() {
-    let net = SimNetwork::new(1);
-    let mut a = bind(&net, "node-a").await;
-    let mut b = bind(&net, "node-b").await;
+    let mut a = bind("node-a").await;
+    let mut b = bind("node-b").await;
     let sender = a
         .links
         .sender(&b.member.node, &b.member.addr, TEST, Delivery::Ordered, 0);
@@ -213,22 +195,24 @@ async fn losing_a_connection_is_reported() {
     assert_eq!(event, (NodeId::new("node-b"), 1));
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn unreachable_peer_is_reported_and_reported_reachable_when_it_answers() {
-    let net = SimNetwork::new(1);
     let timings = LinkTimings {
         connect_timeout: Duration::from_millis(100),
         reconnect_backoff_min: Duration::from_millis(20),
         reconnect_backoff_max: Duration::from_millis(100),
         ..LinkTimings::default()
     };
-    let mut a = bind_at(&net, "node-a", addr_of("node-a"), timings.clone()).await;
+    let mut a = bind_at("node-a", "127.0.0.1:0".parse().unwrap(), timings.clone()).await;
 
     // An address nobody listens on yet.
-    let addr = addr_of("node-b");
+    let addr = std::net::UdpSocket::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
     let b_member = Member {
         node: NodeId::new("node-b"),
-        addr: addr.clone(),
+        addr: addr.into(),
         generation: 1,
     };
 
@@ -257,7 +241,7 @@ async fn unreachable_peer_is_reported_and_reported_reachable_when_it_answers() {
     .await;
 
     // The peer comes up at that address.
-    let _b = bind_at(&net, "node-b", addr, timings).await;
+    let _b = bind_at("node-b", addr, timings).await;
     until(
         &mut a,
         &b_member,

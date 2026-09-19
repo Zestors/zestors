@@ -14,9 +14,9 @@ zestors-actor.workspace = true
 zestors-supervision.workspace = true
 zestors-supervisor.workspace = true
 zestors-codegen.workspace = true
+zestors-distr-backend.workspace = true
 uuid = { workspace = true, features = ["serde"] }
 serde.workspace = true
-smol_str.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 thiserror.workspace = true

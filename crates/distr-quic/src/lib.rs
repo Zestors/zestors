@@ -7,9 +7,9 @@ mod tls;
 use tls::peer_of;
 pub use tls::{Tls, TlsError};
 
-use zestors_distr::{
-    NodeAddr, NodeId,
-    backend::{Backend, Connection, DatagramError, Endpoint, LocalNode, RecvStream, SendStream},
+use zestors_distr_backend::{
+    Backend, Connection, DatagramError, Endpoint, LocalNode, NodeAddr, NodeId, RecvStream,
+    SendStream,
 };
 use bytes::Bytes;
 use std::{io, net::SocketAddr, sync::Arc, time::Duration};

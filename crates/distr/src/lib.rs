@@ -19,16 +19,11 @@ pub mod prelude {
 mod stable_id;
 pub use stable_id::*;
 
-mod node_id;
-pub use node_id::*;
-
-mod node_addr;
-pub use node_addr::*;
-
 mod global_name;
 pub use global_name::*;
 
-pub mod backend;
+pub use zestors_distr_backend as backend;
+pub use zestors_distr_backend::{NodeAddr, NodeId};
 mod cluster;
 mod link;
 mod messaging;
