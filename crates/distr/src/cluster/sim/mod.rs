@@ -122,7 +122,7 @@ impl SimNetwork {
             generation: self.generation,
         };
         let cluster = Cluster::new(local.clone());
-        let (links, _, peers) = Starter::new(self.backend(addr))
+        let (links, _) = Starter::new(self.backend(addr))
             .start(
                 LocalNode {
                     id: local.node.clone(),
@@ -141,8 +141,7 @@ impl SimNetwork {
             timings: self.timings.clone(),
             rng: StdRng::seed_from_u64(self.seed.wrapping_add(self.generation)),
         };
-        let membership =
-            Membership::start(cluster.clone(), local, options, links.clone(), peers).await;
+        let membership = Membership::start(cluster.clone(), local, options, links.clone()).await;
         SimNode {
             cluster,
             running: Some((membership, links)),

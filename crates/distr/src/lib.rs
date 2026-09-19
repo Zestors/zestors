@@ -5,6 +5,9 @@
 //! protocol ([`foca`]). Messages between nodes are carried by a
 //! [`backend`]: mutually authenticated QUIC by default (the `quic` feature),
 //! or any implementation of [`backend::Backend`].
+//!
+//! Actors on other nodes are messaged through a [`RemoteAddress`], from
+//! [`ClusterNode::remote`]; see [`Remote`].
 
 #[allow(unused_imports)]
 mod _prelude {
@@ -16,7 +19,7 @@ pub mod prelude {
     pub use crate::Tls;
     pub use crate::{
         Cluster, ClusterConfig, ClusterEvent, ClusterNode, ClusterNodeError, ClusterSnapshot,
-        NodeStatus, Seed,
+        NodeStatus, Remote, RemoteAccepts, RemoteAddress, RemoteMessage, Seed,
     };
 }
 
@@ -32,7 +35,9 @@ pub use cluster::backend;
 pub use cluster::sim;
 pub use cluster::{
     Cluster, ClusterConfig, ClusterEvent, ClusterNode, ClusterNodeError, ClusterSnapshot,
-    ClusterTimings, Member, NodeAddr, NodeStatus, Seed,
+    ClusterTimings, Decode, DecodeError, Encode, EncodeError, Member, NodeAddr, NodeStatus, Remote,
+    RemoteAccepts, RemoteAddress, RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError,
+    RemoteMessage, RemoteReceipt, RemoteReply, RemoteReplyError, Seed,
 };
 #[cfg(feature = "quic")]
 pub use cluster::{Tls, TlsError};

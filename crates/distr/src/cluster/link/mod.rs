@@ -32,7 +32,12 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
-use tokio::{io::AsyncReadExt, sync::mpsc, task::JoinSet, time::timeout};
+use tokio::{
+    io::AsyncReadExt,
+    sync::{broadcast, mpsc},
+    task::JoinSet,
+    time::timeout,
+};
 use tokio_util::sync::{CancellationToken, DropGuard};
 use wire::{Hello, MAX_MESSAGE_SIZE, read_frame, read_hello, write_hello};
 
@@ -51,6 +56,8 @@ pub(super) struct Protocol(u8);
 impl Protocol {
     /// Cluster membership.
     pub(super) const MEMBERSHIP: Protocol = Protocol(0);
+    /// Messages between actors.
+    pub(super) const ACTORS: Protocol = Protocol(1);
 }
 
 /// How reliably a message must arrive.
@@ -74,7 +81,7 @@ pub(super) struct Incoming {
 }
 
 /// A change in how a node's peers can be reached.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) enum PeerEvent {
     /// Repeated attempts to reach the peer have failed. It is retried with
     /// growing pauses in between until it answers.
@@ -116,7 +123,9 @@ struct Lane {
     addr: NodeAddr,
 }
 
-type LaneKey = (NodeId, Protocol, Delivery);
+/// The peer, protocol and delivery of a pipe, and which of the several
+/// pipes for them it is: see [`Links::sender`].
+type LaneKey = (NodeId, Protocol, Delivery, u8);
 
 struct Inner {
     endpoint: Box<dyn DynEndpoint>,
@@ -133,7 +142,7 @@ struct Inner {
     health: Mutex<HashMap<NodeId, Arc<Mutex<Health>>>>,
     inboxes: Mutex<HashMap<Protocol, mpsc::Sender<Incoming>>>,
     lane_tasks: Mutex<JoinSet<()>>,
-    peer_events: mpsc::Sender<PeerEvent>,
+    peer_events: broadcast::Sender<PeerEvent>,
     token: CancellationToken,
 }
 
@@ -145,18 +154,18 @@ impl Starter {
         Self(Box::new(backend))
     }
 
-    /// Starts the backend for `local`. Returns the links, the address peers
-    /// reach the node on, and the stream of reports about peers.
+    /// Starts the backend for `local`. Returns the links and the address peers
+    /// reach the node on.
     pub(super) async fn start(
         self,
         local: LocalNode,
         timings: ClusterTimings,
-    ) -> io::Result<(Links, NodeAddr, mpsc::Receiver<PeerEvent>)> {
+    ) -> io::Result<(Links, NodeAddr)> {
         let (id, generation) = (local.id.clone(), local.generation);
         let endpoint = self.0.start(local).await?;
         let addr = endpoint.local_addr()?;
 
-        let (peer_events, peer_events_rx) = mpsc::channel(256);
+        let (peer_events, _) = broadcast::channel(256);
         let token = CancellationToken::new();
         let inner = Arc::new(Inner {
             endpoint,
@@ -179,7 +188,7 @@ impl Starter {
             inner,
             _cancel_on_drop: Arc::new(token.drop_guard()),
         };
-        Ok((links, addr, peer_events_rx))
+        Ok((links, addr))
     }
 }
 
@@ -200,15 +209,33 @@ impl Links {
     /// peer, protocol and delivery are handed out. The channel is bounded:
     /// awaiting `send` waits for room, for [`Delivery::Ordered`]; `try_send`
     /// fails when full, which suits [`Delivery::Datagram`]. Messages are at most
-    /// [`MAX_MESSAGE_SIZE`] bytes. The channel closes when the peer is forgotten
-    /// or the links shut down; callers that find it closed ask for a new one.
+    /// [`Links::max_message_size`] bytes. The channel closes when the peer is
+    /// forgotten or the links shut down; callers that find it closed ask for a
+    /// new one.
+    ///
+    /// There can be several pipes per peer, protocol and delivery, told apart
+    /// by `shard`. Messages on one pipe stay in order and are not held up by
+    /// the others, so a layer that spreads its traffic over shards, keeping
+    /// what must stay in order on one, doesn't let one large message stall it all.
     pub(super) fn sender(
         &self,
         to: &Member,
         protocol: Protocol,
         delivery: Delivery,
+        shard: u8,
     ) -> mpsc::Sender<Bytes> {
-        self.inner.sender(to, protocol, delivery)
+        self.inner.sender(to, protocol, delivery, shard)
+    }
+
+    /// The size of the largest message that can be sent, in bytes.
+    pub(super) fn max_message_size(&self) -> usize {
+        MAX_MESSAGE_SIZE
+    }
+
+    /// Reports of changes in how peers can be reached, from now on. Receivers
+    /// that fall behind miss some.
+    pub(super) fn peer_events(&self) -> broadcast::Receiver<PeerEvent> {
+        self.inner.peer_events.subscribe()
     }
 
     /// The messages that arrive for `protocol`. Messages for a protocol nobody
@@ -234,7 +261,7 @@ impl Links {
             .lanes
             .lock()
             .expect("Not poisoned")
-            .retain(|(lane_node, _, _), _| lane_node != node);
+            .retain(|(lane_node, _, _, _), _| lane_node != node);
         self.inner.health.lock().expect("Not poisoned").remove(node);
 
         let mut conns = self.inner.conns.lock().expect("Not poisoned");
@@ -277,8 +304,9 @@ impl Inner {
         to: &Member,
         protocol: Protocol,
         delivery: Delivery,
+        shard: u8,
     ) -> mpsc::Sender<Bytes> {
-        let key = (to.node.clone(), protocol, delivery);
+        let key = (to.node.clone(), protocol, delivery, shard);
         let mut lanes = self.lanes.lock().expect("Not poisoned");
 
         // The pipe ends when idle; one that leads to where the node used to be is stale.
@@ -362,7 +390,7 @@ impl Inner {
             }
             existing.conn.close();
             // Whatever was in flight on it may be lost.
-            let _ = self.peer_events.try_send(PeerEvent::Disconnected {
+            let _ = self.peer_events.send(PeerEvent::Disconnected {
                 node: peer.clone(),
                 generation: existing.generation,
             });
@@ -388,7 +416,7 @@ impl Inner {
             .is_some_and(|registered| registered.conn.id == id)
             && let Some(registered) = conns.remove(peer)
         {
-            let _ = self.peer_events.try_send(PeerEvent::Disconnected {
+            let _ = self.peer_events.send(PeerEvent::Disconnected {
                 node: peer.clone(),
                 generation: registered.generation,
             });

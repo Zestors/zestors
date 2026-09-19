@@ -15,7 +15,7 @@ use foca::{
 use rand::rngs::StdRng;
 use std::collections::HashMap;
 use tokio::{
-    sync::mpsc,
+    sync::{broadcast, mpsc},
     time::{MissedTickBehavior, interval},
 };
 use tokio_util::time::{DelayQueue, delay_queue};
@@ -63,7 +63,7 @@ impl Driver {
     pub(super) async fn run(
         mut self,
         mut inbox: mpsc::Receiver<Incoming>,
-        mut peers: mpsc::Receiver<PeerEvent>,
+        mut peers: broadcast::Receiver<PeerEvent>,
         mut commands: mpsc::Receiver<Command>,
     ) {
         let mut rejoin = interval(self.timings.seed_retry);
@@ -72,7 +72,8 @@ impl Driver {
         loop {
             tokio::select! {
                 Some(message) = inbox.recv() => self.on_incoming(message),
-                Some(event) = peers.recv() => self.on_peer_event(event),
+                // A receiver that fell behind just misses some; the next report still counts.
+                Ok(event) = peers.recv() => self.on_peer_event(event),
                 Some(expired) = std::future::poll_fn(|cx| self.timers.poll_expired(cx)) => {
                     if let Err(err) = self.foca.handle_timer(expired.into_inner(), &mut self.runtime) {
                         tracing::debug!("Failed to handle timer: {err}");
@@ -138,7 +139,7 @@ impl Driver {
     fn send(&self, to: &Member, message: Message) {
         let sender = self
             .links
-            .sender(to, Protocol::MEMBERSHIP, message.delivery());
+            .sender(to, Protocol::MEMBERSHIP, message.delivery(), 0);
         if sender.try_send(message.encode()).is_err() {
             tracing::debug!(node = %to.node, "Peer queue full or closed, dropping message");
         }
@@ -273,7 +274,7 @@ mod tests {
     /// A driver for node-a, over a simulated network, that has heard nothing yet.
     async fn driver() -> Driver {
         let network = SimNetwork::new(1);
-        let (links, _, _peers) = Starter::new(network.backend("node-a:7000"))
+        let (links, _) = Starter::new(network.backend("node-a:7000"))
             .start(
                 LocalNode {
                     id: NodeId::new("node-a"),

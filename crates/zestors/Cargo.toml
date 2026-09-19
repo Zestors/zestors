@@ -23,6 +23,7 @@ tokio.workspace = true
 futures.workspace = true
 tracing.workspace = true
 rootcause.workspace = true
+serde.workspace = true
 
 [features]
 _ra = []

@@ -7,7 +7,7 @@ use crate::{
 use rand::{SeedableRng, rngs::StdRng};
 #[cfg(feature = "quic")]
 use std::net::SocketAddr;
-use std::{num::NonZeroU32, path::PathBuf};
+use std::{num::NonZeroU32, path::PathBuf, time::Duration};
 
 /// How a [`ClusterNode`](crate::ClusterNode) joins and behaves in a cluster.
 pub struct ClusterConfig {
@@ -20,6 +20,7 @@ pub struct ClusterConfig {
     pub(super) timings: ClusterTimings,
     pub(super) rng_seed: Option<u64>,
     pub(super) generation_store: Option<PathBuf>,
+    pub(super) call_timeout: Duration,
 }
 
 impl ClusterConfig {
@@ -45,6 +46,7 @@ impl ClusterConfig {
             timings: ClusterTimings::default(),
             rng_seed: None,
             generation_store: None,
+            call_timeout: Duration::from_secs(30),
         }
     }
 
@@ -84,6 +86,14 @@ impl ClusterConfig {
     /// The node fails to start if the file can't be read or written.
     pub fn generation_store(mut self, path: impl Into<PathBuf>) -> Self {
         self.generation_store = Some(path.into());
+        self
+    }
+
+    /// How long a call to an actor on another node waits for its reply before
+    /// giving up, 30 seconds by default. See
+    /// [`RemoteAccepts::call`](crate::RemoteAccepts::call).
+    pub fn call_timeout(mut self, timeout: Duration) -> Self {
+        self.call_timeout = timeout;
         self
     }
 

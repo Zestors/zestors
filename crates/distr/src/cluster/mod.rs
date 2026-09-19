@@ -14,6 +14,7 @@ mod member;
 mod membership;
 mod node;
 mod node_addr;
+mod remote;
 mod updates;
 
 #[cfg(feature = "sim")]
@@ -25,6 +26,11 @@ pub use config::{ClusterTimings, Seed};
 pub use member::Member;
 pub use node::{ClusterConfig, ClusterNode, ClusterNodeError};
 pub use node_addr::NodeAddr;
+pub use remote::{
+    Decode, DecodeError, Encode, EncodeError, Remote, RemoteAccepts, RemoteAddress,
+    RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError, RemoteMessage, RemoteReceipt,
+    RemoteReply, RemoteReplyError,
+};
 
 use crate::NodeId;
 use std::{

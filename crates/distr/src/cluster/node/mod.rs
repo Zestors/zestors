@@ -1,10 +1,12 @@
 mod config;
 mod error;
 
+use super::{
+    Cluster, Member, NodeAddr, backend::LocalNode, generation, membership::Membership,
+    remote::Remote,
+};
 pub use config::ClusterConfig;
 pub use error::ClusterNodeError;
-
-use super::{Cluster, Member, NodeAddr, backend::LocalNode, generation, membership::Membership};
 use std::{net::SocketAddr, time::Duration};
 use zestors_supervision::{ChildSpec, RestartIntensity};
 use zestors_supervisor::{Node, NodeShutdown, SupervisorBlueprint};
@@ -19,6 +21,7 @@ pub struct ClusterNode {
     node: Node,
     config: ClusterConfig,
     cluster: Cluster,
+    remote: Remote,
 }
 
 impl ClusterNode {
@@ -38,10 +41,12 @@ impl ClusterNode {
                 .unwrap_or_else(|| NodeAddr::from(SocketAddr::from(([0, 0, 0, 0], 0)))),
             generation: 0,
         });
+        let remote = Remote::new(cluster.clone(), config.call_timeout);
         Self {
             node,
             config,
             cluster,
+            remote,
         }
     }
 
@@ -68,6 +73,13 @@ impl ClusterNode {
         self.node.root_supervisor()
     }
 
+    /// A handle for messaging actors on other nodes, and for registering the
+    /// messages this node accepts from them. Cheap to clone and usable from
+    /// anywhere, also before [`ClusterNode::run`] is called.
+    pub fn remote(&self) -> Remote {
+        self.remote.clone()
+    }
+
     /// A handle for observing the cluster. Cheap to clone and usable from
     /// anywhere, also before [`ClusterNode::run`] is called.
     pub fn cluster(&self) -> Cluster {
@@ -82,12 +94,13 @@ impl ClusterNode {
             node,
             config,
             cluster,
+            remote,
         } = self;
 
         let generation = generation::next(config.generation_store.as_deref())
             .map_err(ClusterNodeError::Generation)?;
         let options = config.membership_options();
-        let (links, addr, peers) = config
+        let (links, addr) = config
             .backend
             .start(
                 LocalNode {
@@ -108,13 +121,15 @@ impl ClusterNode {
             },
             options,
             links.clone(),
-            peers,
         )
         .await;
         tracing::info!(node = %config.node_id, addr = %local_addr, "Cluster node started");
 
+        let messaging = remote.start(links.clone());
+
         let result = node.run().await;
 
+        messaging.stop();
         membership.leave().await;
         links.shutdown(config.timings.shutdown_grace).await;
 

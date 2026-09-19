@@ -48,13 +48,16 @@ impl From<String> for NodeId {
 /// keeps resolving to whichever actor currently holds that name on that node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GlobalPid {
-    node: NodeId,
     pid: Pid,
+    node: NodeId,
 }
 
 impl GlobalPid {
-    pub fn new(node: NodeId, pid: Pid) -> Self {
-        Self { node, pid }
+    pub fn new(pid: impl Into<Pid>, node: impl Into<NodeId>) -> Self {
+        Self {
+            pid: pid.into(),
+            node: node.into(),
+        }
     }
 
     /// The node this pid lives on.
@@ -67,8 +70,8 @@ impl GlobalPid {
         &self.pid
     }
 
-    pub fn into_parts(self) -> (NodeId, Pid) {
-        (self.node, self.pid)
+    pub fn into_parts(self) -> (Pid, NodeId) {
+        (self.pid, self.node)
     }
 }
 

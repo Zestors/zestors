@@ -6,7 +6,7 @@ mod message;
 
 use super::{
     Cluster, Member, NodeStatus,
-    link::{Links, PeerEvent, Protocol},
+    link::{Links, Protocol},
 };
 use crate::{ClusterTimings, Seed};
 use driver::Driver;
@@ -43,14 +43,12 @@ pub(super) struct Membership {
 
 impl Membership {
     /// Makes `local` part of the cluster over `links`: marks `cluster` as up,
-    /// starts the protocol and announces to the seeds. `peers` reports what `links`
-    /// notices about its peers.
+    /// starts the protocol and announces to the seeds.
     pub(super) async fn start(
         cluster: Cluster,
         local: Member,
         options: Options,
         links: Links,
-        peers: mpsc::Receiver<PeerEvent>,
     ) -> Self {
         cluster.set_local(local);
         cluster.set_status(NodeStatus::Up);
@@ -65,6 +63,7 @@ impl Membership {
             })
             .collect();
         let inbox = links.subscribe(Protocol::MEMBERSHIP);
+        let peers = links.peer_events();
         let leave_grace = options.timings.leave_grace;
         let (commands, command_rx) = mpsc::channel(16);
         let task = tokio::spawn(

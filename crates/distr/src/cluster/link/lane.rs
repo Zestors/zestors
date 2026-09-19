@@ -104,10 +104,7 @@ pub(super) async fn lane(
             Ok(conn) => {
                 if health_of().succeeded() {
                     tracing::debug!(%node, "Peer is reachable again");
-                    let _ = inner
-                        .peer_events
-                        .send(PeerEvent::Reachable(node.clone()))
-                        .await;
+                    let _ = inner.peer_events.send(PeerEvent::Reachable(node.clone()));
                 }
                 conn
             }
@@ -115,10 +112,7 @@ pub(super) async fn lane(
                 let (backoff, newly_unreachable) = health_of().failed(&inner.timings);
                 tracing::debug!(%node, %addr, ?backoff, "Failed to connect to peer: {err}");
                 if newly_unreachable {
-                    let _ = inner
-                        .peer_events
-                        .send(PeerEvent::Unreachable(node.clone()))
-                        .await;
+                    let _ = inner.peer_events.send(PeerEvent::Unreachable(node.clone()));
                 }
                 continue;
             }

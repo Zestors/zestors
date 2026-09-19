@@ -20,14 +20,19 @@ async fn main() -> Result<(), ClusterNodeError> {
         .init();
 
     let mut args = std::env::args().skip(1);
-    let name = args.next().expect("usage: cluster <name> <bind> [seed-name=seed-addr]...");
+    let name = args
+        .next()
+        .expect("usage: cluster <name> <bind> [seed-name=seed-addr]...");
     let bind: SocketAddr = args.next().expect("missing bind address").parse().unwrap();
 
     // Development only: use `Tls::from_pem` to authenticate cluster members.
     let mut config = ClusterConfig::new(name, bind, Tls::insecure_dev().unwrap());
     for seed in args {
         let (seed_name, seed_addr) = seed.split_once('=').expect("seed must be name=addr");
-        config = config.seed(Seed::new(seed_name, seed_addr.parse::<SocketAddr>().unwrap()));
+        config = config.seed(Seed::new(
+            seed_name,
+            seed_addr.parse::<SocketAddr>().unwrap(),
+        ));
     }
 
     let node = ClusterNode::new(Supervisor::blueprint().rand_pid(), config);

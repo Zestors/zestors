@@ -3,7 +3,7 @@
 use super::*;
 use crate::backend::{Quic, Tls};
 use std::time::Duration;
-use tokio::time::timeout;
+use tokio::{sync::broadcast, time::timeout};
 
 /// A protocol for the tests to talk on.
 const TEST: Protocol = Protocol(20);
@@ -12,7 +12,7 @@ const TEST: Protocol = Protocol(20);
 struct TestNode {
     links: Links,
     inbox: mpsc::Receiver<Incoming>,
-    peers: mpsc::Receiver<PeerEvent>,
+    peers: broadcast::Receiver<PeerEvent>,
     member: Member,
 }
 
@@ -31,7 +31,8 @@ async fn bind_at(name: &str, addr: std::net::SocketAddr, timings: ClusterTimings
         id: NodeId::new(name),
         generation: 1,
     };
-    let (links, addr, peers) = Starter::new(backend).start(local, timings).await.unwrap();
+    let (links, addr) = Starter::new(backend).start(local, timings).await.unwrap();
+    let peers = links.peer_events();
     let inbox = links.subscribe(TEST);
     TestNode {
         links,
@@ -56,7 +57,7 @@ async fn next(inbox: &mut mpsc::Receiver<Incoming>) -> Incoming {
 async fn datagrams_arrive_small_or_big() {
     let a = bind("node-a").await;
     let mut b = bind("node-b").await;
-    let sender = a.links.sender(&b.member, TEST, Delivery::Datagram);
+    let sender = a.links.sender(&b.member, TEST, Delivery::Datagram, 0);
 
     let small = Bytes::from(vec![7u8; 100]);
     sender.send(small.clone()).await.unwrap();
@@ -76,7 +77,7 @@ async fn ordered_messages_arrive_in_order() {
     let a = bind("node-a").await;
     let mut b = bind("node-b").await;
 
-    let sender = a.links.sender(&b.member, TEST, Delivery::Ordered);
+    let sender = a.links.sender(&b.member, TEST, Delivery::Ordered, 0);
     // Enough that they queue up, and of mixed sizes. Sent alongside reading:
     // sending waits for room, which the reader makes.
     tokio::spawn(async move {
@@ -100,7 +101,7 @@ async fn ordered_messages_arrive_in_order() {
 async fn large_messages_get_through_and_oversized_ones_are_dropped() {
     let a = bind("node-a").await;
     let mut b = bind("node-b").await;
-    let sender = a.links.sender(&b.member, TEST, Delivery::Ordered);
+    let sender = a.links.sender(&b.member, TEST, Delivery::Ordered, 0);
 
     let large = Bytes::from(vec![3u8; MAX_MESSAGE_SIZE]);
     sender.send(large.clone()).await.unwrap();
@@ -122,7 +123,7 @@ async fn protocols_do_not_mix() {
     let mut other = b.links.subscribe(Protocol(21));
 
     for (protocol, payload) in [(TEST, "one"), (Protocol(21), "two"), (TEST, "three")] {
-        let sender = a.links.sender(&b.member, protocol, Delivery::Ordered);
+        let sender = a.links.sender(&b.member, protocol, Delivery::Ordered, 0);
         sender.send(Bytes::from(payload)).await.unwrap();
     }
     assert_eq!(next(&mut b.inbox).await.payload, "one");
@@ -138,8 +139,8 @@ async fn nodes_dialing_each_other_at_once_settle_on_one_connection() {
     let mut b = bind("node-b").await;
 
     let (to_b, to_a) = (
-        a.links.sender(&b.member, TEST, Delivery::Ordered),
-        b.links.sender(&a.member, TEST, Delivery::Ordered),
+        a.links.sender(&b.member, TEST, Delivery::Ordered, 0),
+        b.links.sender(&a.member, TEST, Delivery::Ordered, 0),
     );
     to_b.send(Bytes::from_static(b"first")).await.unwrap();
     to_a.send(Bytes::from_static(b"first")).await.unwrap();
@@ -167,7 +168,7 @@ async fn nodes_dialing_each_other_at_once_settle_on_one_connection() {
 async fn losing_a_connection_is_reported() {
     let mut a = bind("node-a").await;
     let mut b = bind("node-b").await;
-    let sender = a.links.sender(&b.member, TEST, Delivery::Ordered);
+    let sender = a.links.sender(&b.member, TEST, Delivery::Ordered, 0);
     sender.send(Bytes::from_static(b"hi")).await.unwrap();
     next(&mut b.inbox).await;
 
@@ -175,9 +176,7 @@ async fn losing_a_connection_is_reported() {
     drop(b);
     let event = timeout(Duration::from_secs(10), async {
         loop {
-            if let PeerEvent::Disconnected { node, generation } =
-                a.peers.recv().await.expect("links are open")
-            {
+            if let Ok(PeerEvent::Disconnected { node, generation }) = a.peers.recv().await {
                 break (node, generation);
             }
         }
@@ -215,9 +214,9 @@ async fn unreachable_peer_is_reported_and_reported_reachable_when_it_answers() {
             loop {
                 tokio::select! {
                     _ = tick.tick() => {
-                        let _ = a.links.sender(to, TEST, Delivery::Datagram).try_send(Bytes::from_static(b"hi"));
+                        let _ = a.links.sender(to, TEST, Delivery::Datagram, 0).try_send(Bytes::from_static(b"hi"));
                     }
-                    Some(event) = a.peers.recv() => if wanted(&event) { return },
+                    Ok(event) = a.peers.recv() => if wanted(&event) { return },
                 }
             }
         })

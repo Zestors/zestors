@@ -24,6 +24,8 @@ rand.workspace = true
 quinn = { workspace = true, optional = true }
 foca.workspace = true
 bytes.workspace = true
+postcard = { version = "1.1", features = ["use-std"] }
+type-sets.workspace = true
 tokio-util = { version = "0.7", features = ["time"] }
 rcgen = { workspace = true, optional = true }
 rustls-webpki = { workspace = true, optional = true }
@@ -45,4 +47,8 @@ sim = []
 
 [[test]]
 name = "cluster"
+required-features = ["quic"]
+
+[[test]]
+name = "remote_quic"
 required-features = ["quic"]
