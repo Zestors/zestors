@@ -1,10 +1,12 @@
+//! What a message must be to cross the network, and how its receipt comes back.
+
 use super::{
     Decode, Encode,
-    reply::{RemoteMessageKind, RemoteReceipt, RemoteReply},
+    reply::{RemoteReceipt, RemoteReply},
 };
 use crate::StableId;
 use std::time::Duration;
-use zestors_interface::{Message, ReceiptOf};
+use zestors_interface::{Call, Cast, Message, MessageKind, ReceiptOf};
 
 /// A [`Message`] that can be sent to an actor on another node.
 ///
@@ -43,6 +45,44 @@ where
 
     fn local_receipt(receipt: ReceiptOf<M>, timeout: Option<Duration>) -> Self::RemoteReceipt {
         <Self::Kind as RemoteMessageKind<M::Output>>::local(receipt, timeout)
+    }
+}
+
+/// How the [`Receipt`](zestors_interface::Receipt) of a message, `()` or
+/// [`Reply<T>`](zestors_interface::Reply), is sent and received remotely. The
+/// two are all there are.
+pub trait RemoteMessageKind<T>: MessageKind<T> {
+    type RemoteReceipt: RemoteReceipt<Output = T>;
+
+    /// Whether the message gets a reply.
+    const REPLIES: bool;
+
+    /// The remote receipt, given what to wait on if there is a reply.
+    fn remote(waiting: Option<RemoteReply<T>>) -> Self::RemoteReceipt;
+
+    /// What is waited on for a message sent to an actor on this node.
+    fn local(receipt: Self::Receipt, timeout: Option<Duration>) -> Self::RemoteReceipt;
+}
+
+impl RemoteMessageKind<()> for Cast {
+    type RemoteReceipt = ();
+    const REPLIES: bool = false;
+
+    fn remote(_: Option<RemoteReply<()>>) {}
+
+    fn local(_: (), _: Option<Duration>) {}
+}
+
+impl<T: Send + 'static> RemoteMessageKind<T> for Call {
+    type RemoteReceipt = RemoteReply<T>;
+    const REPLIES: bool = true;
+
+    fn remote(waiting: Option<RemoteReply<T>>) -> RemoteReply<T> {
+        waiting.expect("A message with a reply is sent as a call")
+    }
+
+    fn local(receipt: Self::Receipt, timeout: Option<Duration>) -> RemoteReply<T> {
+        RemoteReply::local(receipt, timeout)
     }
 }
 

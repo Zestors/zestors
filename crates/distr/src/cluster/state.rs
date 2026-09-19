@@ -1,5 +1,5 @@
 use super::{ClusterEvent, ClusterSnapshot, Member, NodeStatus};
-use crate::{NodeName, messaging::MessageHandler};
+use crate::{NodeName, messaging::CommunicationView};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
@@ -25,7 +25,7 @@ struct MembershipView {
 
 struct ClusterInner {
     members: MembershipView,
-    messaging: MessageHandler,
+    messaging: CommunicationView,
 }
 
 /// A cheaply cloneable handle to this node's place in the cluster, obtained
@@ -52,7 +52,7 @@ impl Cluster {
                     }),
                     event_sender: broadcast::channel(256).0,
                 },
-                messaging: MessageHandler::new(call_timeout, shards),
+                messaging: CommunicationView::new(call_timeout, shards),
             }),
         }
     }
@@ -62,7 +62,7 @@ impl Cluster {
         Self::new(local, Duration::from_secs(30), 4)
     }
 
-    pub(crate) fn messaging(&self) -> &MessageHandler {
+    pub(crate) fn messaging(&self) -> &CommunicationView {
         &self.inner.messaging
     }
 

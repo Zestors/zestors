@@ -1,7 +1,7 @@
 //! Delivers a message to a local actor, knowing its type.
 
-use super::Cluster;
-use super::{Encode, RemoteError, RemoteMessage, context::Wire};
+use super::{Encode, RemoteError, RemoteMessage, wire::Wire};
+use crate::Cluster;
 use bytes::Bytes;
 use std::{future::Future, marker::PhantomData, pin::Pin};
 use zestors_interface::Receipt;
@@ -66,7 +66,7 @@ impl<M: Operation> Handler for Builtin<M> {
             let msg = wire
                 .scope(|| M::decode(payload))
                 .map_err(|error| RemoteError::Decode(error.to_string()))?;
-            let running = msg.run(address, wire.cluster().clone());
+            let running = msg.run(address, wire.session().cluster().clone());
             if !reply {
                 tokio::spawn(async move {
                     let _ = running.await;

@@ -1,7 +1,7 @@
 //! [`RemoteRequest`]: a reply channel that can be part of a message sent to
 //! another node.
 
-use super::{Decode, Encode, context};
+use super::{Decode, Encode, wire};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de, ser};
 use std::{fmt, sync::Mutex};
 use zestors_interface::{Reply, Request, ResolveError};
@@ -101,7 +101,7 @@ impl<T> fmt::Debug for RemoteRequest<T> {
 /// answers to. Only while a message is sent.
 impl<T: Decode + Send + 'static> Serialize for RemoteRequest<T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let wire = context::current().ok_or_else(|| {
+        let wire = wire::current().ok_or_else(|| {
             ser::Error::custom("A RemoteRequest can only be serialized as part of a sent message")
         })?;
         let request = self
@@ -119,7 +119,7 @@ impl<T: Decode + Send + 'static> Serialize for RemoteRequest<T> {
 impl<'de, T: Encode + Send + 'static> Deserialize<'de> for RemoteRequest<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let id = u64::deserialize(deserializer)?;
-        let wire = context::current().ok_or_else(|| {
+        let wire = wire::current().ok_or_else(|| {
             de::Error::custom("A RemoteRequest can only be deserialized from a received message")
         })?;
         Ok(wire.import(id).into())

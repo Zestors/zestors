@@ -1,279 +1,153 @@
-//! How messages between actors are laid out, on
-//! [`Protocol::ACTORS`](crate::link::Protocol::ACTORS): a kind byte,
-//! then the fields of that kind.
+//! What serialising a message needs to know about the node it goes to or comes
+//! from, for the parts of a message that can't be plain data: a
+//! [`RemoteRequest`](super::RemoteRequest) is a reply channel, which is
+//! stood in for by a request id on the wire and answered over the connection.
+//!
+//! serde gives its impls no way to pass this along, so it is made available for
+//! the duration of the encoding or decoding of one message, in a thread-local.
+//! Both are synchronous, so nothing else can observe it in between.
 
-use super::RemoteError;
-use crate::Id;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use zestors_runtime::Name;
+use super::{Decode, Encode, RemoteError, pending::Pending, receive::Session};
+use crate::NodeName;
+use std::{
+    cell::RefCell,
+    sync::{Arc, Mutex, atomic::Ordering},
+};
+use tokio::sync::oneshot;
+use zestors_interface::Request;
 
-const KIND_CAST: u8 = 1;
-const KIND_CALL: u8 = 2;
-const KIND_REPLY: u8 = 3;
-
-const OK: u8 = 0;
-const ERR: u8 = 1;
-
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum Frame {
-    /// A message that expects no reply.
-    Cast {
-        target: Name,
-        msg: Id,
-        /// The requests in the message, see [`RemoteRequest`](super::RemoteRequest).
-        /// Named here so that a message that isn't delivered can fail them.
-        requests: Vec<u64>,
-        payload: Bytes,
-    },
-    /// A message that is answered by a [`Frame::Reply`] with the same `call_id`.
-    Call {
-        call_id: u64,
-        target: Name,
-        msg: Id,
-        /// The requests in the message, see [`RemoteRequest`](super::RemoteRequest).
-        /// Named here so that a message that isn't delivered can fail them.
-        requests: Vec<u64>,
-        payload: Bytes,
-    },
-    Reply {
-        call_id: u64,
-        result: Result<Bytes, RemoteError>,
-    },
+thread_local! {
+    static CURRENT: RefCell<Option<Wire>> = const { RefCell::new(None) };
 }
 
-impl Frame {
-    pub(super) fn encode(&self) -> Bytes {
-        let mut buf = BytesMut::new();
-        match self {
-            Frame::Cast {
-                target,
-                msg,
-                requests,
-                payload,
-            } => {
-                buf.put_u8(KIND_CAST);
-                put_target(&mut buf, target, msg, requests);
-                buf.put_slice(payload);
-            }
-            Frame::Call {
-                call_id,
-                target,
-                msg,
-                requests,
-                payload,
-            } => {
-                buf.put_u8(KIND_CALL);
-                buf.put_u64(*call_id);
-                put_target(&mut buf, target, msg, requests);
-                buf.put_slice(payload);
-            }
-            Frame::Reply { call_id, result } => {
-                buf.put_u8(KIND_REPLY);
-                buf.put_u64(*call_id);
-                match result {
-                    Ok(payload) => {
-                        buf.put_u8(OK);
-                        buf.put_slice(payload);
+/// The node a message is being encoded for, or was decoded from.
+#[derive(Clone)]
+pub(super) struct Wire {
+    session: Session,
+    peer: NodeName,
+    /// The requests handed to the node while encoding: see [`Wire::export`].
+    exported: Arc<Mutex<Vec<u64>>>,
+}
+
+/// Puts back what was current before a [`Wire::scope`], however it ends.
+struct Restore(Option<Wire>);
+
+impl Drop for Restore {
+    fn drop(&mut self) {
+        CURRENT.with(|current| *current.borrow_mut() = self.0.take());
+    }
+}
+
+/// The wire of the message being encoded or decoded right now, if any.
+pub(super) fn current() -> Option<Wire> {
+    CURRENT.with(|current| current.borrow().clone())
+}
+
+impl Wire {
+    pub(super) fn new(session: Session, peer: NodeName) -> Self {
+        Self {
+            session,
+            peer,
+            exported: Arc::default(),
+        }
+    }
+
+    pub(super) fn session(&self) -> &Session {
+        &self.session
+    }
+
+    /// Runs `f`, which encodes or decodes one message, with this as its [`current`] wire.
+    pub(super) fn scope<R>(&self, f: impl FnOnce() -> R) -> R {
+        let previous = CURRENT.with(|current| current.borrow_mut().replace(self.clone()));
+        let _restore = Restore(previous);
+        f()
+    }
+
+    /// What was exported so far, to be forgotten again unless
+    /// [`Exports::commit`]ted: the message may not make it out after all.
+    pub(super) fn exports(&self) -> Exports {
+        Exports {
+            pending: self.session.pending().clone(),
+            ids: std::mem::take(&mut *self.exported.lock().expect("Not poisoned")),
+        }
+    }
+
+    /// Hands `request` to the node: what it replies with is sent back and
+    /// answers `request`. Returns the id the node knows it by.
+    ///
+    /// It is answered by whoever is on the other end of the connection, so a
+    /// reply is accepted only from the node it went to. If that node is lost,
+    /// or answers with an error, `request` is dropped without a reply.
+    pub(super) fn export<T: Decode + Send + 'static>(&self, request: Request<T>) -> u64 {
+        let id = self
+            .session
+            .cluster()
+            .messaging()
+            .next_call
+            .fetch_add(1, Ordering::Relaxed);
+        let (answer, answered) = oneshot::channel();
+        self.session.pending().insert(id, self.peer.clone(), answer);
+        self.exported.lock().expect("Not poisoned").push(id);
+
+        tokio::spawn(async move {
+            match answered.await {
+                Ok(Ok(bytes)) => match T::decode(bytes) {
+                    Ok(value) => {
+                        let _ = request.reply(value);
                     }
                     Err(error) => {
-                        buf.put_u8(ERR);
-                        put_error(&mut buf, error);
+                        tracing::warn!("Failed to decode the reply to a request: {error}");
+                        request.no_reply();
                     }
-                }
+                },
+                _ => request.no_reply(),
             }
-        }
-        buf.freeze()
-    }
-
-    pub(super) fn decode(mut bytes: Bytes) -> Option<Self> {
-        match get_u8(&mut bytes)? {
-            KIND_CAST => {
-                let (target, msg, requests) = get_target(&mut bytes)?;
-                Some(Frame::Cast {
-                    target,
-                    msg,
-                    requests,
-                    payload: bytes,
-                })
-            }
-            KIND_CALL => {
-                let call_id = get_u64(&mut bytes)?;
-                let (target, msg, requests) = get_target(&mut bytes)?;
-                Some(Frame::Call {
-                    call_id,
-                    target,
-                    msg,
-                    requests,
-                    payload: bytes,
-                })
-            }
-            KIND_REPLY => {
-                let call_id = get_u64(&mut bytes)?;
-                let result = match get_u8(&mut bytes)? {
-                    OK => Ok(bytes),
-                    ERR => Err(get_error(bytes)?),
-                    _ => return None,
-                };
-                Some(Frame::Reply { call_id, result })
-            }
-            _ => None,
-        }
-    }
-}
-
-/// Who a message is for, and what it is: the name (length-prefixed), the message
-/// id, and the ids of the requests in it (count-prefixed).
-fn put_target(buf: &mut BytesMut, target: &Name, msg: &Id, requests: &[u64]) {
-    let name = String::from(target);
-    buf.put_u16(name.len() as u16);
-    buf.put_slice(name.as_bytes());
-    buf.put_u128(msg.as_uuid().as_u128());
-    buf.put_u16(requests.len() as u16);
-    for request in requests {
-        buf.put_u64(*request);
-    }
-}
-
-fn get_target(bytes: &mut Bytes) -> Option<(Name, Id, Vec<u64>)> {
-    let len = get_u16(bytes)? as usize;
-    if bytes.remaining() < len {
-        return None;
-    }
-    let name = std::str::from_utf8(&bytes.split_to(len)).ok()?.to_owned();
-    if bytes.remaining() < 16 {
-        return None;
-    }
-    let id = Id::from_u128(bytes.get_u128());
-    let count = get_u16(bytes)? as usize;
-    if bytes.remaining() < count * 8 {
-        return None;
-    }
-    let requests = (0..count).map(|_| bytes.get_u64()).collect();
-    Some((Name::new(name), id, requests))
-}
-
-const E_UNKNOWN_MESSAGE: u8 = 1;
-const E_NO_SUCH_ACTOR: u8 = 2;
-const E_NOT_ACCEPTED: u8 = 3;
-const E_CLOSED: u8 = 4;
-const E_OVERLOADED: u8 = 5;
-const E_NO_REPLY: u8 = 6;
-const E_DECODE: u8 = 7;
-const E_ENCODE: u8 = 8;
-const E_TOO_LARGE: u8 = 9;
-
-fn put_error(buf: &mut BytesMut, error: &RemoteError) {
-    match error {
-        RemoteError::UnknownMessage => buf.put_u8(E_UNKNOWN_MESSAGE),
-        RemoteError::NoSuchActor => buf.put_u8(E_NO_SUCH_ACTOR),
-        RemoteError::NotAccepted => buf.put_u8(E_NOT_ACCEPTED),
-        RemoteError::Closed => buf.put_u8(E_CLOSED),
-        RemoteError::Overloaded => buf.put_u8(E_OVERLOADED),
-        RemoteError::NoReply => buf.put_u8(E_NO_REPLY),
-        RemoteError::Decode(reason) => {
-            buf.put_u8(E_DECODE);
-            buf.put_slice(reason.as_bytes());
-        }
-        RemoteError::Encode(reason) => {
-            buf.put_u8(E_ENCODE);
-            buf.put_slice(reason.as_bytes());
-        }
-        RemoteError::TooLarge => buf.put_u8(E_TOO_LARGE),
-    }
-}
-
-fn get_error(mut bytes: Bytes) -> Option<RemoteError> {
-    Some(match get_u8(&mut bytes)? {
-        E_UNKNOWN_MESSAGE => RemoteError::UnknownMessage,
-        E_NO_SUCH_ACTOR => RemoteError::NoSuchActor,
-        E_NOT_ACCEPTED => RemoteError::NotAccepted,
-        E_CLOSED => RemoteError::Closed,
-        E_OVERLOADED => RemoteError::Overloaded,
-        E_NO_REPLY => RemoteError::NoReply,
-        E_DECODE => RemoteError::Decode(String::from_utf8_lossy(&bytes).into_owned()),
-        E_ENCODE => RemoteError::Encode(String::from_utf8_lossy(&bytes).into_owned()),
-        E_TOO_LARGE => RemoteError::TooLarge,
-        _ => return None,
-    })
-}
-
-fn get_u8(bytes: &mut Bytes) -> Option<u8> {
-    bytes.has_remaining().then(|| bytes.get_u8())
-}
-
-fn get_u16(bytes: &mut Bytes) -> Option<u16> {
-    (bytes.remaining() >= 2).then(|| bytes.get_u16())
-}
-
-fn get_u64(bytes: &mut Bytes) -> Option<u64> {
-    (bytes.remaining() >= 8).then(|| bytes.get_u64())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn round_trips(frame: Frame) {
-        assert_eq!(Frame::decode(frame.encode()), Some(frame));
-    }
-
-    #[test]
-    fn frames_round_trip() {
-        let (target, msg) = (Name::new("counter"), Id::from_u128(0xabcdef));
-        round_trips(Frame::Cast {
-            target: target.clone(),
-            msg,
-            requests: vec![3, 4],
-            payload: Bytes::from_static(b"payload"),
         });
-        round_trips(Frame::Call {
-            call_id: 42,
-            target,
-            msg,
-            requests: Vec::new(),
-            payload: Bytes::new(),
-        });
-        round_trips(Frame::Reply {
-            call_id: 42,
-            result: Ok(Bytes::from_static(b"answer")),
-        });
+        id
     }
 
-    #[test]
-    fn every_error_round_trips() {
-        for error in [
-            RemoteError::UnknownMessage,
-            RemoteError::NoSuchActor,
-            RemoteError::NotAccepted,
-            RemoteError::Closed,
-            RemoteError::Overloaded,
-            RemoteError::NoReply,
-            RemoteError::Decode("bad".into()),
-            RemoteError::Encode("worse".into()),
-            RemoteError::TooLarge,
-        ] {
-            round_trips(Frame::Reply {
-                call_id: 1,
-                result: Err(error),
-            });
-        }
+    /// The request that the node knows by `id`, as a request on this node:
+    /// what it is replied to is sent to the node. Dropping it without a reply
+    /// tells the node so.
+    pub(super) fn import<T: Encode + Send + 'static>(&self, id: u64) -> Request<T> {
+        let (request, reply) = Request::<T>::new();
+        let (session, peer) = (self.session.clone(), self.peer.clone());
+        tokio::spawn(async move {
+            let result = match reply.await {
+                Ok(value) => value
+                    .encode()
+                    .map_err(|error| RemoteError::Encode(error.to_string())),
+                Err(_) => Err(RemoteError::NoReply),
+            };
+            session.reply(&peer, id, result).await;
+        });
+        request
+    }
+}
+
+/// The requests handed to a node with a message. Forgets them when dropped,
+/// unless the message was sent.
+pub(super) struct Exports {
+    pending: Arc<Pending>,
+    ids: Vec<u64>,
+}
+
+impl Exports {
+    /// The ids of the requests, to put in the frame the message goes in.
+    pub(super) fn ids(&self) -> Vec<u64> {
+        self.ids.clone()
     }
 
-    #[test]
-    fn garbage_is_not_a_frame() {
-        assert_eq!(Frame::decode(Bytes::new()), None);
-        assert_eq!(Frame::decode(Bytes::from_static(&[0xff])), None);
-        // Cut short at every point.
-        let frame = Frame::Call {
-            call_id: 7,
-            target: Name::new("counter"),
-            msg: Id::from_u128(1),
-            requests: vec![3],
-            payload: Bytes::new(),
-        }
-        .encode();
-        for len in 0..frame.len() {
-            assert_eq!(Frame::decode(frame.slice(..len)), None, "cut at {len}");
+    /// The message is on its way: the node will answer.
+    pub(super) fn commit(mut self) {
+        self.ids.clear();
+    }
+}
+
+impl Drop for Exports {
+    fn drop(&mut self) {
+        for id in &self.ids {
+            self.pending.remove(*id);
         }
     }
 }

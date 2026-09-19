@@ -2,10 +2,10 @@
 //! local actors, and answered.
 
 use super::{
-    Cluster, RemoteError, Started, context::Wire, handler::ReplyFuture, reply::Pending, wire::Frame,
+    RemoteError, Started, dispatch::ReplyFuture, frame::Frame, pending::Pending, wire::Wire,
 };
 use crate::{
-    ClusterEvent, Id, NodeName,
+    Cluster, ClusterEvent, MessageId, NodeName,
     link::{Delivery, Incoming, Links, MAX_MESSAGE_SIZE, PeerEvent, Protocol},
 };
 use bytes::Bytes;
@@ -59,7 +59,7 @@ impl Queued {
 }
 
 /// The way to the task of one actor.
-struct Route {
+struct ActorQueue {
     queue: mpsc::UnboundedSender<Work>,
     queued: Arc<Queued>,
 }
@@ -68,7 +68,7 @@ struct Route {
 struct Work {
     /// The node that sent it.
     from: NodeName,
-    msg: Id,
+    msg: MessageId,
     /// The requests in the message, see [`RemoteRequest`](super::RemoteRequest).
     requests: Vec<u64>,
     payload: Bytes,
@@ -85,12 +85,11 @@ pub(super) async fn serve(
     mut peers: broadcast::Receiver<PeerEvent>,
     mut members: broadcast::Receiver<ClusterEvent>,
 ) {
+    let pending = running.pending.clone();
     let mut router = Router {
-        cluster,
-        started: running.clone(),
+        session: Session::new(cluster, running),
         routes: HashMap::new(),
     };
-    let pending = running.pending;
 
     loop {
         tokio::select! {
@@ -121,13 +120,132 @@ pub(super) async fn serve(
     }
 }
 
+/// The cluster, together with the links and the table of calls it is waiting
+/// for: what every step of receiving a message needs. It exists only while the
+/// node runs.
+#[derive(Clone)]
+pub(super) struct Session {
+    cluster: Cluster,
+    started: Started,
+}
+
+impl Session {
+    pub(super) fn new(cluster: Cluster, started: Started) -> Self {
+        Self { cluster, started }
+    }
+
+    pub(super) fn cluster(&self) -> &Cluster {
+        &self.cluster
+    }
+
+    pub(super) fn links(&self) -> &Links {
+        &self.started.links
+    }
+
+    pub(super) fn pending(&self) -> &Arc<Pending> {
+        &self.started.pending
+    }
+
+    /// The lane replies to `node` go through, if it is a member of the cluster.
+    fn reply_lane(&self, node: &NodeName, call_id: u64) -> Option<mpsc::Sender<Bytes>> {
+        let Some(member) = self.cluster.member(node) else {
+            tracing::debug!(%node, "Not replying to a node that is not a member");
+            return None;
+        };
+        Some(self.links().sender(
+            &member.name,
+            &member.addr,
+            Protocol::ACTORS,
+            Delivery::Ordered,
+            (call_id % self.cluster.messaging().shards as u64) as u8,
+        ))
+    }
+
+    /// Sends the reply to a call.
+    pub(super) async fn reply(
+        &self,
+        node: &NodeName,
+        call_id: u64,
+        result: Result<Bytes, RemoteError>,
+    ) {
+        let Some(lane) = self.reply_lane(node, call_id) else {
+            return;
+        };
+        let mut frame = Frame::Reply { call_id, result }.encode();
+        if frame.len() > MAX_MESSAGE_SIZE {
+            frame = Frame::Reply {
+                call_id,
+                result: Err(RemoteError::TooLarge),
+            }
+            .encode();
+        }
+        let _ = lane.send(frame).await;
+    }
+
+    /// Delivers one message to the actor `name`, and sends its reply when it comes.
+    async fn process(&self, name: &Name, work: Work) {
+        let Work {
+            from,
+            msg,
+            requests,
+            payload,
+            call_id,
+        } = work;
+        let wire = Wire::new(self.clone(), from.clone());
+        match self
+            .deliver(wire, name, msg, payload, call_id.is_some())
+            .await
+        {
+            Ok(Some(waiting)) => {
+                // Waiting for the actor to answer mustn't hold up the next message.
+                let session = self.clone();
+                tokio::spawn(async move {
+                    let result = waiting.await;
+                    if let Some(call_id) = call_id {
+                        session.reply(&from, call_id, result).await;
+                    }
+                });
+            }
+            Ok(None) => {}
+            Err(error) => {
+                if call_id.is_none() {
+                    tracing::debug!(%name, "Could not deliver a message that expected no reply: {error}");
+                }
+                // Whoever waits for an answer to this message learns it isn't coming.
+                for id in call_id.into_iter().chain(requests) {
+                    self.reply(&from, id, Err(error.clone())).await;
+                }
+            }
+        }
+    }
+
+    /// Hands the message to the handler registered for its type.
+    async fn deliver(
+        &self,
+        wire: Wire,
+        name: &Name,
+        msg: MessageId,
+        payload: Bytes,
+        reply: bool,
+    ) -> Result<Option<ReplyFuture>, RemoteError> {
+        let handler = self
+            .cluster
+            .messaging()
+            .handlers
+            .get(&msg)
+            .map(|handler| handler.clone())
+            .ok_or(RemoteError::UnknownMessage)?;
+        let address = name.address().ok_or(RemoteError::NoSuchActor)?;
+        handler.deliver(wire, address, payload, reply).await
+    }
+}
+
 /// Hands each message to the task of the actor it is for, so that one slow
 /// actor doesn't hold up the others, and the messages for one are put in its
 /// mailbox in the order they arrived.
 struct Router {
-    cluster: Cluster,
-    started: Started,
-    routes: HashMap<Name, Route>,
+    session: Session,
+    routes: HashMap<Name, ActorQueue>,
 }
 
 impl Router {
@@ -138,22 +256,7 @@ impl Router {
         };
         match frame {
             Frame::Reply { call_id, result } => pending.complete(&incoming.from, call_id, result),
-            Frame::Cast {
-                target,
-                msg,
-                requests,
-                payload,
-            } => self.route(
-                target,
-                Work {
-                    from: incoming.from,
-                    msg,
-                    requests,
-                    payload,
-                    call_id: None,
-                },
-            ),
-            Frame::Call {
+            Frame::Message {
                 call_id,
                 target,
                 msg,
@@ -166,7 +269,7 @@ impl Router {
                     msg,
                     requests,
                     payload,
-                    call_id: Some(call_id),
+                    call_id,
                 },
             ),
         }
@@ -176,14 +279,15 @@ impl Router {
         // Operations on the actor itself, such as signals, don't wait behind
         // its messages, as they don't locally.
         let bypasses_queue = self
-            .cluster
+            .session
+            .cluster()
             .messaging()
             .handlers
             .get(&work.msg)
             .is_some_and(|handler| handler.bypasses_queue());
         if bypasses_queue {
-            let (cluster, started) = (self.cluster.clone(), self.started.clone());
-            tokio::spawn(async move { process(&cluster, &started, &target, work).await });
+            let session = self.session.clone();
+            tokio::spawn(async move { session.process(&target, work).await });
             return;
         }
 
@@ -216,14 +320,13 @@ impl Router {
         queue.send(work).expect("The task's queue is open");
         self.routes.insert(
             target.clone(),
-            Route {
+            ActorQueue {
                 queue,
                 queued: queued.clone(),
             },
         );
         tokio::spawn(actor_task(
-            self.cluster.clone(),
-            self.started.clone(),
+            self.session.clone(),
             target,
             tasks_queue,
             queued,
@@ -237,8 +340,7 @@ impl Router {
             tracing::warn!("Dropping a message for an actor with too much waiting: {error}");
         }
         for call_id in answers {
-            let Some(lane) = reply_lane(&self.cluster, &self.started.links, &work.from, call_id)
-            else {
+            let Some(lane) = self.session.reply_lane(&work.from, call_id) else {
                 return;
             };
             let _ = lane.try_send(
@@ -252,52 +354,9 @@ impl Router {
     }
 }
 
-/// The lane replies to `node` go through, if it is a member of the cluster.
-fn reply_lane(
-    cluster: &Cluster,
-    links: &Links,
-    node: &NodeName,
-    call_id: u64,
-) -> Option<mpsc::Sender<Bytes>> {
-    let Some(member) = cluster.member(node) else {
-        tracing::debug!(%node, "Not replying to a node that is not a member");
-        return None;
-    };
-    Some(links.sender(
-        &member.name,
-        &member.addr,
-        Protocol::ACTORS,
-        Delivery::Ordered,
-        (call_id % cluster.messaging().shards as u64) as u8,
-    ))
-}
-
-/// Sends the reply to a call.
-pub(super) async fn reply(
-    cluster: &Cluster,
-    links: &Links,
-    node: &NodeName,
-    call_id: u64,
-    result: Result<Bytes, RemoteError>,
-) {
-    let Some(lane) = reply_lane(cluster, links, node, call_id) else {
-        return;
-    };
-    let mut frame = Frame::Reply { call_id, result }.encode();
-    if frame.len() > MAX_MESSAGE_SIZE {
-        frame = Frame::Reply {
-            call_id,
-            result: Err(RemoteError::TooLarge),
-        }
-        .encode();
-    }
-    let _ = lane.send(frame).await;
-}
-
 /// Delivers the messages for one actor, one after the other.
 async fn actor_task(
-    cluster: Cluster,
-    started: Started,
+    session: Session,
     name: Name,
     mut queue: mpsc::UnboundedReceiver<Work>,
     queued: Arc<Queued>,
@@ -314,60 +373,8 @@ async fn actor_task(
         };
 
         queued.release(work.payload.len());
-        process(&cluster, &started, &name, work).await;
+        session.process(&name, work).await;
     }
-}
-
-/// Delivers one message to the actor `name`, and sends its reply when it comes.
-async fn process(cluster: &Cluster, started: &Started, name: &Name, work: Work) {
-    let Work {
-        from,
-        msg,
-        requests,
-        payload,
-        call_id,
-    } = work;
-    let wire = Wire::new(cluster.clone(), started.clone(), from.clone());
-    match deliver(cluster, wire, name, msg, payload, call_id.is_some()).await {
-        Ok(Some(waiting)) => {
-            // Waiting for the actor to answer mustn't hold up the next message.
-            let (cluster, links) = (cluster.clone(), started.links.clone());
-            tokio::spawn(async move {
-                let result = waiting.await;
-                if let Some(call_id) = call_id {
-                    reply(&cluster, &links, &from, call_id, result).await;
-                }
-            });
-        }
-        Ok(None) => {}
-        Err(error) => {
-            if call_id.is_none() {
-                tracing::debug!(%name, "Could not deliver a message that expected no reply: {error}");
-            }
-            // Whoever waits for an answer to this message learns it isn't coming.
-            for id in call_id.into_iter().chain(requests) {
-                reply(cluster, &started.links, &from, id, Err(error.clone())).await;
-            }
-        }
-    }
-}
-
-async fn deliver(
-    cluster: &Cluster,
-    wire: Wire,
-    name: &Name,
-    msg: Id,
-    payload: Bytes,
-    reply: bool,
-) -> Result<Option<ReplyFuture>, RemoteError> {
-    let handler = cluster
-        .messaging()
-        .handlers
-        .get(&msg)
-        .map(|handler| handler.clone())
-        .ok_or(RemoteError::UnknownMessage)?;
-    let address = name.address().ok_or(RemoteError::NoSuchActor)?;
-    handler.deliver(wire, address, payload, reply).await
 }
 
 #[cfg(test)]

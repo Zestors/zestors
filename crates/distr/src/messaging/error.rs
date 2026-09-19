@@ -34,49 +34,60 @@ pub enum RemoteError {
     TooLarge,
 }
 
-/// A message couldn't be sent to a remote actor. It is given back.
+/// Why a message couldn't be sent, without the message itself. See
+/// [`RemoteCastError`], which pairs it with the message that was not sent.
 #[derive(Debug, thiserror::Error)]
-pub enum RemoteCastError<M> {
+#[non_exhaustive]
+pub enum CastFailure {
     /// The node hasn't started yet, or has stopped.
     #[error("The node is not running")]
-    NotRunning(M),
+    NotRunning,
     /// The node the actor is on isn't part of the cluster.
     #[error("The node is not part of the cluster")]
-    NotAMember(M),
+    NotAMember,
     /// The node can't be connected to right now.
     #[error("The node can't be reached")]
-    Unreachable(M),
+    Unreachable,
     /// The encoded message is larger than can be sent.
     #[error("The message is too large: {size} bytes, at most {max} can be sent")]
-    TooLarge { msg: M, size: usize, max: usize },
+    TooLarge { size: usize, max: usize },
     /// The message couldn't be encoded.
-    #[error("Failed to encode the message: {error}")]
-    Encode { msg: M, error: EncodeError },
+    #[error("Failed to encode the message: {0}")]
+    Encode(EncodeError),
     /// The messages waiting to be sent to the node are too many; see
     /// [`RemoteAccepts::try_cast`](super::RemoteAccepts::try_cast).
     #[error("Too many messages are waiting to be sent to the node")]
-    Full(M),
+    Full,
     /// The actor is on this node and is not taking messages any more.
     #[error("The actor is closed")]
-    Closed(M),
+    Closed,
     /// The actor is on this node and doesn't accept this message type.
     #[error("The actor doesn't accept this message")]
-    NotAccepted(M),
+    NotAccepted,
+}
+
+impl CastFailure {
+    /// Pairs this with the message that was not sent.
+    pub(super) fn with<M>(self, msg: M) -> RemoteCastError<M> {
+        RemoteCastError { msg, reason: self }
+    }
+}
+
+/// A message couldn't be sent to an actor. The message is given back in
+/// [`msg`](Self::msg), and [`reason`](Self::reason) says why.
+#[derive(Debug, thiserror::Error)]
+#[error("{reason}")]
+pub struct RemoteCastError<M> {
+    /// The message that was not sent.
+    pub msg: M,
+    /// Why it was not sent.
+    pub reason: CastFailure,
 }
 
 impl<M> RemoteCastError<M> {
     /// The message that was not sent.
     pub fn into_inner(self) -> M {
-        match self {
-            RemoteCastError::NotRunning(msg)
-            | RemoteCastError::NotAMember(msg)
-            | RemoteCastError::Unreachable(msg)
-            | RemoteCastError::Full(msg)
-            | RemoteCastError::Closed(msg)
-            | RemoteCastError::NotAccepted(msg)
-            | RemoteCastError::TooLarge { msg, .. }
-            | RemoteCastError::Encode { msg, .. } => msg,
-        }
+        self.msg
     }
 }
 
@@ -106,7 +117,7 @@ pub enum RemoteReplyError {
 pub enum RemoteOpError {
     /// The request couldn't be sent.
     #[error(transparent)]
-    NotSent(#[from] RemoteCastError<()>),
+    NotSent(#[from] CastFailure),
     /// The request was sent, but no answer came.
     #[error(transparent)]
     Reply(#[from] RemoteReplyError),

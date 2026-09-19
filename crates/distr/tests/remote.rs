@@ -17,10 +17,11 @@ use zestors::{
     supervisor::Supervisor,
 };
 use zestors_distr::{
-    AddressError, Cluster, ClusterAddress, ClusterConfig, ClusterNode, ClusterNodeError, Decode,
-    DecodeError, Encode, EncodeError, GlobalName, RemoteAccepts, RemoteActorOps, RemoteAddress,
-    RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError, RemoteOpError,
-    RemoteReceipt as _, RemoteReplyError, RemoteRequest, Seed, StableId, sim::SimNetwork,
+    AddressError, CastFailure, Cluster, ClusterAddress, ClusterConfig, ClusterNode,
+    ClusterNodeError, Decode, DecodeError, Encode, EncodeError, GlobalName, RemoteAccepts,
+    RemoteActorOps, RemoteAddress, RemoteCallError, RemoteCallOptions, RemoteCastError,
+    RemoteError, RemoteOpError, RemoteReceipt as _, RemoteReplyError, RemoteRequest, Seed,
+    StableId, sim::SimNetwork,
 };
 
 // Messages. All but `Reverse` cross the network with serde.
@@ -541,14 +542,20 @@ async fn messages_that_cant_be_sent_are_given_back() {
         .a
         .cluster
         .address_unchecked(GlobalName::new("any", "node-z"));
-    let Err(RemoteCastError::NotAMember(Note(3))) = stranger.cast(Note(3)).await else {
+    let Err(RemoteCastError {
+        msg: Note(3),
+        reason: CastFailure::NotAMember,
+    }) = stranger.cast(Note(3)).await
+    else {
         panic!("Expected the message back")
     };
 
     // Too large for the network.
     let blobs = pair.on_b::<Dyn<(Blob,)>>("any");
-    let Err(RemoteCastError::TooLarge { msg, size, max }) =
-        blobs.cast(Blob(vec![0; 5 * 1024 * 1024])).await
+    let Err(RemoteCastError {
+        msg,
+        reason: CastFailure::TooLarge { size, max },
+    }) = blobs.cast(Blob(vec![0; 5 * 1024 * 1024])).await
     else {
         panic!("Expected the message back")
     };
@@ -566,7 +573,10 @@ async fn nothing_is_sent_before_the_node_runs() {
         remote.address_unchecked(GlobalName::new("any", "node-b"));
     assert!(matches!(
         target.cast(Note(1)).await,
-        Err(RemoteCastError::NotRunning(_))
+        Err(RemoteCastError {
+            reason: CastFailure::NotRunning,
+            ..
+        })
     ));
 }
 
@@ -734,7 +744,10 @@ async fn a_request_in_a_message_that_is_not_sent_fails_its_reply() {
     let pair = Pair::start().await;
 
     let (reply, answer) = RemoteRequest::new();
-    let Err(RemoteCastError::TooLarge { .. }) = pair
+    let Err(RemoteCastError {
+        reason: CastFailure::TooLarge { .. },
+        ..
+    }) = pair
         .on_b::<Dyn<(BigFetch,)>>("any")
         .cast(BigFetch {
             blob: vec![0; 5 * 1024 * 1024],
@@ -866,7 +879,7 @@ async fn operations_report_why_they_failed() {
         .address_unchecked(GlobalName::new("ops-nobody", "node-z"));
     assert!(matches!(
         stranger.signal_shutdown().await,
-        Err(RemoteOpError::NotSent(RemoteCastError::NotAMember(())))
+        Err(RemoteOpError::NotSent(CastFailure::NotAMember))
     ));
 }
 
@@ -962,7 +975,10 @@ async fn a_local_message_is_not_encoded() {
             .await
             .call(NoWire(1))
             .await,
-        Err(RemoteCallError::NotSent(RemoteCastError::Encode { .. }))
+        Err(RemoteCallError::NotSent(RemoteCastError {
+            reason: CastFailure::Encode(_),
+            ..
+        }))
     ));
 }
 
@@ -985,7 +1001,7 @@ async fn a_local_actor_is_reached_without_the_node_running() {
             .address::<WorkerInterface>(GlobalName::new("cluster-idle", "node-y"))
             .await,
         Err(AddressError::Remote(RemoteOpError::NotSent(
-            RemoteCastError::NotRunning(_)
+            CastFailure::NotRunning
         )))
     ));
     let elsewhere = ClusterAddress::from(
@@ -993,7 +1009,10 @@ async fn a_local_actor_is_reached_without_the_node_running() {
     );
     assert!(matches!(
         elsewhere.call(Double(2)).await,
-        Err(RemoteCallError::NotSent(RemoteCastError::NotRunning(_)))
+        Err(RemoteCallError::NotSent(RemoteCastError {
+            reason: CastFailure::NotRunning,
+            ..
+        }))
     ));
 }
 
@@ -1029,11 +1048,17 @@ async fn a_local_call_can_time_out_and_a_closed_actor_is_told() {
     within(local_worker.watch_exit()).await.unwrap();
     assert!(matches!(
         local.call(Double(1)).await,
-        Err(RemoteCallError::NotSent(RemoteCastError::Closed(_)))
+        Err(RemoteCallError::NotSent(RemoteCastError {
+            reason: CastFailure::Closed,
+            ..
+        }))
     ));
     assert!(matches!(
         local.try_cast(Double(1)),
-        Err(RemoteCastError::Closed(_))
+        Err(RemoteCastError {
+            reason: CastFailure::Closed,
+            ..
+        })
     ));
 }
 
@@ -1086,7 +1111,7 @@ async fn making_an_address_checks_the_actor_where_it_is() {
         a.address::<WorkerInterface>(GlobalName::new("cluster-check", "node-z"))
             .await,
         Err(AddressError::Remote(RemoteOpError::NotSent(
-            RemoteCastError::NotAMember(_)
+            CastFailure::NotAMember
         )))
     ));
 }
@@ -1108,7 +1133,10 @@ async fn an_address_can_be_made_unchecked() {
     let itself = b.address_unchecked::<WorkerInterface>(GlobalName::new("cluster-check", "node-b"));
     assert!(matches!(
         itself.call(Double(1)).await,
-        Err(RemoteCallError::NotSent(RemoteCastError::NotAMember(_)))
+        Err(RemoteCallError::NotSent(RemoteCastError {
+            reason: CastFailure::NotAMember,
+            ..
+        }))
     ));
 }
 

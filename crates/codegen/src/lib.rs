@@ -306,7 +306,7 @@ pub fn derive_message(input: TokenStream) -> TokenStream {
 }
 
 /// Derives the `StableId` trait, giving the message a stable, globally unique
-/// [`Id`](https://docs.rs/zestors-distr) that identifies it across nodes.
+/// [`MessageId`](https://docs.rs/zestors-distr) that identifies it across nodes.
 ///
 /// The id is set with `#[msg(id = "<uuid>")]`. If it is missing, compilation
 /// fails with a freshly generated random id that can be pasted in.
@@ -323,7 +323,7 @@ pub fn derive_message(input: TokenStream) -> TokenStream {
 /// #[msg(id = "0b0f7e4e-3f3a-4d5b-9d7e-6a1c2b3d4e92")]
 /// struct Ping;
 ///
-/// assert_eq!(Ping::Id, Id::from_u128(0x0b0f7e4e_3f3a_4d5b_9d7e_6a1c2b3d4e92));
+/// assert_eq!(Ping::Id, MessageId::from_u128(0x0b0f7e4e_3f3a_4d5b_9d7e_6a1c2b3d4e92));
 /// ```
 #[proc_macro_derive(StableId, attributes(msg, zestors))]
 pub fn derive_message_id(input: TokenStream) -> TokenStream {
@@ -364,7 +364,7 @@ pub fn derive_message_id(input: TokenStream) -> TokenStream {
 
     TokenStream::from(quote! {
         impl #impl_generics #distr_path::StableId for #name #ty_generics #where_clause {
-            const Id: #distr_path::Id = #distr_path::Id::from_u128(#uuid);
+            const Id: #distr_path::MessageId = #distr_path::MessageId::from_u128(#uuid);
         }
         #auto_register
     })

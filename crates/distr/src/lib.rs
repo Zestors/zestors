@@ -68,8 +68,8 @@ pub use cluster::{
 };
 pub use link::LinkTimings;
 pub use messaging::{
-    AddressError, ClusterAddress, Decode, DecodeError, Encode, EncodeError, RemoteAccepts,
-    RemoteActorOps, RemoteActorRef, RemoteAddress, RemoteCallError, RemoteCallOptions,
-    RemoteCastError, RemoteError, RemoteInfo, RemoteMessage, RemoteOpError, RemoteReceipt,
-    RemoteReply, RemoteReplyError, RemoteRequest, Route,
+    AddressError, CastFailure, ClusterAddress, Decode, DecodeError, Encode, EncodeError,
+    RemoteAccepts, RemoteActorOps, RemoteActorRef, RemoteAddress, RemoteCallError,
+    RemoteCallOptions, RemoteCastError, RemoteError, RemoteInfo, RemoteMessage, RemoteOpError,
+    RemoteReceipt, RemoteReply, RemoteReplyError, RemoteRequest, Route,
 };

@@ -7,14 +7,14 @@ use uuid::Uuid;
 #[allow(non_upper_case_globals)]
 pub trait StableId {
     /// The stable, globally unique identifier for this message type.
-    const Id: Id;
+    const Id: MessageId;
 }
 
 /// A globally unique identifier for a message type, stable across nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct Id(Uuid);
+pub struct MessageId(Uuid);
 
-impl Id {
+impl MessageId {
     pub const fn from_uuid(id: Uuid) -> Self {
         Self(id)
     }
@@ -30,32 +30,32 @@ impl Id {
     }
 }
 
-impl std::fmt::Display for Id {
+impl std::fmt::Display for MessageId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl From<Uuid> for Id {
+impl From<Uuid> for MessageId {
     fn from(id: Uuid) -> Self {
         Self(id)
     }
 }
 
-impl From<u128> for Id {
+impl From<u128> for MessageId {
     fn from(id: u128) -> Self {
         Self(Uuid::from_u128(id))
     }
 }
 
-impl From<Id> for Uuid {
-    fn from(id: Id) -> Self {
+impl From<MessageId> for Uuid {
+    fn from(id: MessageId) -> Self {
         id.0
     }
 }
 
-impl From<Id> for u128 {
-    fn from(id: Id) -> Self {
+impl From<MessageId> for u128 {
+    fn from(id: MessageId) -> Self {
         id.0.as_u128()
     }
 }
