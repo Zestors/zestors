@@ -6,7 +6,7 @@ impl Channel {
         &self,
         msg: M,
         mut options: CallOptions,
-    ) -> Result<M::Receipt, CastError<M>>
+    ) -> Result<ReceiptOf<M>, CastError<M>>
     where
         M: Message,
         I: Interface + TryInto<Envelope<M>> + From<Envelope<M>> + Send + 'static,
@@ -25,7 +25,7 @@ impl Channel {
         &self,
         msg: M,
         mut options: CallOptions,
-    ) -> impl Future<Output = Result<M::Receipt, CastDynError<M>>> + Send {
+    ) -> impl Future<Output = Result<ReceiptOf<M>, CastDynError<M>>> + Send {
         async move {
             if !options.ignore_backpressure {
                 self.delay_for_backpressure().await;
@@ -45,7 +45,7 @@ impl Channel {
         &self,
         msg: M,
         options: CallOptions,
-    ) -> Result<M::Receipt, TryCastError<M>>
+    ) -> Result<ReceiptOf<M>, TryCastError<M>>
     where
         M: Message,
         I: Interface + TryInto<Envelope<M>> + From<Envelope<M>> + Send + 'static,
@@ -92,7 +92,7 @@ impl Channel {
         &self,
         msg: M,
         options: CallOptions,
-    ) -> Result<M::Receipt, TryCastDynError<M>> {
+    ) -> Result<ReceiptOf<M>, TryCastDynError<M>> {
         if !options.ignore_backpressure && self.reached_backpressure() {
             return Err(TryCastDynError::Full(msg));
         }
@@ -118,10 +118,11 @@ pub(crate) trait Casts<M: Message>: Sync {
         &self,
         msg: M,
         options: CallOptions,
-    ) -> impl Future<Output = Result<M::Receipt, CastError<M>>> + Send;
+    ) -> impl Future<Output = Result<ReceiptOf<M>, CastError<M>>> + Send;
 
     /// The [`Address`]-specific implementation backing [`Accepts::try_cast_with`].
-    fn _try_cast_with(&self, msg: M, options: CallOptions) -> Result<M::Receipt, TryCastError<M>>;
+    fn _try_cast_with(&self, msg: M, options: CallOptions)
+    -> Result<ReceiptOf<M>, TryCastError<M>>;
 }
 
 impl<M, I> Casts<M> for Address<I>
@@ -129,11 +130,15 @@ where
     M: Message,
     I: Interface + TryInto<Envelope<M>> + From<Envelope<M>> + Send + 'static,
 {
-    async fn _cast_with(&self, msg: M, options: CallOptions) -> Result<M::Receipt, CastError<M>> {
+    async fn _cast_with(&self, msg: M, options: CallOptions) -> Result<ReceiptOf<M>, CastError<M>> {
         self._channel().cast_with::<M, I>(msg, options).await
     }
 
-    fn _try_cast_with(&self, msg: M, options: CallOptions) -> Result<M::Receipt, TryCastError<M>> {
+    fn _try_cast_with(
+        &self,
+        msg: M,
+        options: CallOptions,
+    ) -> Result<ReceiptOf<M>, TryCastError<M>> {
         self._channel().try_cast_with::<M, I>(msg, options)
     }
 }
@@ -143,7 +148,7 @@ where
     M: Message,
     T: AsTypeSet + Contains<M> + 'static,
 {
-    async fn _cast_with(&self, msg: M, options: CallOptions) -> Result<M::Receipt, CastError<M>> {
+    async fn _cast_with(&self, msg: M, options: CallOptions) -> Result<ReceiptOf<M>, CastError<M>> {
         match self.cast_dyn_with(msg, options).await {
             Ok(output) => Ok(output),
             Err(CastDynError::Closed(msg)) => Err(CastError(msg)),
@@ -157,7 +162,11 @@ where
         }
     }
 
-    fn _try_cast_with(&self, msg: M, options: CallOptions) -> Result<M::Receipt, TryCastError<M>> {
+    fn _try_cast_with(
+        &self,
+        msg: M,
+        options: CallOptions,
+    ) -> Result<ReceiptOf<M>, TryCastError<M>> {
         match self.try_cast_dyn_with(msg, options) {
             Ok(output) => Ok(output),
             Err(TryCastDynError::Closed(msg)) => Err(TryCastError::Closed(msg)),

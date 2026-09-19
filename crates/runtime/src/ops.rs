@@ -81,7 +81,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     fn cast_dyn<M: Message>(
         &self,
         msg: M,
-    ) -> impl Future<Output = Result<M::Receipt, CastDynError<M>>> + Send {
+    ) -> impl Future<Output = Result<ReceiptOf<M>, CastDynError<M>>> + Send {
         self.cast_dyn_with(msg, Default::default())
     }
 
@@ -91,13 +91,13 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         &self,
         msg: M,
         options: CallOptions,
-    ) -> impl Future<Output = Result<M::Receipt, CastDynError<M>>> + Send {
+    ) -> impl Future<Output = Result<ReceiptOf<M>, CastDynError<M>>> + Send {
         self.channel().cast_dyn_with(msg, options)
     }
 
     /// Same as [`Accepts::try_cast`], but see [`ActorOps::cast_dyn`] for how it
     /// differs from [`Accepts::cast`].
-    fn try_cast_dyn<M: Message>(&self, msg: M) -> Result<M::Receipt, TryCastDynError<M>> {
+    fn try_cast_dyn<M: Message>(&self, msg: M) -> Result<ReceiptOf<M>, TryCastDynError<M>> {
         self.try_cast_dyn_with(msg, Default::default())
     }
 
@@ -108,7 +108,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         &self,
         msg: M,
         options: CallOptions,
-    ) -> Result<M::Receipt, TryCastDynError<M>> {
+    ) -> Result<ReceiptOf<M>, TryCastDynError<M>> {
         self.channel().try_cast_dyn_with(msg, options)
     }
 

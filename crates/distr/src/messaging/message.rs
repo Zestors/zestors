@@ -4,7 +4,7 @@ use super::{
 };
 use crate::StableId;
 use std::time::Duration;
-use zestors_interface::Message;
+use zestors_interface::{Message, MessageKind, ReceiptOf};
 
 /// A [`Message`] that can be sent to an actor on another node.
 ///
@@ -13,7 +13,10 @@ use zestors_interface::Message;
 /// is one. With serde that is
 /// `#[derive(Message, StableId, Serialize, Deserialize)]`.
 pub trait RemoteMessage:
-    Message<Output: Encode + Decode, Receipt: RemoteKind> + StableId + Encode + Decode
+    Message<Output: Encode + Decode, Kind: MessageKind<Self::Output, Receipt: RemoteKind>>
+    + StableId
+    + Encode
+    + Decode
 {
     /// What sending the message gives back to wait on, like
     /// [`Message::Receipt`]: `()` if it expects no reply, else a
@@ -25,24 +28,24 @@ pub trait RemoteMessage:
     fn remote_receipt(waiting: Option<RemoteReply<Self::Output>>) -> Self::RemoteReceipt;
 
     /// What to wait on for a message sent to an actor on this node.
-    fn local_receipt(
-        receipt: <Self as Message>::Receipt,
-        timeout: Option<Duration>,
-    ) -> Self::RemoteReceipt;
+    fn local_receipt(receipt: ReceiptOf<Self>, timeout: Option<Duration>) -> Self::RemoteReceipt;
 }
 
 impl<M> RemoteMessage for M
 where
-    M: Message<Output: Encode + Decode, Receipt: RemoteKind> + StableId + Encode + Decode,
+    M: Message<Output: Encode + Decode, Kind: MessageKind<Self::Output, Receipt: RemoteKind>>
+        + StableId
+        + Encode
+        + Decode,
 {
-    type RemoteReceipt = <M::Receipt as RemoteKind>::Remote;
+    type RemoteReceipt = <ReceiptOf<M> as RemoteKind>::Remote;
 
     fn remote_receipt(waiting: Option<RemoteReply<Self::Output>>) -> Self::RemoteReceipt {
-        <M::Receipt as RemoteKind>::remote(waiting)
+        <ReceiptOf<M> as RemoteKind>::remote(waiting)
     }
 
-    fn local_receipt(receipt: M::Receipt, timeout: Option<Duration>) -> Self::RemoteReceipt {
-        <M::Receipt as RemoteKind>::local(receipt, timeout)
+    fn local_receipt(receipt: ReceiptOf<M>, timeout: Option<Duration>) -> Self::RemoteReceipt {
+        <ReceiptOf<M> as RemoteKind>::local(receipt, timeout)
     }
 }
 

@@ -36,7 +36,7 @@ impl<I: Interface> DynamicQueue for ConcurrentQueue<I> {
 }
 
 impl dyn DynamicQueue {
-    pub(crate) fn try_push_msg<M: Message>(&self, msg: M) -> Result<M::Receipt, NotAccepted<M>> {
+    pub(crate) fn try_push_msg<M: Message>(&self, msg: M) -> Result<ReceiptOf<M>, NotAccepted<M>> {
         let (envelope, receipt) = AnyEnvelope::new_pair::<M>(msg);
 
         self.push_envelope_dyn(envelope)

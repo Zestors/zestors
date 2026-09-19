@@ -168,7 +168,7 @@ impl Channel {
         exits.clone()
     }
 
-    pub(crate) fn try_push_msg<M: Message>(&self, msg: M) -> Result<M::Receipt, NotAccepted<M>> {
+    pub(crate) fn try_push_msg<M: Message>(&self, msg: M) -> Result<ReceiptOf<M>, NotAccepted<M>> {
         self.msg_queue.try_push_msg(msg)
     }
 

@@ -36,16 +36,10 @@ use std::{convert::Infallible, fmt::Debug};
 /// struct CountLetters(String);
 /// ```
 pub trait Message: Send + 'static + Sized {
-    /// The receipt associated with this message, that is returned after sending.
-    type Receipt: Receipt<Output = Self::Output, Resolver = Self::Resolver>;
-
-    /// The resolver used to resolve the receipt given to the sender.
-    type Resolver: Resolver<Receipt = Self::Receipt>;
-
     /// The output of the receipt after being resolved.
     type Output: Send + 'static;
 
-    // type Kind: MessageKind;
+    type Kind: MessageKind<Self::Output>;
 }
 
 /// Not yet part of [`Message`]'s public contract (see the commented-out
@@ -54,7 +48,7 @@ pub trait Message: Send + 'static + Sized {
 /// pairing that `Message` already exposes directly.
 pub trait MessageKind<O> {
     type Receipt: Receipt<Output = O, Resolver = Self::Resolver>;
-    type Resolver: Resolver<Receipt = Self::Receipt>;
+    type Resolver: Resolver<Input = O, Receipt = Self::Receipt>;
 }
 
 /// Marker for the request-style [`MessageKind`]. See [`MessageKind`].
@@ -70,6 +64,9 @@ impl MessageKind<()> for Cast {
     type Receipt = ();
     type Resolver = ();
 }
+
+pub type ResolverOf<M> = <<M as Message>::Kind as MessageKind<<M as Message>::Output>>::Resolver;
+pub type ReceiptOf<M> = <<M as Message>::Kind as MessageKind<<M as Message>::Output>>::Receipt;
 
 /// The value returned to the sender after sending a [`Message`]; can be
 /// awaited (or, for [`Reply`], blocked on) to obtain the message's outcome.
@@ -185,8 +182,7 @@ macro_rules! implement_message_for_base_types {
         $(
             impl Message for $ty {
                 type Output = ();
-                type Receipt = ();
-                type Resolver = ();
+                type Kind = Cast;
             }
         )*
     };
@@ -208,8 +204,7 @@ macro_rules! implement_message_for_wrappers {
                 where M: Send + 'static + $($where +)*
             {
                 type Output = ();
-                type Receipt = ();
-                type Resolver = ();
+                type Kind = Cast;
             }
         )*
     };
@@ -231,8 +226,7 @@ macro_rules! implement_message_kind_and_message_for_tuples {
                 $($id: Message + Send + 'static,)*
             {
                 type Output = ();
-                type Receipt = ();
-                type Resolver = ();
+                type Kind = Cast;
             }
         )*
     };

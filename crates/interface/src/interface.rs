@@ -36,7 +36,7 @@ use type_sets::{AsTypeSet, Members};
 /// assert!(matches!(restored, MyInterface::Double(_)));
 /// ```
 pub trait Interface:
-    Message<Receipt = ()> + TryInto<Envelope<Self>> + From<Envelope<Self>>
+    Message<Output = (), Kind = Cast> + TryInto<Envelope<Self>> + From<Envelope<Self>>
 {
     /// A type-level set — implemented as a tuple — of the message types this
     /// interface accepts.

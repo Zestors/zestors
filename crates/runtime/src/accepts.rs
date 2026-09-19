@@ -54,7 +54,7 @@ pub trait Accepts<M: Message>: Sync {
     /// under load.
     ///
     /// Equivalent to [`Accepts::cast_with`] with the default [`CallOptions`].
-    fn cast(&self, msg: M) -> impl Future<Output = Result<M::Receipt, CastError<M>>> + Send {
+    fn cast(&self, msg: M) -> impl Future<Output = Result<ReceiptOf<M>, CastError<M>>> + Send {
         self.cast_with(msg, Default::default())
     }
 
@@ -71,12 +71,12 @@ pub trait Accepts<M: Message>: Sync {
         &self,
         msg: M,
         options: CallOptions,
-    ) -> impl Future<Output = Result<M::Receipt, CastError<M>>> + Send;
+    ) -> impl Future<Output = Result<ReceiptOf<M>, CastError<M>>> + Send;
 
     /// Sends a message immediately, without waiting out backpressure.
     ///
     /// Equivalent to [`Accepts::try_cast_with`] with the default [`CallOptions`].
-    fn try_cast(&self, msg: M) -> Result<M::Receipt, TryCastError<M>> {
+    fn try_cast(&self, msg: M) -> Result<ReceiptOf<M>, TryCastError<M>> {
         self.try_cast_with(msg, Default::default())
     }
 
@@ -88,7 +88,7 @@ pub trait Accepts<M: Message>: Sync {
     ///
     /// Returns [`TryCastError::Full`] if `options.ignore_backpressure` is
     /// `false` and the channel is currently under backpressure.
-    fn try_cast_with(&self, msg: M, options: CallOptions) -> Result<M::Receipt, TryCastError<M>>;
+    fn try_cast_with(&self, msg: M, options: CallOptions) -> Result<ReceiptOf<M>, TryCastError<M>>;
 
     /// Sends a message via [`Accepts::cast`] and waits for its reply.
     ///
@@ -122,11 +122,11 @@ where
     M: Message,
     Address<T::Ctx>: Casts<M>,
 {
-    async fn cast_with(&self, msg: M, options: CallOptions) -> Result<M::Receipt, CastError<M>> {
+    async fn cast_with(&self, msg: M, options: CallOptions) -> Result<ReceiptOf<M>, CastError<M>> {
         self.actor_ref()._cast_with(msg, options).await
     }
 
-    fn try_cast_with(&self, msg: M, options: CallOptions) -> Result<M::Receipt, TryCastError<M>> {
+    fn try_cast_with(&self, msg: M, options: CallOptions) -> Result<ReceiptOf<M>, TryCastError<M>> {
         self.actor_ref()._try_cast_with(msg, options)
     }
 }

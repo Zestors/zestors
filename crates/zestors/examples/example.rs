@@ -10,6 +10,7 @@ use zestors::{
     supervision::messages::{GetChildren, GetHealth, Health},
 };
 use zestors_actor::ActorExt;
+use zestors_interface::ResolverOf;
 use zestors_runtime::spawn_rand;
 use zestors_supervision::ChildDescription;
 #[tokio::main]
@@ -162,7 +163,7 @@ impl Handle<GetChildren> for MyActor {
         &mut self,
         ctx: HandlerContext<'_, Self>,
         msg: GetChildren,
-        req: <GetChildren as Message>::Resolver,
+        req: ResolverOf<GetChildren>,
     ) -> Result<(), Report> {
         req.reply(vec![]).ok();
         Ok(())

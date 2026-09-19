@@ -169,8 +169,7 @@ fn derive_interface(input: TokenStream) -> TokenStream {
 
         impl #msg_path::Message for #enum_name {
             type Output = ();
-            type Resolver = ();
-            type Receipt = ();
+            type Kind = #msg_path::Cast;
         }
 
 
@@ -289,8 +288,7 @@ pub fn derive_message(input: TokenStream) -> TokenStream {
             impl #impl_generics #base_path::Message for #name #ty_generics #where_clause
             {
                 type Output = #reply_type;
-                type Receipt = #base_path::Reply<#reply_type>;
-                type Resolver = #base_path::Request<#reply_type>;
+                type Kind = #base_path::Call;
             }
         )
     } else {
@@ -298,8 +296,7 @@ pub fn derive_message(input: TokenStream) -> TokenStream {
             impl #impl_generics #base_path::Message for #name #ty_generics #where_clause
             {
                 type Output = ();
-                type Resolver = ();
-                type Receipt = ();
+                type Kind = #base_path::Cast;
             }
         )
     };

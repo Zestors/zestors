@@ -1,7 +1,7 @@
 use futures::{StreamExt as _, future::BoxFuture, stream::FuturesUnordered};
 use rootcause::Report;
 use zestors_codegen::Message;
-use zestors_interface::{Resolver, prelude::*};
+use zestors_interface::{Resolver, ResolverOf, prelude::*};
 
 use crate::{Handle, Handler, HandlerContext};
 
@@ -111,7 +111,7 @@ impl<H: Handler> Handle<HandlerMessage<H>> for H {
         &mut self,
         ctx: HandlerContext<'_, Self>,
         msg: HandlerMessage<H>,
-        _req: <HandlerMessage<H> as Message>::Resolver,
+        _req: ResolverOf<HandlerMessage<H>>,
     ) -> Result<(), Report> {
         msg.msg.handle_dyn(ctx, self).await
     }
@@ -141,7 +141,7 @@ impl<M: Message, H: Handle<M>> DynErasedMessage<H> for M {
         actor: &'a mut H,
     ) -> BoxFuture<'a, Result<(), Report>> {
         Box::pin(async move {
-            let (resolver, receipt) = <M::Resolver as Resolver>::new();
+            let (resolver, receipt) = <ResolverOf<M> as Resolver>::new();
             std::mem::drop(receipt);
             actor.handle(ctx, *self, resolver).await?;
             Ok(())
@@ -211,7 +211,7 @@ where
         ctx: HandlerContext<'_, H>,
         actor: &mut H,
     ) -> impl Future<Output = Result<(), Report>> + Send {
-        let (resolver, receipt) = <M::Resolver as Resolver>::new();
+        let (resolver, receipt) = <ResolverOf<M> as Resolver>::new();
         std::mem::drop(receipt);
         actor.handle(ctx, self, resolver)
     }

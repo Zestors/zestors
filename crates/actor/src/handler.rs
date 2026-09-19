@@ -2,7 +2,7 @@ use crate::{Actor, FullHandlerContext, HandledBy, HandlerContext};
 use futures::future::ready;
 use rootcause::{Report, report};
 use std::{convert::Infallible, fmt::Debug};
-use zestors_interface::{Interface, Message};
+use zestors_interface::{Interface, Message, ResolverOf};
 use zestors_runtime::prelude::*;
 
 /// A declarative and simple way to implement an [`Actor`], by providing a set of
@@ -162,7 +162,7 @@ pub trait Handle<M: Message>: Handler {
         &mut self,
         ctx: HandlerContext<'_, Self>,
         msg: M,
-        req: M::Resolver,
+        req: ResolverOf<M>,
     ) -> impl Future<Output = Result<(), Report>> + Send;
 }
 
@@ -171,7 +171,7 @@ impl<H: Handler> Handle<Infallible> for H {
         &mut self,
         _ctx: HandlerContext<'_, Self>,
         _msg: Infallible,
-        _req: <Infallible as Message>::Resolver,
+        _req: ResolverOf<Infallible>,
     ) -> Result<(), Report> {
         unreachable!("Infallible")
     }
