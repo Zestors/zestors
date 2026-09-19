@@ -38,6 +38,7 @@ indexmap = "2"
 smol_str = { version = "0.3", features = ["serde"] }
 serde = { version = "1", features = ["derive", "rc"] }
 papaya = { version = "0.2", features = ["serde"] }
+dashmap = "6"
 rand = { version = "0.10" }
 uuid = { version = "1", features = ["v4"] }
 bs58 = { version = "0.5" }

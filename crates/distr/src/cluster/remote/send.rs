@@ -9,13 +9,13 @@ use crate::{
     cluster::link::{Delivery, Protocol},
 };
 use bytes::Bytes;
+use dashmap::DashMap;
 use std::{
-    collections::HashMap,
     fmt,
     future::Future,
     hash::{Hash, Hasher},
     marker::PhantomData,
-    sync::{Arc, Mutex, atomic::Ordering},
+    sync::{Arc, atomic::Ordering},
     time::Duration,
 };
 use tokio::{
@@ -259,7 +259,7 @@ impl<C: Context> RemoteAddress<C> {
         &self.target
     }
 
-    /// How long [`RemoteAccepts::call`] and [`RemoteReply::wait`] wait for a
+    /// How long [`RemoteAccepts::call`] and [`RemoteReceipt::wait`] wait for a
     /// reply, instead of the node's
     /// [`ClusterConfig::call_timeout`](crate::ClusterConfig::call_timeout).
     /// [`RemoteCallOptions::timeout`] overrides it for one call.
@@ -441,7 +441,7 @@ impl Drop for PendingGuard {
 /// The calls that have been sent and are waiting for a reply.
 #[derive(Default)]
 pub(super) struct Pending {
-    calls: Mutex<HashMap<u64, PendingCall>>,
+    calls: DashMap<u64, PendingCall>,
 }
 
 struct PendingCall {
@@ -451,50 +451,48 @@ struct PendingCall {
 }
 
 impl Pending {
-    fn calls(&self) -> std::sync::MutexGuard<'_, HashMap<u64, PendingCall>> {
-        self.calls.lock().expect("Not poisoned")
-    }
-
     fn insert(
         &self,
         call_id: u64,
         node: NodeId,
         reply: oneshot::Sender<Result<Bytes, RemoteReplyError>>,
     ) {
-        self.calls().insert(call_id, PendingCall { node, reply });
+        self.calls.insert(call_id, PendingCall { node, reply });
     }
 
     fn remove(&self, call_id: u64) {
-        self.calls().remove(&call_id);
+        self.calls.remove(&call_id);
     }
 
     /// `node` answered the call `call_id`.
     pub(super) fn complete(&self, node: &NodeId, call_id: u64, result: Result<Bytes, RemoteError>) {
-        let mut calls = self.calls();
-        match calls.get(&call_id) {
-            Some(call) if call.node == *node => {
-                let call = calls.remove(&call_id).expect("Just found");
+        match self.calls.remove_if(&call_id, |_, call| call.node == *node) {
+            Some((_, call)) => {
                 let _ = call.reply.send(result.map_err(RemoteReplyError::Remote));
             }
-            Some(_) => {
-                tracing::warn!(%node, call_id, "Dropping a reply from a node the call didn't go to")
-            }
-            None => {
-                tracing::debug!(%node, call_id, "Dropping a reply to a call that is no longer waited for")
-            }
+            None if self.calls.contains_key(&call_id) => tracing::warn!(
+                %node,
+                call_id,
+                "Dropping a reply from a node the call didn't go to"
+            ),
+            None => tracing::debug!(
+                %node,
+                call_id,
+                "Dropping a reply to a call that is no longer waited for"
+            ),
         }
     }
 
     /// The node is gone: the calls that went to it will not be answered.
     pub(super) fn fail_node(&self, node: &NodeId) {
-        let mut calls = self.calls();
-        let failed: Vec<u64> = calls
+        let failed: Vec<u64> = self
+            .calls
             .iter()
-            .filter(|(_, call)| call.node == *node)
-            .map(|(id, _)| *id)
+            .filter(|call| call.node == *node)
+            .map(|call| *call.key())
             .collect();
         for id in failed {
-            if let Some(call) = calls.remove(&id) {
+            if let Some((_, call)) = self.calls.remove_if(&id, |_, call| call.node == *node) {
                 let _ = call.reply.send(Err(RemoteReplyError::Disconnected));
             }
         }
@@ -502,14 +500,17 @@ impl Pending {
 
     /// Nothing more will be answered.
     pub(super) fn fail_all(&self) {
-        for (_, call) in self.calls().drain() {
-            let _ = call.reply.send(Err(RemoteReplyError::Disconnected));
+        let all: Vec<u64> = self.calls.iter().map(|call| *call.key()).collect();
+        for id in all {
+            if let Some((_, call)) = self.calls.remove(&id) {
+                let _ = call.reply.send(Err(RemoteReplyError::Disconnected));
+            }
         }
     }
 
     #[cfg(test)]
     fn len(&self) -> usize {
-        self.calls().len()
+        self.calls.len()
     }
 }
 

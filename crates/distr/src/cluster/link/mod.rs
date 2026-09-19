@@ -21,6 +21,7 @@ mod tests;
 
 use crate::{ClusterTimings, Member, NodeAddr, NodeId, backend::LocalNode};
 use bytes::Bytes;
+use dashmap::{DashMap, mapref::entry::Entry};
 use dynamic::{DynConnection, DynEndpoint, ErasedBackend};
 use lane::{Health, lane};
 use std::{
@@ -133,14 +134,14 @@ struct Inner {
     generation: u64,
     timings: ClusterTimings,
     next_conn: AtomicU64,
-    conns: Mutex<HashMap<NodeId, Registered>>,
+    conns: DashMap<NodeId, Registered>,
     /// Held while dialing a peer, so that its lanes share one connection
     /// instead of dialing at once and closing each other's.
     dialing: Mutex<HashMap<NodeId, Arc<tokio::sync::Mutex<()>>>>,
-    lanes: Mutex<HashMap<LaneKey, Lane>>,
+    lanes: DashMap<LaneKey, Lane>,
     /// How reaching each peer is going, shared by all lanes to it.
     health: Mutex<HashMap<NodeId, Arc<Mutex<Health>>>>,
-    inboxes: Mutex<HashMap<Protocol, mpsc::Sender<Incoming>>>,
+    inboxes: DashMap<Protocol, mpsc::Sender<Incoming>>,
     lane_tasks: Mutex<JoinSet<()>>,
     peer_events: broadcast::Sender<PeerEvent>,
     token: CancellationToken,
@@ -173,11 +174,11 @@ impl Starter {
             generation,
             timings,
             next_conn: AtomicU64::new(0),
-            conns: Mutex::new(HashMap::new()),
+            conns: DashMap::new(),
             dialing: Mutex::new(HashMap::new()),
-            lanes: Mutex::new(HashMap::new()),
+            lanes: DashMap::new(),
             health: Mutex::new(HashMap::new()),
-            inboxes: Mutex::new(HashMap::new()),
+            inboxes: DashMap::new(),
             lane_tasks: Mutex::new(JoinSet::new()),
             peer_events,
             token: token.clone(),
@@ -243,11 +244,7 @@ impl Links {
     /// hearing from peers. A second subscription replaces the first.
     pub(super) fn subscribe(&self, protocol: Protocol) -> mpsc::Receiver<Incoming> {
         let (tx, rx) = mpsc::channel(INBOX_QUEUE);
-        self.inner
-            .inboxes
-            .lock()
-            .expect("Not poisoned")
-            .insert(protocol, tx);
+        self.inner.inboxes.insert(protocol, tx);
         rx
     }
 
@@ -259,16 +256,13 @@ impl Links {
         // ones that are backing off from an unreachable peer.
         self.inner
             .lanes
-            .lock()
-            .expect("Not poisoned")
             .retain(|(lane_node, _, _, _), _| lane_node != node);
         self.inner.health.lock().expect("Not poisoned").remove(node);
 
-        let mut conns = self.inner.conns.lock().expect("Not poisoned");
-        if conns
-            .get(node)
-            .is_some_and(|registered| registered.generation <= generation)
-            && let Some(registered) = conns.remove(node)
+        if let Some((_, registered)) = self
+            .inner
+            .conns
+            .remove_if(node, |_, registered| registered.generation <= generation)
         {
             registered.conn.conn.close();
         }
@@ -278,7 +272,7 @@ impl Links {
     /// every connection.
     pub(super) async fn shutdown(&self, grace: std::time::Duration) {
         // Dropping our ends of the pipes lets every lane finish its queue and exit.
-        self.inner.lanes.lock().expect("Not poisoned").clear();
+        self.inner.lanes.clear();
 
         let mut tasks = std::mem::take(&mut *self.inner.lane_tasks.lock().expect("Not poisoned"));
         let _ = timeout(grace, async { while tasks.join_next().await.is_some() {} }).await;
@@ -307,16 +301,30 @@ impl Inner {
         shard: u8,
     ) -> mpsc::Sender<Bytes> {
         let key = (to.node.clone(), protocol, delivery, shard);
-        let mut lanes = self.lanes.lock().expect("Not poisoned");
-
-        // The pipe ends when idle; one that leads to where the node used to be is stale.
-        if let Some(lane) = lanes.get(&key)
-            && lane.addr == to.addr
-            && !lane.tx.is_closed()
-        {
-            return lane.tx.clone();
+        match self.lanes.entry(key) {
+            Entry::Occupied(mut occupied) => {
+                let lane = occupied.get();
+                // The pipe ends when idle; one that leads to where the node used
+                // to be is stale.
+                if lane.addr == to.addr && !lane.tx.is_closed() {
+                    return lane.tx.clone();
+                }
+                let lane = self.start_lane(to, protocol, delivery);
+                let tx = lane.tx.clone();
+                occupied.insert(lane);
+                tx
+            }
+            Entry::Vacant(vacant) => {
+                let lane = self.start_lane(to, protocol, delivery);
+                let tx = lane.tx.clone();
+                vacant.insert(lane);
+                tx
+            }
         }
+    }
 
+    /// Starts the task for a new pipe to `to`.
+    fn start_lane(self: &Arc<Self>, to: &Member, protocol: Protocol, delivery: Delivery) -> Lane {
         let (tx, rx) = mpsc::channel(LANE_QUEUE);
         let health = self
             .health
@@ -325,13 +333,6 @@ impl Inner {
             .entry(to.node.clone())
             .or_default()
             .clone();
-        lanes.insert(
-            key,
-            Lane {
-                tx: tx.clone(),
-                addr: to.addr.clone(),
-            },
-        );
 
         let token = self.token.clone();
         let task = lane(
@@ -349,13 +350,15 @@ impl Inner {
             .spawn(async move {
                 let _ = token.run_until_cancelled_owned(task).await;
             });
-        tx
+        Lane {
+            tx,
+            addr: to.addr.clone(),
+        }
     }
 
     /// The live connection to `node`, if there is one.
     fn live(&self, node: &NodeId) -> Option<Conn> {
-        let conns = self.conns.lock().expect("Not poisoned");
-        conns
+        self.conns
             .get(node)
             .filter(|registered| !registered.conn.is_closed())
             .map(|registered| registered.conn.clone())
@@ -364,57 +367,56 @@ impl Inner {
     /// Makes `conn` the connection to `peer`, unless the one already there is
     /// preferred. Returns whether `conn` was kept.
     fn register(&self, peer: &NodeId, generation: u64, conn: &Conn, dialer: &NodeId) -> bool {
-        let mut conns = self.conns.lock().expect("Not poisoned");
-
-        if let Some(existing) = conns
-            .get(peer)
-            .filter(|existing| !existing.conn.is_closed())
-        {
-            let keep_new = match generation.cmp(&existing.generation) {
-                // The peer restarted, or this is an outdated connection.
-                std::cmp::Ordering::Greater => true,
-                std::cmp::Ordering::Less => false,
-                std::cmp::Ordering::Equal if *dialer == existing.dialer => true,
-                // Both sides dialed at once: keep the one dialed by the smaller name.
-                std::cmp::Ordering::Equal => {
-                    let smaller = if self.local <= *peer {
-                        &self.local
-                    } else {
-                        peer
-                    };
-                    dialer == smaller
-                }
-            };
-            if !keep_new {
-                return false;
+        let registered = Registered {
+            conn: conn.clone(),
+            generation,
+            dialer: dialer.clone(),
+        };
+        match self.conns.entry(peer.clone()) {
+            Entry::Vacant(vacant) => {
+                vacant.insert(registered);
+                true
             }
-            existing.conn.close();
-            // Whatever was in flight on it may be lost.
-            let _ = self.peer_events.send(PeerEvent::Disconnected {
-                node: peer.clone(),
-                generation: existing.generation,
-            });
+            Entry::Occupied(mut occupied) => {
+                let existing = occupied.get();
+                if !existing.conn.is_closed() {
+                    let keep_new = match generation.cmp(&existing.generation) {
+                        // The peer restarted, or this is an outdated connection.
+                        std::cmp::Ordering::Greater => true,
+                        std::cmp::Ordering::Less => false,
+                        std::cmp::Ordering::Equal if *dialer == existing.dialer => true,
+                        // Both sides dialed at once: keep the one dialed by the smaller name.
+                        std::cmp::Ordering::Equal => {
+                            let smaller = if self.local <= *peer {
+                                &self.local
+                            } else {
+                                peer
+                            };
+                            dialer == smaller
+                        }
+                    };
+                    if !keep_new {
+                        return false;
+                    }
+                    existing.conn.close();
+                    // Whatever was in flight on it may be lost.
+                    let _ = self.peer_events.send(PeerEvent::Disconnected {
+                        node: peer.clone(),
+                        generation: existing.generation,
+                    });
+                }
+                occupied.insert(registered);
+                true
+            }
         }
-
-        conns.insert(
-            peer.clone(),
-            Registered {
-                conn: conn.clone(),
-                generation,
-                dialer: dialer.clone(),
-            },
-        );
-        true
     }
 
     /// Forgets the connection `id` if it is still the connection to `peer`, and
     /// says so. One that was replaced or forgotten on purpose is not reported.
     fn unregister(&self, peer: &NodeId, id: u64) {
-        let mut conns = self.conns.lock().expect("Not poisoned");
-        if conns
-            .get(peer)
-            .is_some_and(|registered| registered.conn.id == id)
-            && let Some(registered) = conns.remove(peer)
+        if let Some((_, registered)) = self
+            .conns
+            .remove_if(peer, |_, registered| registered.conn.id == id)
         {
             let _ = self.peer_events.send(PeerEvent::Disconnected {
                 node: peer.clone(),
@@ -433,12 +435,7 @@ impl Inner {
         payload: Bytes,
         wait: bool,
     ) {
-        let inbox = self
-            .inboxes
-            .lock()
-            .expect("Not poisoned")
-            .get(&protocol)
-            .cloned();
+        let inbox = self.inboxes.get(&protocol).map(|inbox| inbox.clone());
         let Some(inbox) = inbox else {
             tracing::debug!(node = %peer, protocol = protocol.0, "Nobody subscribed, dropping message");
             return;

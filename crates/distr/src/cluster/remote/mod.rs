@@ -60,10 +60,10 @@ use super::{
     link::{Links, Protocol},
 };
 use crate::{GlobalPid, Id};
+use dashmap::DashMap;
 use receive::{Handler, Typed};
 use send::Pending;
 use std::{
-    collections::HashMap,
     marker::PhantomData,
     sync::{Arc, RwLock, atomic::AtomicU64},
     time::Duration,
@@ -88,7 +88,7 @@ pub struct Remote {
 struct Shared {
     cluster: Cluster,
     call_timeout: Duration,
-    handlers: RwLock<HashMap<Id, Arc<dyn Handler>>>,
+    handlers: DashMap<Id, Arc<dyn Handler>>,
     /// Set while the node runs.
     running: RwLock<Option<Running>>,
     next_call: AtomicU64,
@@ -113,7 +113,7 @@ impl Remote {
             shared: Arc::new(Shared {
                 cluster,
                 call_timeout,
-                handlers: RwLock::new(HashMap::new()),
+                handlers: DashMap::new(),
                 running: RwLock::new(None),
                 next_call: AtomicU64::new(0),
             }),
@@ -128,8 +128,6 @@ impl Remote {
     pub fn register<M: RemoteMessage>(&self) -> &Self {
         self.shared
             .handlers
-            .write()
-            .expect("Not poisoned")
             .insert(M::Id, Arc::new(Typed::<M>(PhantomData)));
         self
     }

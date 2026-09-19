@@ -19,8 +19,8 @@ use zestors::{
 use zestors_distr::{
     Cluster, ClusterConfig, ClusterNode, ClusterNodeError, Decode, DecodeError, Encode,
     EncodeError, GlobalPid, Remote, RemoteAccepts, RemoteAddress, RemoteCallError,
-    RemoteCallOptions, RemoteCastError, RemoteError, RemoteReplyError, Seed, StableId,
-    sim::SimNetwork,
+    RemoteCallOptions, RemoteCastError, RemoteError, RemoteReceipt as _, RemoteReplyError, Seed,
+    StableId, sim::SimNetwork,
 };
 
 // Messages. All but `Reverse` cross the network with serde.

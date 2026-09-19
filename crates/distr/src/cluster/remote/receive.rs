@@ -377,10 +377,8 @@ async fn deliver(
 ) -> Result<Option<ReplyFuture>, RemoteError> {
     let handler = shared
         .handlers
-        .read()
-        .expect("Not poisoned")
         .get(&msg)
-        .cloned()
+        .map(|handler| handler.clone())
         .ok_or(RemoteError::UnknownMessage)?;
     let address = pid.address().ok_or(RemoteError::NoSuchActor)?;
     handler.deliver(address, payload, reply).await
