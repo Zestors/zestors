@@ -1,7 +1,8 @@
 //! The sending side: [`RemoteAddress`], and how a message is put on its way.
 
 use super::{
-    Decode, Remote, RemoteAccepts, RemoteCallOptions, RemoteCastError, RemoteMessage, RemoteReply,
+    Decode, Remote, RemoteAccepts, RemoteCallOptions, RemoteCastError, RemoteMessage,
+    RemoteOpError, RemoteReceipt as _, RemoteReply,
     context::{Exports, Wire},
     reply::RemoteKind,
     wire::Frame,
@@ -163,6 +164,23 @@ impl<C: Context> RemoteAddress<C> {
     /// Encodes `msg` and finds the lane to the node, as a call if the message
     /// expects a reply, else as a cast. For a call, what to wait on for the
     /// reply is set up, so that a reply can't beat it.
+    /// Calls one of the [operations](super::ops) on the actor, whatever the
+    /// actor accepts.
+    pub(super) async fn call_op<M: RemoteMessage>(
+        &self,
+        msg: M,
+    ) -> Result<M::Output, RemoteOpError> {
+        let (prepared, waiting) = match self.prepare(&msg, Default::default()) {
+            Ok(prepared) => prepared,
+            Err(refusal) => return Err(refusal.with(()).into()),
+        };
+        if prepared.lane.send(prepared.frame).await.is_err() {
+            return Err(RemoteCastError::Unreachable(()).into());
+        }
+        prepared.exports.commit();
+        Ok(M::remote_receipt(waiting).wait().await?)
+    }
+
     fn prepare<M: RemoteMessage>(
         &self,
         msg: &M,

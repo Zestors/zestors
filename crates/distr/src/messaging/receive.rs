@@ -173,6 +173,19 @@ impl Router {
     }
 
     fn route(&mut self, target: Name, work: Work) {
+        // Operations on the actor itself, such as signals, don't wait behind
+        // its messages, as they don't locally.
+        let bypasses_queue = self
+            .shared
+            .handlers
+            .get(&work.msg)
+            .is_some_and(|handler| handler.bypasses_queue());
+        if bypasses_queue {
+            let (shared, started) = (self.shared.clone(), self.started.clone());
+            tokio::spawn(async move { process(&shared, &started, &target, work).await });
+            return;
+        }
+
         let len = work.payload.len();
         let work = match self.routes.get(&target) {
             Some(route) => {
@@ -300,34 +313,39 @@ async fn actor_task(
         };
 
         queued.release(work.payload.len());
-        let Work {
-            from,
-            msg,
-            requests,
-            payload,
-            call_id,
-        } = work;
-        let wire = Wire::new(shared.clone(), started.clone(), from.clone());
-        match deliver(&shared, wire, &name, msg, payload, call_id.is_some()).await {
-            Ok(Some(waiting)) => {
-                // Waiting for the actor to answer mustn't hold up the next message.
-                let (shared, links) = (shared.clone(), started.links.clone());
-                tokio::spawn(async move {
-                    let result = waiting.await;
-                    if let Some(call_id) = call_id {
-                        reply(&shared, &links, &from, call_id, result).await;
-                    }
-                });
+        process(&shared, &started, &name, work).await;
+    }
+}
+
+/// Delivers one message to the actor `name`, and sends its reply when it comes.
+async fn process(shared: &Arc<Shared>, started: &Started, name: &Name, work: Work) {
+    let Work {
+        from,
+        msg,
+        requests,
+        payload,
+        call_id,
+    } = work;
+    let wire = Wire::new(shared.clone(), started.clone(), from.clone());
+    match deliver(shared, wire, name, msg, payload, call_id.is_some()).await {
+        Ok(Some(waiting)) => {
+            // Waiting for the actor to answer mustn't hold up the next message.
+            let (shared, links) = (shared.clone(), started.links.clone());
+            tokio::spawn(async move {
+                let result = waiting.await;
+                if let Some(call_id) = call_id {
+                    reply(&shared, &links, &from, call_id, result).await;
+                }
+            });
+        }
+        Ok(None) => {}
+        Err(error) => {
+            if call_id.is_none() {
+                tracing::debug!(%name, "Could not deliver a message that expected no reply: {error}");
             }
-            Ok(None) => {}
-            Err(error) => {
-                if call_id.is_none() {
-                    tracing::debug!(%name, "Could not deliver a message that expected no reply: {error}");
-                }
-                // Whoever waits for an answer to this message learns it isn't coming.
-                for id in call_id.into_iter().chain(requests) {
-                    reply(&shared, &started.links, &from, id, Err(error.clone())).await;
-                }
+            // Whoever waits for an answer to this message learns it isn't coming.
+            for id in call_id.into_iter().chain(requests) {
+                reply(shared, &started.links, &from, id, Err(error.clone())).await;
             }
         }
     }

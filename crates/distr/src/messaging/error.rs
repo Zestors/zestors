@@ -90,6 +90,19 @@ pub enum RemoteReplyError {
     Decode(#[from] DecodeError),
 }
 
+/// An operation on a remote actor failed, see
+/// [`RemoteActorOps`](super::RemoteActorOps).
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum RemoteOpError {
+    /// The request couldn't be sent.
+    #[error(transparent)]
+    NotSent(#[from] RemoteCastError<()>),
+    /// The request was sent, but no answer came.
+    #[error(transparent)]
+    Reply(#[from] RemoteReplyError),
+}
+
 /// A call to a remote actor failed.
 #[derive(Debug, thiserror::Error)]
 pub enum RemoteCallError<M> {

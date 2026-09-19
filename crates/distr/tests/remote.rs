@@ -13,14 +13,14 @@ use tokio::task::JoinHandle;
 use zestors::{
     interface::{Envelope, Interface, Message},
     prelude::*,
-    runtime::{Dyn, Inbox, Name, spawn},
+    runtime::{ActorStatus, Dyn, Inbox, Name, spawn},
     supervisor::Supervisor,
 };
 use zestors_distr::{
     Cluster, ClusterConfig, ClusterNode, ClusterNodeError, Decode, DecodeError, Encode,
-    EncodeError, GlobalName, Remote, RemoteAccepts, RemoteAddress, RemoteCallError,
-    RemoteCallOptions, RemoteCastError, RemoteError, RemoteReceipt as _, RemoteReplyError,
-    RemoteRequest, Seed, StableId, sim::SimNetwork,
+    EncodeError, GlobalName, Remote, RemoteAccepts, RemoteActorOps, RemoteAddress, RemoteCallError,
+    RemoteCallOptions, RemoteCastError, RemoteError, RemoteOpError, RemoteReceipt as _,
+    RemoteReplyError, RemoteRequest, Seed, StableId, sim::SimNetwork,
 };
 
 // Messages. All but `Reverse` cross the network with serde.
@@ -727,4 +727,121 @@ async fn a_request_in_a_message_that_is_not_sent_fails_its_reply() {
 fn a_request_is_only_serialized_as_part_of_a_sent_message() {
     let (request, _reply) = RemoteRequest::<u32>::new();
     assert!(postcard::to_allocvec(&request).is_err());
+}
+
+/// Signals sent to an actor on another node work as they do locally.
+#[tokio::test(start_paused = true)]
+async fn an_actor_on_another_node_can_be_signalled() {
+    let pair = Pair::start().await;
+    let local = worker("ops-signal", Log::default());
+    local.watch_init().await.unwrap();
+    let remote = pair.on_b::<WorkerInterface>("ops-signal");
+
+    assert_eq!(remote.status().await.unwrap(), ActorStatus::Running);
+
+    assert!(remote.signal_suspend().await.unwrap());
+    remote.ping().await.unwrap();
+    assert_eq!(remote.status().await.unwrap(), ActorStatus::Suspended);
+
+    assert!(remote.signal_resume().await.unwrap());
+    remote.ping().await.unwrap();
+    assert_eq!(remote.status().await.unwrap(), ActorStatus::Running);
+
+    assert!(remote.signal_shutdown().await.unwrap());
+    assert!(within(local.watch_exit()).await.is_ok());
+    assert!(remote.is_dead().await.unwrap());
+    assert!(!remote.signal_shutdown().await.unwrap(), "Already dead");
+}
+
+/// A signal isn't stuck behind the messages queued for a busy actor. Delivering
+/// each of them to a mailbox that is filling up is slowed down, so many
+/// queued messages take a long time to get through.
+#[tokio::test(start_paused = true)]
+async fn a_signal_does_not_wait_for_the_actors_messages() {
+    let pair = Pair::start().await;
+    let _worker = worker("ops-busy", Log::default());
+    let remote = pair.on_b::<WorkerInterface>("ops-busy");
+
+    let _busy = remote.cast(Slow(600_000)).await.unwrap();
+    for i in 0..2_000 {
+        remote.cast(Note(i)).await.unwrap();
+    }
+
+    let started = tokio::time::Instant::now();
+    assert!(remote.signal_shutdown().await.unwrap());
+    let info = remote.info().await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "The signal waited for the actor: {:?}",
+        started.elapsed()
+    );
+    assert!(info.snapshot.msg_len > 0, "{:?}", info.snapshot);
+    assert!(remote.msg_len().await.unwrap() > 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn what_an_actor_accepts_can_be_asked() {
+    let pair = Pair::start().await;
+    let _worker = worker("ops-accepts", Log::default());
+    let remote = pair.on_b::<WorkerInterface>("ops-accepts");
+
+    assert!(remote.accepts::<Double>().await.unwrap());
+    assert!(remote.accepts::<Note>().await.unwrap());
+    // Registered on the node, but not accepted by the actor.
+    assert!(!remote.accepts::<Unwanted>().await.unwrap());
+    // Not registered on the node.
+    assert!(!remote.accepts::<Unknown>().await.unwrap());
+
+    let members = remote.members().await.unwrap();
+    assert!(members.contains(&Double::Id) && members.contains(&Note::Id));
+    assert!(!members.contains(&Unwanted::Id));
+    assert!(
+        remote
+            .is_superset_of(&[Double::Id, Note::Id])
+            .await
+            .unwrap()
+    );
+    assert!(
+        !remote
+            .is_superset_of(&[Double::Id, Unwanted::Id])
+            .await
+            .unwrap()
+    );
+
+    assert!(!remote.reached_backpressure().await.unwrap());
+    assert!(remote.msg_is_empty().await.unwrap());
+    assert!(remote.signal_is_empty().await.unwrap());
+    assert!(!remote.is_exiting().await.unwrap());
+    let snapshot = remote.snapshot().await.unwrap();
+    assert_eq!(&snapshot.name, remote.target().name());
+    assert!(remote.last_spawned_at().await.unwrap().is_some());
+    assert_eq!(remote.node().to_string(), "node-b");
+}
+
+#[tokio::test(start_paused = true)]
+async fn operations_report_why_they_failed() {
+    let pair = Pair::start().await;
+
+    let nobody = pair.on_b::<WorkerInterface>("ops-nobody");
+    assert!(matches!(
+        nobody.ping().await,
+        Err(RemoteOpError::Reply(RemoteReplyError::Remote(
+            RemoteError::NoSuchActor
+        )))
+    ));
+    assert!(matches!(
+        nobody.info().await,
+        Err(RemoteOpError::Reply(RemoteReplyError::Remote(
+            RemoteError::NoSuchActor
+        )))
+    ));
+
+    let stranger: RemoteAddress<WorkerInterface> = pair
+        .a
+        .remote
+        .address(GlobalName::new("ops-nobody", "node-z"));
+    assert!(matches!(
+        stranger.signal_shutdown().await,
+        Err(RemoteOpError::NotSent(RemoteCastError::NotAMember(())))
+    ));
 }

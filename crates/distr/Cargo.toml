@@ -27,6 +27,7 @@ dashmap.workspace = true
 postcard = { version = "1.1", features = ["use-std"] }
 type-sets.workspace = true
 tokio-util = { version = "0.7", features = ["time"] }
+jiff.workspace = true
 
 [dev-dependencies]
 zestors.workspace = true

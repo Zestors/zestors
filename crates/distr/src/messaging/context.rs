@@ -55,6 +55,10 @@ impl Wire {
     }
 
     /// Runs `f`, which encodes or decodes one message, with this as its [`current`] wire.
+    pub(super) fn shared(&self) -> &Arc<Shared> {
+        &self.shared
+    }
+
     pub(super) fn scope<R>(&self, f: impl FnOnce() -> R) -> R {
         let previous = CURRENT.with(|current| current.borrow_mut().replace(self.clone()));
         let _restore = Restore(previous);

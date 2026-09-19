@@ -46,11 +46,13 @@
 //! ```
 
 mod accepts;
+mod actor_ops;
 mod codec;
 mod context;
 mod error;
 mod handler;
 mod message;
+mod ops;
 mod receive;
 mod reply;
 mod request;
@@ -58,9 +60,11 @@ mod send;
 mod wire;
 
 pub use accepts::{RemoteAccepts, RemoteCallOptions};
+pub use actor_ops::{RemoteActorOps, RemoteActorRef};
 pub use codec::{Decode, DecodeError, Encode, EncodeError};
-pub use error::{RemoteCallError, RemoteCastError, RemoteError, RemoteReplyError};
+pub use error::{RemoteCallError, RemoteCastError, RemoteError, RemoteOpError, RemoteReplyError};
 pub use message::RemoteMessage;
+pub use ops::RemoteInfo;
 pub use reply::{RemoteReceipt, RemoteReply};
 pub use request::RemoteRequest;
 pub use send::RemoteAddress;
@@ -117,12 +121,14 @@ impl Shared {
 
 impl Remote {
     pub(super) fn new(cluster: Cluster, call_timeout: Duration, shards: u8) -> Self {
+        let handlers = DashMap::new();
+        ops::register(&handlers);
         Self {
             shared: Arc::new(Shared {
                 cluster,
                 call_timeout,
                 shards,
-                handlers: DashMap::new(),
+                handlers,
                 running: RwLock::new(None),
                 next_call: AtomicU64::new(0),
             }),
