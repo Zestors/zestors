@@ -1,4 +1,4 @@
-use crate::{Addr, NodeId};
+use crate::{NodeAddr, NodeId};
 use std::time::Duration;
 
 /// A node to contact when joining the cluster.
@@ -6,11 +6,11 @@ use std::time::Duration;
 pub struct Seed {
     /// The seed's node name, which its certificate must carry.
     pub node: NodeId,
-    pub addr: Addr,
+    pub addr: NodeAddr,
 }
 
 impl Seed {
-    pub fn new(node: impl Into<NodeId>, addr: impl Into<Addr>) -> Self {
+    pub fn new(node: impl Into<NodeId>, addr: impl Into<NodeAddr>) -> Self {
         Self {
             node: node.into(),
             addr: addr.into(),

@@ -4,7 +4,7 @@ mod error;
 pub use config::ClusterConfig;
 pub use error::ClusterNodeError;
 
-use super::{Addr, Cluster, Member, backend::LocalNode, generation, membership::Membership};
+use super::{Cluster, Member, NodeAddr, backend::LocalNode, generation, membership::Membership};
 use std::{net::SocketAddr, time::Duration};
 use zestors_supervision::{ChildSpec, RestartIntensity};
 use zestors_supervisor::{Node, NodeShutdown, SupervisorBlueprint};
@@ -35,7 +35,7 @@ impl ClusterNode {
             addr: config
                 .advertise
                 .clone()
-                .unwrap_or_else(|| Addr::from(SocketAddr::from(([0, 0, 0, 0], 0)))),
+                .unwrap_or_else(|| NodeAddr::from(SocketAddr::from(([0, 0, 0, 0], 0)))),
             generation: 0,
         });
         Self {

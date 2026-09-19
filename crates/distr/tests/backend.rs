@@ -15,7 +15,7 @@ use std::{
 use tokio::sync::mpsc;
 use zestors::{prelude::*, supervisor::Supervisor};
 use zestors_distr::{
-    Addr, ClusterConfig, ClusterEvent, ClusterNode, NodeId, Seed,
+    ClusterConfig, ClusterEvent, ClusterNode, NodeAddr, NodeId, Seed,
     backend::{Backend, Connection, DatagramError, Endpoint, LocalNode, RecvStream, SendStream},
 };
 
@@ -24,28 +24,31 @@ type Listener = (NodeId, mpsc::Sender<HubConnection>);
 /// Connects nodes of one process to each other through channels.
 #[derive(Clone, Default)]
 struct Hub {
-    listeners: Arc<Mutex<HashMap<Addr, Listener>>>,
+    listeners: Arc<Mutex<HashMap<NodeAddr, Listener>>>,
 }
 
 struct HubBackend {
     hub: Hub,
-    addr: Addr,
+    addr: NodeAddr,
+    /// The name the hub knows this node by, if not the one it was started with.
+    hub_name: Option<NodeId>,
 }
 
 impl Backend for HubBackend {
     type Endpoint = HubEndpoint;
 
     async fn start(self, local: LocalNode) -> io::Result<HubEndpoint> {
+        let node = self.hub_name.unwrap_or(local.id);
         let (tx, rx) = mpsc::channel(16);
         self.hub
             .listeners
             .lock()
             .unwrap()
-            .insert(self.addr.clone(), (local.id.clone(), tx));
+            .insert(self.addr.clone(), (node.clone(), tx));
         Ok(HubEndpoint {
             hub: self.hub,
             addr: self.addr,
-            node: local.id,
+            node,
             incoming: tokio::sync::Mutex::new(rx),
         })
     }
@@ -53,7 +56,7 @@ impl Backend for HubBackend {
 
 struct HubEndpoint {
     hub: Hub,
-    addr: Addr,
+    addr: NodeAddr,
     node: NodeId,
     incoming: tokio::sync::Mutex<mpsc::Receiver<HubConnection>>,
 }
@@ -61,11 +64,11 @@ struct HubEndpoint {
 impl Endpoint for HubEndpoint {
     type Connection = HubConnection;
 
-    fn local_addr(&self) -> io::Result<Addr> {
+    fn local_addr(&self) -> io::Result<NodeAddr> {
         Ok(self.addr.clone())
     }
 
-    async fn connect(&self, addr: &Addr, node: &NodeId) -> io::Result<HubConnection> {
+    async fn connect(&self, addr: &NodeAddr, node: &NodeId) -> io::Result<HubConnection> {
         let incoming = match self.hub.listeners.lock().unwrap().get(addr) {
             Some((name, tx)) if name == node => tx.clone(),
             _ => return Err(io::ErrorKind::ConnectionRefused.into()),
@@ -146,8 +149,8 @@ impl Connection for HubConnection {
         std::future::pending().await
     }
 
-    fn authenticates(&self, node: &NodeId) -> bool {
-        *node == self.peer
+    fn peer(&self) -> &NodeId {
+        &self.peer
     }
 
     fn is_closed(&self) -> bool {
@@ -159,20 +162,26 @@ impl Connection for HubConnection {
     }
 }
 
-fn addr(n: u8) -> Addr {
-    Addr::new(format!("hub-{n}"))
+fn addr(n: u8) -> NodeAddr {
+    NodeAddr::new(format!("hub-{n}"))
 }
 
-fn config(hub: &Hub, name: &str, n: u8) -> ClusterConfig {
+fn fast_foca() -> foca::Config {
     let mut foca = foca::Config::new_lan(NonZeroU32::new(3).unwrap());
     foca.probe_period = Duration::from_millis(100);
     foca.probe_rtt = Duration::from_millis(50);
     foca.suspect_to_down_after = Duration::from_millis(200);
+    foca
+}
+
+fn config(hub: &Hub, name: &str, n: u8) -> ClusterConfig {
+    let foca = fast_foca();
     ClusterConfig::with_backend(
         name,
         HubBackend {
             hub: hub.clone(),
             addr: addr(n),
+            hub_name: None,
         },
     )
     .foca_config(foca)
@@ -226,4 +235,65 @@ async fn nodes_join_over_a_custom_backend() {
 
     a_shutdown.shutdown();
     a_task.await.unwrap().unwrap();
+}
+
+/// The backend says who a node is. One that calls itself by another name than
+/// the backend knows it by doesn't get in under that name.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_node_cannot_get_in_under_a_name_the_backend_does_not_know_it_by() {
+    let hub = Hub::default();
+    let a = ClusterNode::new(
+        Supervisor::blueprint().rand_pid(),
+        config(&hub, "node-a", 1),
+    )
+    .with_exit_delay(Duration::ZERO);
+    let a_cluster = a.cluster();
+    let a_shutdown = a.shutdown_handle();
+    let a_task = tokio::spawn(a.run());
+
+    // Known to the hub, and so to node-a, as "mallory", but gossiping as node-b.
+    let mallory = ClusterConfig::with_backend(
+        "node-b",
+        HubBackend {
+            hub: hub.clone(),
+            addr: addr(2),
+            hub_name: Some(NodeId::new("mallory")),
+        },
+    )
+    .seed(Seed::new("node-a", addr(1)))
+    .foca_config(fast_foca());
+    let mallory = ClusterNode::new(Supervisor::blueprint().rand_pid(), mallory)
+        .with_exit_delay(Duration::ZERO);
+    let mallory_shutdown = mallory.shutdown_handle();
+    let mallory_task = tokio::spawn(mallory.run());
+
+    // An honest node joins meanwhile, so we know node-a is listening.
+    let c = ClusterNode::new(
+        Supervisor::blueprint().rand_pid(),
+        config(&hub, "node-c", 3).seed(Seed::new("node-a", addr(1))),
+    )
+    .with_exit_delay(Duration::ZERO);
+    let c_shutdown = c.shutdown_handle();
+    let c_task = tokio::spawn(c.run());
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            if a_cluster.member(&NodeId::new("node-c")).is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("The honest node joins");
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(a_cluster.member(&NodeId::new("node-b")).is_none());
+    assert_eq!(a_cluster.members().len(), 1);
+
+    for shutdown in [a_shutdown, mallory_shutdown, c_shutdown] {
+        shutdown.shutdown();
+    }
+    for task in [a_task, mallory_task, c_task] {
+        task.await.unwrap().unwrap();
+    }
 }

@@ -6,7 +6,7 @@ use super::{
     wire::{MAX_MESSAGE_SIZE, write_frame},
 };
 use crate::{
-    Addr, ClusterTimings, NodeId,
+    ClusterTimings, NodeAddr, NodeId,
     backend::{DatagramError, RecvStream, SendStream},
 };
 use bytes::{BufMut, Bytes, BytesMut};
@@ -71,7 +71,7 @@ struct Ordered {
 pub(super) async fn lane(
     inner: Arc<Inner>,
     node: NodeId,
-    addr: Addr,
+    addr: NodeAddr,
     protocol: Protocol,
     delivery: Delivery,
     health: Arc<Mutex<Health>>,

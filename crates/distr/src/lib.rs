@@ -31,8 +31,8 @@ pub use cluster::backend;
 #[cfg(feature = "sim")]
 pub use cluster::sim;
 pub use cluster::{
-    Addr, Cluster, ClusterConfig, ClusterEvent, ClusterNode, ClusterNodeError, ClusterSnapshot,
-    ClusterTimings, Member, NodeStatus, Seed,
+    Cluster, ClusterConfig, ClusterEvent, ClusterNode, ClusterNodeError, ClusterSnapshot,
+    ClusterTimings, Member, NodeAddr, NodeStatus, Seed,
 };
 #[cfg(feature = "quic")]
 pub use cluster::{Tls, TlsError};

@@ -30,7 +30,7 @@
 mod fabric;
 
 use super::{
-    Addr, Cluster, ClusterTimings, Member, Seed,
+    Cluster, ClusterTimings, Member, NodeAddr, Seed,
     backend::{Backend, LocalNode},
     link::{Links, Starter},
     membership::{Membership, Options},
@@ -97,7 +97,7 @@ impl SimNetwork {
     ///
     /// Every node needs its own address. Nodes reach each other by the
     /// addresses they were started with.
-    pub fn backend(&self, addr: impl Into<Addr>) -> SimBackend {
+    pub fn backend(&self, addr: impl Into<NodeAddr>) -> SimBackend {
         SimBackend {
             fabric: self.fabric.clone(),
             addr: addr.into(),
@@ -155,7 +155,7 @@ impl SimNetwork {
 /// [`SimNetwork::backend`].
 pub struct SimBackend {
     fabric: Fabric,
-    addr: Addr,
+    addr: NodeAddr,
 }
 
 impl Backend for SimBackend {

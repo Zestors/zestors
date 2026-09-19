@@ -3,7 +3,7 @@
 //! allocation per opened stream, accepted stream and received datagram.
 
 use crate::{
-    Addr, NodeId,
+    NodeAddr, NodeId,
     backend::{Backend, Connection, DatagramError, Endpoint, LocalNode, RecvStream, SendStream},
 };
 use bytes::Bytes;
@@ -16,7 +16,7 @@ pub(super) trait DynConnection: Send + Sync {
     fn accept_stream(&self) -> BoxFuture<'_, io::Result<(SendStream, RecvStream)>>;
     fn send_datagram(&self, data: Bytes) -> Result<(), DatagramError>;
     fn recv_datagram(&self) -> BoxFuture<'_, io::Result<Bytes>>;
-    fn authenticates(&self, node: &NodeId) -> bool;
+    fn peer(&self) -> &NodeId;
     fn is_closed(&self) -> bool;
     fn close(&self);
 }
@@ -38,8 +38,8 @@ impl<C: Connection> DynConnection for C {
         Box::pin(Connection::recv_datagram(self))
     }
 
-    fn authenticates(&self, node: &NodeId) -> bool {
-        Connection::authenticates(self, node)
+    fn peer(&self) -> &NodeId {
+        Connection::peer(self)
     }
 
     fn is_closed(&self) -> bool {
@@ -52,10 +52,10 @@ impl<C: Connection> DynConnection for C {
 }
 
 pub(super) trait DynEndpoint: Send + Sync {
-    fn local_addr(&self) -> io::Result<Addr>;
+    fn local_addr(&self) -> io::Result<NodeAddr>;
     fn connect<'a>(
         &'a self,
-        addr: &'a Addr,
+        addr: &'a NodeAddr,
         node: &'a NodeId,
     ) -> BoxFuture<'a, io::Result<Arc<dyn DynConnection>>>;
     fn accept(&self) -> BoxFuture<'_, io::Result<Arc<dyn DynConnection>>>;
@@ -63,13 +63,13 @@ pub(super) trait DynEndpoint: Send + Sync {
 }
 
 impl<E: Endpoint> DynEndpoint for E {
-    fn local_addr(&self) -> io::Result<Addr> {
+    fn local_addr(&self) -> io::Result<NodeAddr> {
         Endpoint::local_addr(self)
     }
 
     fn connect<'a>(
         &'a self,
-        addr: &'a Addr,
+        addr: &'a NodeAddr,
         node: &'a NodeId,
     ) -> BoxFuture<'a, io::Result<Arc<dyn DynConnection>>> {
         Box::pin(async move {

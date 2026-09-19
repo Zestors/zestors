@@ -15,11 +15,13 @@
 //!
 //! # What a backend must provide
 //!
-//! - **Named nodes.** [`Endpoint::connect`] reaches the node with the given
-//!   name at the given address, and fails if it isn't that node.
-//! - **Authentication.** [`Connection::authenticates`] says whether the peer
-//!   on the other end may claim to be a given node, for example by checking a
-//!   certificate. Without that, any node could impersonate another.
+//! - **Verified identity.** [`Connection::peer`] is the node on the other end,
+//!   established by the backend and not taken from the peer's word: from a
+//!   certificate, a key, or credentials. [`Endpoint::connect`] reaches the node
+//!   with the given name at the given address, and fails if it isn't that
+//!   node; [`Endpoint::accept`] derives the name of whoever connected. The
+//!   cluster trusts it completely, since without it any node could
+//!   impersonate another.
 //! - **Streams.** Bytes written to a stream arrive complete and in order, or
 //!   not at all once the connection is lost. Streams are independent: a stall
 //!   on one must not hold up the others, which is what a backend with native
@@ -33,7 +35,7 @@ mod quic;
 #[cfg(feature = "quic")]
 pub use quic::{Quic, QuicTimings, Tls, TlsError};
 
-use crate::{Addr, NodeId};
+use crate::{NodeAddr, NodeId};
 use bytes::Bytes;
 use std::{future::Future, io, time::Duration};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -71,19 +73,20 @@ pub trait Endpoint: Send + Sync + 'static {
 
     /// The address other nodes reach this one on. The node's configuration can
     /// override it, for example behind NAT.
-    fn local_addr(&self) -> io::Result<Addr>;
+    fn local_addr(&self) -> io::Result<NodeAddr>;
 
     /// Connects to the node `node` at `addr`. Fails if what answers there is
-    /// not that node.
+    /// not that node: the connection's [`peer`](Connection::peer) is `node`.
     fn connect(
         &self,
-        addr: &Addr,
+        addr: &NodeAddr,
         node: &NodeId,
     ) -> impl Future<Output = io::Result<Self::Connection>> + Send;
 
     /// The next connection a peer has opened to this node, once it is ready to
-    /// be used. Fails once the endpoint is closed. Connections that fail to be
-    /// set up are not reported.
+    /// be used and the peer's identity is established. Fails once the endpoint
+    /// is closed. Connections that fail to be set up, or whose peer can't be
+    /// identified, are not reported.
     fn accept(&self) -> impl Future<Output = io::Result<Self::Connection>> + Send;
 
     /// Closes the endpoint and every connection on it, waiting at most `grace`
@@ -107,8 +110,8 @@ pub trait Connection: Send + Sync + 'static {
     /// The next datagram from the peer. Fails once the connection is closed.
     fn recv_datagram(&self) -> impl Future<Output = io::Result<Bytes>> + Send;
 
-    /// Whether the peer proved that it may be the node `node`.
-    fn authenticates(&self, node: &NodeId) -> bool;
+    /// The node on the other end, as verified by the backend.
+    fn peer(&self) -> &NodeId;
 
     /// Whether the connection is closed, by either side or by an error.
     fn is_closed(&self) -> bool;

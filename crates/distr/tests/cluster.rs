@@ -212,33 +212,34 @@ fn config(name: &str, addr: SocketAddr, tls: Tls) -> ClusterConfig {
         .foca_config(fast_foca_config())
 }
 
-/// Holding a certificate from the cluster CA is not enough to claim another
-/// node's name: the certificate must be valid for the claimed name.
+/// A node is who its certificate says. One that is configured with another
+/// name than its certificate carries doesn't start, and can't get in as anyone.
 #[tokio::test(flavor = "multi_thread")]
-async fn node_cannot_claim_a_name_its_certificate_lacks() {
+async fn node_cannot_use_a_name_its_certificate_lacks() {
     let ca = Ca::new();
     let (a_addr, b_addr, m_addr) = (free_addr(), free_addr(), free_addr());
 
     let a = start_with(config("node-a", a_addr, ca.tls("node-a")));
 
-    // Mallory holds a valid certificate, but for "mallory", and claims to be node-b.
+    // Mallory holds a valid certificate, but for "mallory", and calls herself node-b.
     let mallory =
         start_with(config("node-b", m_addr, ca.tls("mallory")).seed(Seed::new("node-a", a_addr)));
+    let error = within(mallory.handle)
+        .await
+        .unwrap()
+        .expect_err("Mallory can't start");
+    assert!(matches!(error, ClusterNodeError::Backend(_)), "{error}");
 
-    // The honest node-b is unaffected and can join.
+    // The honest node-b2 is unaffected and can join.
     let b =
         start_with(config("node-b2", b_addr, ca.tls("node-b2")).seed(Seed::new("node-a", a_addr)));
     eventually("the honest node joins", || {
         a.cluster.member(&NodeId::new("node-b2")).is_some()
     })
     .await;
-
-    // Give the impostor ample time to (wrongly) get in.
-    tokio::time::sleep(Duration::from_secs(1)).await;
     assert!(a.cluster.member(&NodeId::new("node-b")).is_none());
-    assert!(mallory.cluster.members().is_empty());
 
-    for node in [&a, &b, &mallory] {
+    for node in [&a, &b] {
         node.shutdown.signal_shutdown();
     }
 }

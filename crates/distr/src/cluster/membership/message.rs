@@ -1,5 +1,6 @@
-use crate::cluster::link::Delivery;
+use crate::{Member, NodeId, cluster::link::Delivery};
 use bytes::{BufMut, Bytes, BytesMut};
+use foca::{Codec, PostcardCodec};
 
 const KIND_GOSSIP: u8 = 1;
 const KIND_DEPARTURE: u8 = 2;
@@ -49,6 +50,17 @@ impl Message {
     }
 }
 
+/// The node that a gossip packet says it is from.
+///
+/// Members gossip about each other, but every packet also names its own sender,
+/// and foca answers whoever that is. So it has to be the node that the packet
+/// came from, which the backend has established; otherwise any member could
+/// speak for another.
+pub(super) fn sender_of(packet: &[u8]) -> Option<NodeId> {
+    let header = Codec::<Member>::decode_header(&mut PostcardCodec, packet).ok()?;
+    Some(header.src.node)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,5 +79,39 @@ mod tests {
     fn garbage_is_not_a_message() {
         assert_eq!(Message::decode(Bytes::new()), None);
         assert_eq!(Message::decode(Bytes::from_static(&[0xff, 1, 2])), None);
+    }
+
+    /// A gossip packet as a node called `from` would send it.
+    fn packet_from(from: &str) -> Vec<u8> {
+        use foca::{AccumulatingRuntime, Config, Foca};
+        use rand::{SeedableRng, rngs::StdRng};
+
+        let member = |name: &str| Member {
+            node: NodeId::new(name),
+            addr: format!("{name}:7000").into(),
+            generation: 1,
+        };
+        let mut foca = Foca::new(
+            member(from),
+            Config::simple(),
+            StdRng::seed_from_u64(1),
+            PostcardCodec,
+        );
+        let mut runtime = AccumulatingRuntime::new();
+        foca.announce(member("node-target"), &mut runtime).unwrap();
+        runtime
+            .to_send()
+            .expect("An announcement is sent")
+            .1
+            .to_vec()
+    }
+
+    #[test]
+    fn a_packet_names_its_sender() {
+        assert_eq!(
+            sender_of(&packet_from("node-a")),
+            Some(NodeId::new("node-a"))
+        );
+        assert_eq!(sender_of(b"not a packet"), None);
     }
 }

@@ -19,7 +19,7 @@ mod wire;
 #[cfg(all(test, feature = "quic"))]
 mod tests;
 
-use crate::{Addr, ClusterTimings, Member, NodeId, backend::LocalNode};
+use crate::{ClusterTimings, Member, NodeAddr, NodeId, backend::LocalNode};
 use bytes::Bytes;
 use dynamic::{DynConnection, DynEndpoint, ErasedBackend};
 use lane::{Health, lane};
@@ -113,7 +113,7 @@ struct Registered {
 /// A pipe to a peer for one protocol and delivery.
 struct Lane {
     tx: mpsc::Sender<Bytes>,
-    addr: Addr,
+    addr: NodeAddr,
 }
 
 type LaneKey = (NodeId, Protocol, Delivery);
@@ -151,7 +151,7 @@ impl Starter {
         self,
         local: LocalNode,
         timings: ClusterTimings,
-    ) -> io::Result<(Links, Addr, mpsc::Receiver<PeerEvent>)> {
+    ) -> io::Result<(Links, NodeAddr, mpsc::Receiver<PeerEvent>)> {
         let (id, generation) = (local.id.clone(), local.generation);
         let endpoint = self.0.start(local).await?;
         let addr = endpoint.local_addr()?;
@@ -487,7 +487,11 @@ impl Inner {
     }
 
     /// The connection to `node`, dialing `addr` if there is none yet.
-    async fn connection(self: &Arc<Self>, node: &NodeId, addr: &Addr) -> Result<Conn, BoxError> {
+    async fn connection(
+        self: &Arc<Self>,
+        node: &NodeId,
+        addr: &NodeAddr,
+    ) -> Result<Conn, BoxError> {
         if let Some(conn) = self.live(node) {
             return Ok(conn);
         }
@@ -517,7 +521,6 @@ impl Inner {
             write_hello(
                 &mut send,
                 &Hello {
-                    node: self.local.clone(),
                     generation: self.generation,
                 },
             )
@@ -526,14 +529,9 @@ impl Inner {
         })
         .await??;
 
-        if hello.node != *node {
-            conn.close();
-            return Err(format!("expected node {node}, found {}", hello.node).into());
-        }
-        self.authenticate(&conn, &hello.node)?;
-
-        if self.register(&hello.node, hello.generation, &conn, &self.local) {
-            self.spawn_receive(conn.clone(), hello.node, hello.generation);
+        let peer = conn.peer().clone();
+        if self.register(&peer, hello.generation, &conn, &self.local) {
+            self.spawn_receive(conn.clone(), peer, hello.generation);
             Ok(conn)
         } else {
             // The peer dialed us at the same time and that connection is preferred.
@@ -548,16 +546,6 @@ impl Inner {
             id: self.next_conn.fetch_add(1, Ordering::Relaxed),
             conn,
         }
-    }
-
-    /// Checks that the peer may claim the node name it gave in its [`Hello`].
-    /// Closes `conn` if not.
-    fn authenticate(&self, conn: &Conn, claimed: &NodeId) -> Result<(), BoxError> {
-        if !conn.authenticates(claimed) {
-            conn.close();
-            return Err(format!("peer claiming to be {claimed} rejected").into());
-        }
-        Ok(())
     }
 
     async fn accept_loop(self: Arc<Self>) {
@@ -579,7 +567,6 @@ impl Inner {
             write_hello(
                 &mut send,
                 &Hello {
-                    node: self.local.clone(),
                     generation: self.generation,
                 },
             )
@@ -587,10 +574,10 @@ impl Inner {
             Ok::<_, BoxError>(hello)
         })
         .await??;
-        self.authenticate(&conn, &hello.node)?;
 
-        if self.register(&hello.node, hello.generation, &conn, &hello.node) {
-            self.spawn_receive(conn, hello.node, hello.generation);
+        let peer = conn.peer().clone();
+        if self.register(&peer, hello.generation, &conn, &peer) {
+            self.spawn_receive(conn, peer, hello.generation);
         } else {
             conn.close();
         }

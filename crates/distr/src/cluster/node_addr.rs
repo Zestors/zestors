@@ -8,9 +8,9 @@ use std::{fmt, net::SocketAddr};
 /// that is resolved when connecting. Other backends define their own: a URL, a
 /// key, a name. The cluster only carries it around, which is why it is opaque.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Addr(SmolStr);
+pub struct NodeAddr(SmolStr);
 
-impl Addr {
+impl NodeAddr {
     pub fn new(addr: impl Into<SmolStr>) -> Self {
         Self(addr.into())
     }
@@ -25,25 +25,25 @@ impl Addr {
     }
 }
 
-impl fmt::Display for Addr {
+impl fmt::Display for NodeAddr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-impl From<SocketAddr> for Addr {
+impl From<SocketAddr> for NodeAddr {
     fn from(addr: SocketAddr) -> Self {
         Self(addr.to_string().into())
     }
 }
 
-impl From<&str> for Addr {
+impl From<&str> for NodeAddr {
     fn from(addr: &str) -> Self {
         Self::new(addr)
     }
 }
 
-impl From<String> for Addr {
+impl From<String> for NodeAddr {
     fn from(addr: String) -> Self {
         Self::new(addr)
     }
@@ -56,7 +56,7 @@ mod tests {
     #[test]
     fn socket_addresses_round_trip() {
         let socket: SocketAddr = "10.0.0.1:7000".parse().unwrap();
-        assert_eq!(Addr::from(socket).to_socket_addr(), Some(socket));
-        assert_eq!(Addr::new("db.internal:7000").to_socket_addr(), None);
+        assert_eq!(NodeAddr::from(socket).to_socket_addr(), Some(socket));
+        assert_eq!(NodeAddr::new("db.internal:7000").to_socket_addr(), None);
     }
 }

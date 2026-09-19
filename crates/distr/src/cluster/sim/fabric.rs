@@ -13,7 +13,7 @@
 //! latency, and partitions, which cut every connection across them.
 
 use crate::{
-    Addr, NodeId,
+    NodeAddr, NodeId,
     backend::{Connection, DatagramError, Endpoint, RecvStream, SendStream},
 };
 use bytes::{Bytes, BytesMut};
@@ -44,7 +44,7 @@ pub(super) struct Fabric {
 
 struct State {
     /// The nodes currently listening, by the address they listen on.
-    listeners: HashMap<Addr, Listener>,
+    listeners: HashMap<NodeAddr, Listener>,
     /// Pairs of nodes that can't reach each other, in both directions.
     partitions: HashSet<(NodeId, NodeId)>,
     /// Every connection made, to cut the ones a partition falls across.
@@ -121,7 +121,7 @@ impl Fabric {
     }
 
     /// Starts `node` listening on `addr`, replacing whatever listened there.
-    pub(super) fn bind(&self, node: &str, addr: Addr) -> SimEndpoint {
+    pub(super) fn bind(&self, node: &str, addr: NodeAddr) -> SimEndpoint {
         let (incoming_tx, incoming_rx) = mpsc::channel(INCOMING_QUEUE);
         let mut state = self.state();
         let instance = state.next_instance;
@@ -240,7 +240,7 @@ impl Fabric {
 pub struct SimEndpoint {
     fabric: Fabric,
     node: NodeId,
-    addr: Addr,
+    addr: NodeAddr,
     instance: u64,
     incoming: tokio::sync::Mutex<mpsc::Receiver<SimConnection>>,
     /// Every connection this endpoint has made or accepted.
@@ -267,11 +267,11 @@ impl SimEndpoint {
 impl Endpoint for SimEndpoint {
     type Connection = SimConnection;
 
-    fn local_addr(&self) -> io::Result<Addr> {
+    fn local_addr(&self) -> io::Result<NodeAddr> {
         Ok(self.addr.clone())
     }
 
-    async fn connect(&self, addr: &Addr, node: &NodeId) -> io::Result<SimConnection> {
+    async fn connect(&self, addr: &NodeAddr, node: &NodeId) -> io::Result<SimConnection> {
         let refused = || io::Error::from(io::ErrorKind::ConnectionRefused);
         // Like dialing an address: whoever answers there must be the node we
         // mean, and reachable from here.
@@ -455,10 +455,10 @@ impl Connection for SimConnection {
         }
     }
 
-    /// The fabric checks that whoever answers is the node dialed, and that is
-    /// all the authentication there is.
-    fn authenticates(&self, node: &NodeId) -> bool {
-        *node == self.remote
+    /// The fabric checks that whoever answers is the node dialed, and knows
+    /// who is dialing.
+    fn peer(&self) -> &NodeId {
+        &self.remote
     }
 
     fn is_closed(&self) -> bool {

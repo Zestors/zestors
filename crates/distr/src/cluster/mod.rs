@@ -6,7 +6,6 @@
 //! items, which are visible in this module and nowhere else. The public API is
 //! re-exported from here.
 
-mod addr;
 pub mod backend;
 mod config;
 mod generation;
@@ -14,17 +13,18 @@ mod link;
 mod member;
 mod membership;
 mod node;
+mod node_addr;
 mod updates;
 
 #[cfg(feature = "sim")]
 pub mod sim;
 
-pub use addr::Addr;
 #[cfg(feature = "quic")]
 pub use backend::{Tls, TlsError};
 pub use config::{ClusterTimings, Seed};
 pub use member::Member;
 pub use node::{ClusterConfig, ClusterNode, ClusterNodeError};
+pub use node_addr::NodeAddr;
 
 use crate::NodeId;
 use std::{

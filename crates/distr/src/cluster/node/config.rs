@@ -1,4 +1,4 @@
-use crate::Addr;
+use crate::NodeAddr;
 use crate::{
     ClusterTimings, NodeId, Seed,
     backend::Backend,
@@ -13,7 +13,7 @@ use std::{num::NonZeroU32, path::PathBuf};
 pub struct ClusterConfig {
     pub(super) node_id: NodeId,
     pub(super) backend: Starter,
-    pub(super) advertise: Option<Addr>,
+    pub(super) advertise: Option<NodeAddr>,
     pub(super) seeds: Vec<Seed>,
     pub(super) foca: Option<foca::Config>,
     pub(super) expected_size: NonZeroU32,
@@ -58,7 +58,7 @@ impl ClusterConfig {
     /// The address other nodes should use to reach this one, if it differs from
     /// the address the backend listens on (for example behind NAT or in a
     /// container).
-    pub fn advertise(mut self, addr: impl Into<Addr>) -> Self {
+    pub fn advertise(mut self, addr: impl Into<NodeAddr>) -> Self {
         self.advertise = Some(addr.into());
         self
     }

@@ -1,4 +1,7 @@
-use super::{Command, message::Message};
+use super::{
+    Command,
+    message::{Message, sender_of},
+};
 use crate::{
     ClusterTimings, Member, NodeId, NodeStatus,
     cluster::{
@@ -148,6 +151,11 @@ impl Driver {
         };
         match decoded {
             Message::Gossip(data) => {
+                // Whoever the packet says it is from must be who sent it.
+                if sender_of(&data).as_ref() != Some(&message.from) {
+                    tracing::warn!(node = %message.from, "Dropping gossip that names another sender");
+                    return;
+                }
                 if let Err(err) = self.foca.handle_data(&data, &mut self.runtime) {
                     tracing::debug!("Failed to handle gossip message: {err}");
                 }
@@ -240,5 +248,86 @@ impl Driver {
             #[allow(unreachable_patterns)]
             _ => {}
         }
+    }
+}
+
+#[cfg(all(test, feature = "sim"))]
+mod tests {
+    use super::*;
+    use crate::{
+        Cluster, NodeAddr,
+        backend::LocalNode,
+        cluster::{link::Starter, sim::SimNetwork},
+    };
+    use foca::Foca;
+    use rand::SeedableRng;
+
+    fn member(name: &str) -> Member {
+        Member {
+            node: NodeId::new(name),
+            addr: NodeAddr::new(format!("{name}:7000")),
+            generation: 1,
+        }
+    }
+
+    /// A driver for node-a, over a simulated network, that has heard nothing yet.
+    async fn driver() -> Driver {
+        let network = SimNetwork::new(1);
+        let (links, _, _peers) = Starter::new(network.backend("node-a:7000"))
+            .start(
+                LocalNode {
+                    id: NodeId::new("node-a"),
+                    generation: 1,
+                },
+                ClusterTimings::default(),
+            )
+            .await
+            .unwrap();
+        Driver::new(
+            Cluster::new(member("node-a")),
+            Config::simple(),
+            StdRng::seed_from_u64(1),
+            links,
+            Vec::new(),
+            ClusterTimings::default(),
+        )
+    }
+
+    /// What node-b sends node-a when it wants to join.
+    fn announcement_from_node_b() -> Message {
+        let mut foca = Foca::new(
+            member("node-b"),
+            Config::simple(),
+            StdRng::seed_from_u64(2),
+            PostcardCodec,
+        );
+        let mut runtime = AccumulatingRuntime::new();
+        foca.announce(member("node-a"), &mut runtime).unwrap();
+        Message::Gossip(runtime.to_send().expect("An announcement").1)
+    }
+
+    fn arrives_from(sender: &str) -> Incoming {
+        Incoming {
+            from: NodeId::new(sender),
+            generation: 1,
+            payload: announcement_from_node_b().encode(),
+        }
+    }
+
+    /// node-a answers an announcement with what it knows; whether it does tells
+    /// whether it took the packet in.
+    #[tokio::test]
+    async fn gossip_is_taken_from_the_node_it_names() {
+        let mut driver = driver().await;
+        driver.on_incoming(arrives_from("node-b"));
+        assert!(driver.runtime.to_send().is_some());
+    }
+
+    #[tokio::test]
+    async fn gossip_naming_another_sender_is_dropped() {
+        let mut driver = driver().await;
+        // The packet says node-b, but the backend says it came from mallory.
+        driver.on_incoming(arrives_from("mallory"));
+        assert!(driver.runtime.to_send().is_none());
     }
 }
