@@ -30,13 +30,15 @@
 mod fabric;
 
 use super::{
-    Cluster, ClusterTimings, Member, Seed,
+    Addr, Cluster, ClusterTimings, Member, Seed,
+    backend::{Backend, LocalNode},
+    link::{Links, Starter},
     membership::{Membership, Options},
 };
 use crate::NodeId;
-use fabric::Fabric;
+use fabric::{Fabric, SimEndpoint};
 use rand::{SeedableRng, rngs::StdRng};
-use std::{net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
+use std::{net::SocketAddr, num::NonZeroU32, time::Duration};
 
 /// A simulated network of cluster nodes.
 pub struct SimNetwork {
@@ -89,6 +91,19 @@ impl SimNetwork {
         self.fabric.heal();
     }
 
+    /// A [`Backend`] that attaches a node to this network at `addr`, for
+    /// running a real [`ClusterNode`](crate::ClusterNode) on it with
+    /// [`ClusterConfig::with_backend`](crate::ClusterConfig::with_backend).
+    ///
+    /// Every node needs its own address. Nodes reach each other by the
+    /// addresses they were started with.
+    pub fn backend(&self, addr: impl Into<Addr>) -> SimBackend {
+        SimBackend {
+            fabric: self.fabric.clone(),
+            addr: addr.into(),
+        }
+    }
+
     /// Starts the node `name` listening at `addr`, which contacts `seeds` to
     /// join. Addresses only need to be different from each other.
     ///
@@ -103,11 +118,20 @@ impl SimNetwork {
         self.generation += 1;
         let local = Member {
             node: NodeId::new(name),
-            addr,
+            addr: addr.into(),
             generation: self.generation,
         };
         let cluster = Cluster::new(local.clone());
-        let (net, events) = self.fabric.bind(name, addr, self.generation);
+        let (links, _, peers) = Starter::new(self.backend(addr))
+            .start(
+                LocalNode {
+                    id: local.node.clone(),
+                    generation: self.generation,
+                },
+                self.timings.clone(),
+            )
+            .await
+            .expect("The simulated network can always start");
         let options = Options {
             foca: self.foca.clone(),
             seeds: seeds
@@ -118,11 +142,27 @@ impl SimNetwork {
             rng: StdRng::seed_from_u64(self.seed.wrapping_add(self.generation)),
         };
         let membership =
-            Membership::start(cluster.clone(), local, options, Arc::new(net), events).await;
+            Membership::start(cluster.clone(), local, options, links.clone(), peers).await;
         SimNode {
             cluster,
-            membership: Some(membership),
+            running: Some((membership, links)),
+            shutdown_grace: self.timings.shutdown_grace,
         }
+    }
+}
+
+/// A [`Backend`] that attaches a node to a [`SimNetwork`], see
+/// [`SimNetwork::backend`].
+pub struct SimBackend {
+    fabric: Fabric,
+    addr: Addr,
+}
+
+impl Backend for SimBackend {
+    type Endpoint = SimEndpoint;
+
+    async fn start(self, local: LocalNode) -> std::io::Result<SimEndpoint> {
+        Ok(self.fabric.bind(local.id.as_str(), self.addr))
     }
 }
 
@@ -131,7 +171,8 @@ pub struct SimNode {
     /// The node's view of the cluster.
     pub cluster: Cluster,
     /// `None` once the node has left or crashed.
-    membership: Option<Membership>,
+    running: Option<(Membership, Links)>,
+    shutdown_grace: Duration,
 }
 
 impl SimNode {
@@ -140,18 +181,16 @@ impl SimNode {
     /// # Panics
     /// If the node has already left or crashed.
     pub async fn leave(&mut self) {
-        self.membership
-            .take()
-            .expect("Node is running")
-            .leave()
-            .await;
+        let (membership, links) = self.running.take().expect("Node is running");
+        membership.leave().await;
+        links.shutdown(self.shutdown_grace).await;
     }
 
     /// Stops without a word, like a crash: the rest of the cluster has to find
     /// out by itself.
     pub async fn crash(&mut self) {
-        self.membership = None;
-        // Lets the stopped membership task drop, taking the node off the network.
+        self.running = None;
+        // Lets the stopped tasks drop, taking the node off the network.
         tokio::task::yield_now().await;
     }
 }

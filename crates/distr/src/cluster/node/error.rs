@@ -3,13 +3,10 @@ use zestors_supervisor::NodeError;
 /// Why a [`ClusterNode`](crate::ClusterNode) stopped running.
 #[derive(Debug, thiserror::Error)]
 pub enum ClusterNodeError {
-    /// The node name is not a valid DNS name, so it can't be used with TLS.
-    #[error("Invalid node name {0:?}: must be a valid DNS name")]
-    InvalidNodeName(String),
-
-    /// The QUIC endpoint could not be started.
-    #[error("Failed to bind cluster endpoint: {0}")]
-    Bind(#[source] std::io::Error),
+    /// The network backend could not be started, for example because it
+    /// could not listen on its address or rejected the node name.
+    #[error("Failed to start the network backend: {0}")]
+    Backend(#[source] std::io::Error),
 
     /// The generation could not be read from or recorded in the file given to
     /// [`ClusterConfig::generation_store`](crate::ClusterConfig::generation_store).
@@ -26,9 +23,7 @@ impl ClusterNodeError {
     pub fn exit_code(&self) -> i32 {
         match self {
             ClusterNodeError::Node(err) => err.exit_code(),
-            ClusterNodeError::InvalidNodeName(_)
-            | ClusterNodeError::Bind(_)
-            | ClusterNodeError::Generation(_) => 1,
+            ClusterNodeError::Backend(_) | ClusterNodeError::Generation(_) => 1,
         }
     }
 }

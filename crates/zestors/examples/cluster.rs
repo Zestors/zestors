@@ -27,7 +27,7 @@ async fn main() -> Result<(), ClusterNodeError> {
     let mut config = ClusterConfig::new(name, bind, Tls::insecure_dev().unwrap());
     for seed in args {
         let (seed_name, seed_addr) = seed.split_once('=').expect("seed must be name=addr");
-        config = config.seed(Seed::new(seed_name, seed_addr.parse().unwrap()));
+        config = config.seed(Seed::new(seed_name, seed_addr.parse::<SocketAddr>().unwrap()));
     }
 
     let node = ClusterNode::new(Supervisor::blueprint().rand_pid(), config);

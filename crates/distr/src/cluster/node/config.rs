@@ -1,16 +1,20 @@
-use super::super::membership::Options;
-use crate::{ClusterTimings, NodeId, Seed, Tls};
+use crate::Addr;
+use crate::{
+    ClusterTimings, NodeId, Seed,
+    backend::Backend,
+    cluster::{link::Starter, membership::Options},
+};
 use rand::{SeedableRng, rngs::StdRng};
-use std::{net::SocketAddr, num::NonZeroU32, path::PathBuf};
+#[cfg(feature = "quic")]
+use std::net::SocketAddr;
+use std::{num::NonZeroU32, path::PathBuf};
 
 /// How a [`ClusterNode`](crate::ClusterNode) joins and behaves in a cluster.
-#[derive(Debug)]
 pub struct ClusterConfig {
     pub(super) node_id: NodeId,
-    pub(super) bind: SocketAddr,
-    pub(super) advertise: Option<SocketAddr>,
+    pub(super) backend: Starter,
+    pub(super) advertise: Option<Addr>,
     pub(super) seeds: Vec<Seed>,
-    pub(super) tls: Tls,
     pub(super) foca: Option<foca::Config>,
     pub(super) expected_size: NonZeroU32,
     pub(super) timings: ClusterTimings,
@@ -19,17 +23,23 @@ pub struct ClusterConfig {
 }
 
 impl ClusterConfig {
-    /// Configures a node named `node_id` that listens on `bind`.
+    /// Configures a node named `node_id` that listens on `bind` and talks to
+    /// the others over [`Quic`](crate::backend::Quic) with the identity `tls`.
     ///
-    /// The node name must be a valid DNS name; with [`Tls::from_pem`] it must
+    /// The node name must be a valid DNS name; with [`Tls::from_pem`](crate::Tls::from_pem) it must
     /// also be a subject alternative name of the node's certificate.
-    pub fn new(node_id: impl Into<NodeId>, bind: SocketAddr, tls: Tls) -> Self {
+    #[cfg(feature = "quic")]
+    pub fn new(node_id: impl Into<NodeId>, bind: SocketAddr, tls: crate::Tls) -> Self {
+        Self::with_backend(node_id, crate::backend::Quic::new(bind, tls))
+    }
+
+    /// Configures a node named `node_id` that talks to the others over `backend`.
+    pub fn with_backend(node_id: impl Into<NodeId>, backend: impl Backend) -> Self {
         Self {
             node_id: node_id.into(),
-            bind,
+            backend: Starter::new(backend),
             advertise: None,
             seeds: Vec::new(),
-            tls,
             foca: None,
             expected_size: NonZeroU32::new(32).unwrap(),
             timings: ClusterTimings::default(),
@@ -46,9 +56,10 @@ impl ClusterConfig {
     }
 
     /// The address other nodes should use to reach this one, if it differs from
-    /// the bind address (for example behind NAT or in a container).
-    pub fn advertise(mut self, addr: SocketAddr) -> Self {
-        self.advertise = Some(addr);
+    /// the address the backend listens on (for example behind NAT or in a
+    /// container).
+    pub fn advertise(mut self, addr: impl Into<Addr>) -> Self {
+        self.advertise = Some(addr.into());
         self
     }
 
@@ -112,5 +123,14 @@ impl ClusterConfig {
                 None => rand::make_rng(),
             },
         }
+    }
+}
+
+impl std::fmt::Debug for ClusterConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClusterConfig")
+            .field("node_id", &self.node_id)
+            .field("seeds", &self.seeds)
+            .finish_non_exhaustive()
     }
 }

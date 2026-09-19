@@ -4,8 +4,8 @@ mod error;
 pub use config::ClusterConfig;
 pub use error::ClusterNodeError;
 
-use super::{Cluster, Member, generation, membership::Membership, quic::Transport};
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use super::{Addr, Cluster, Member, backend::LocalNode, generation, membership::Membership};
+use std::{net::SocketAddr, time::Duration};
 use zestors_supervision::{ChildSpec, RestartIntensity};
 use zestors_supervisor::{Node, NodeShutdown, SupervisorBlueprint};
 
@@ -31,7 +31,11 @@ impl ClusterNode {
     pub fn from_node(node: Node, config: ClusterConfig) -> Self {
         let cluster = Cluster::new(Member {
             node: config.node_id.clone(),
-            addr: config.advertise.unwrap_or(config.bind),
+            // Not known until the backend has started, unless configured.
+            addr: config
+                .advertise
+                .clone()
+                .unwrap_or_else(|| Addr::from(SocketAddr::from(([0, 0, 0, 0], 0)))),
             generation: 0,
         });
         Self {
@@ -80,39 +84,31 @@ impl ClusterNode {
             cluster,
         } = self;
 
-        // The node name doubles as the TLS server name when peers dial it.
-        if quinn::rustls::pki_types::ServerName::try_from(config.node_id.as_str()).is_err() {
-            return Err(ClusterNodeError::InvalidNodeName(
-                config.node_id.as_str().to_owned(),
-            ));
-        }
-
         let generation = generation::next(config.generation_store.as_deref())
             .map_err(ClusterNodeError::Generation)?;
-        let (transport, events) = Transport::bind(
-            config.bind,
-            &config.tls,
-            config.node_id.clone(),
-            generation,
-            config.timings.clone(),
-        )
-        .map_err(ClusterNodeError::Bind)?;
-        let transport = Arc::new(transport);
-
-        let local_addr = match config.advertise {
-            Some(addr) => addr,
-            None => local_addr(&transport)?,
-        };
+        let options = config.membership_options();
+        let (links, addr, peers) = config
+            .backend
+            .start(
+                LocalNode {
+                    id: config.node_id.clone(),
+                    generation,
+                },
+                config.timings.clone(),
+            )
+            .await
+            .map_err(ClusterNodeError::Backend)?;
+        let local_addr = config.advertise.clone().unwrap_or(addr);
         let membership = Membership::start(
             cluster,
             Member {
                 node: config.node_id.clone(),
-                addr: local_addr,
+                addr: local_addr.clone(),
                 generation,
             },
-            config.membership_options(),
-            transport.clone(),
-            events,
+            options,
+            links.clone(),
+            peers,
         )
         .await;
         tracing::info!(node = %config.node_id, addr = %local_addr, "Cluster node started");
@@ -120,12 +116,8 @@ impl ClusterNode {
         let result = node.run().await;
 
         membership.leave().await;
-        transport.shutdown(config.timings.shutdown_grace).await;
+        links.shutdown(config.timings.shutdown_grace).await;
 
         result.map_err(ClusterNodeError::from)
     }
-}
-
-fn local_addr(transport: &Transport) -> Result<SocketAddr, ClusterNodeError> {
-    transport.local_addr().map_err(ClusterNodeError::Bind)
 }

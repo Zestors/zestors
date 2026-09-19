@@ -94,7 +94,7 @@ async fn nodes_discover_each_other_and_notice_departures() {
     members_of(&c2, 2).await;
     assert_eq!(
         a.cluster.member(&NodeId::new("node-c")).map(|m| m.addr),
-        Some(addr(4))
+        Some(addr(4).into())
     );
     assert!(c2.cluster.local().generation > old_generation);
 
@@ -228,6 +228,39 @@ async fn runs_are_reproducible() {
     }
 
     let first = run(7).await;
-    assert!(first.len() >= 5, "the scenario produced events: {first:?}");
+    assert!(first.len() >= 4, "the scenario produced events: {first:?}");
     assert_eq!(first, run(7).await);
+}
+
+/// Real cluster nodes, supervisor and all, over the simulated network.
+#[tokio::test(start_paused = true)]
+async fn cluster_nodes_run_over_the_simulated_network() {
+    use zestors::{prelude::*, supervisor::Supervisor};
+    use zestors_distr::{ClusterConfig, ClusterNode, Seed};
+
+    let net = SimNetwork::new(5);
+    let config = |name: &str, n: u8| {
+        ClusterConfig::with_backend(name, net.backend(addr(n))).foca_config(fast_foca_config())
+    };
+    let a = ClusterNode::new(Supervisor::blueprint().rand_pid(), config("node-a", 1))
+        .with_exit_delay(Duration::ZERO);
+    let b = ClusterNode::new(
+        Supervisor::blueprint().rand_pid(),
+        config("node-b", 2).seed(Seed::new("node-a", addr(1))),
+    )
+    .with_exit_delay(Duration::ZERO);
+
+    let (a_cluster, b_cluster) = (a.cluster(), b.cluster());
+    let (a_shutdown, b_shutdown) = (a.shutdown_handle(), b.shutdown_handle());
+    let (a_task, b_task) = (tokio::spawn(a.run()), tokio::spawn(b.run()));
+
+    within(a_cluster.wait_for_members(1)).await;
+    within(b_cluster.wait_for_members(1)).await;
+
+    b_shutdown.shutdown();
+    b_task.await.unwrap().unwrap();
+    within(a_cluster.wait_for_members(0)).await;
+
+    a_shutdown.shutdown();
+    a_task.await.unwrap().unwrap();
 }

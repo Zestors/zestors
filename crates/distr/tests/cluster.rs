@@ -4,6 +4,7 @@ use zestors::{prelude::*, supervisor::Supervisor};
 use zestors_distr::{
     Cluster, ClusterConfig, ClusterEvent, ClusterNode, ClusterNodeError, ClusterTimings, NodeId,
     NodeStatus, Seed, Tls,
+    backend::{Quic, QuicTimings},
 };
 
 fn free_addr() -> SocketAddr {
@@ -27,8 +28,6 @@ fn fast_timings() -> ClusterTimings {
     ClusterTimings {
         connect_timeout: Duration::from_millis(500),
         handshake_timeout: Duration::from_millis(500),
-        keep_alive: Duration::from_millis(200),
-        idle_timeout: Duration::from_secs(1),
         peer_idle: Duration::from_secs(5),
         reconnect_backoff_min: Duration::from_millis(50),
         reconnect_backoff_max: Duration::from_millis(400),
@@ -39,6 +38,18 @@ fn fast_timings() -> ClusterTimings {
     }
 }
 
+fn fast_quic_timings() -> QuicTimings {
+    QuicTimings {
+        keep_alive: Duration::from_millis(200),
+        idle_timeout: Duration::from_secs(1),
+    }
+}
+
+/// A node over QUIC tuned for localhost.
+fn quic(name: &str, addr: SocketAddr, tls: Tls) -> ClusterConfig {
+    ClusterConfig::with_backend(name, Quic::new(addr, tls).timings(fast_quic_timings()))
+}
+
 struct TestNode {
     cluster: Cluster,
     shutdown: zestors::runtime::Address<zestors_supervisor::SupervisorInterface>,
@@ -46,7 +57,7 @@ struct TestNode {
 }
 
 fn start(name: &str, addr: SocketAddr, seed: Option<(&str, SocketAddr)>) -> TestNode {
-    let mut config = ClusterConfig::new(name, addr, Tls::insecure_dev().unwrap())
+    let mut config = quic(name, addr, Tls::insecure_dev().unwrap())
         .timings(fast_timings())
         .foca_config(fast_foca_config());
     if let Some((seed_name, seed_addr)) = seed {
@@ -133,7 +144,7 @@ async fn nodes_discover_each_other_and_notice_departures() {
     eventually("c is back at its new address", || {
         a.cluster.members().len() == 2
             && c2.cluster.members().len() == 2
-            && a.cluster.member(&NodeId::new("node-c")).map(|m| m.addr) == Some(c2_addr)
+            && a.cluster.member(&NodeId::new("node-c")).map(|m| m.addr) == Some(c2_addr.into())
     })
     .await;
     assert!(c2.cluster.local().generation > old_generation);
@@ -196,7 +207,7 @@ fn start_with(config: ClusterConfig) -> TestNode {
 }
 
 fn config(name: &str, addr: SocketAddr, tls: Tls) -> ClusterConfig {
-    ClusterConfig::new(name, addr, tls)
+    quic(name, addr, tls)
         .timings(fast_timings())
         .foca_config(fast_foca_config())
 }

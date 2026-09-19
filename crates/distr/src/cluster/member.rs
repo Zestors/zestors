@@ -1,7 +1,6 @@
-use crate::NodeId;
+use crate::{Addr, NodeId};
 use foca::Identity;
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
 
 /// A node in the cluster, as known to the membership protocol.
 ///
@@ -15,7 +14,7 @@ pub struct Member {
     /// The node's name; must be a DNS name matching its TLS certificate.
     pub node: NodeId,
     /// The address peers currently reach the node on.
-    pub addr: SocketAddr,
+    pub addr: Addr,
     /// Increases every time the node restarts.
     pub generation: u64,
 }

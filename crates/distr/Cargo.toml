@@ -21,21 +21,28 @@ tokio.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 rand.workspace = true
-quinn.workspace = true
+quinn = { workspace = true, optional = true }
 foca.workspace = true
 bytes.workspace = true
 tokio-util = { version = "0.7", features = ["time"] }
-rcgen.workspace = true
-rustls-webpki.workspace = true
+rcgen = { workspace = true, optional = true }
+rustls-webpki = { workspace = true, optional = true }
 
 [dev-dependencies]
 zestors.workspace = true
 tracing-subscriber.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 # Enables the `sim` feature for this crate's own tests.
-zestors-distr = { path = ".", features = ["sim"] }
+zestors-distr = { path = ".", default-features = false, features = ["sim"] }
 
 [features]
+default = ["quic"]
+# The QUIC backend, see `backend::Quic`.
+quic = ["dep:quinn", "dep:rcgen", "dep:rustls-webpki"]
 _ra = []
 # In-process simulated clusters for tests, see `sim`.
 sim = []
+
+[[test]]
+name = "cluster"
+required-features = ["quic"]

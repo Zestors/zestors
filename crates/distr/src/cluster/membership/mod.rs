@@ -1,17 +1,18 @@
 //! Keeps track of who is in the cluster: the membership protocol ([`foca`])
-//! running over a [`Net`].
+//! running over [`Links`].
 
 mod driver;
+mod message;
 
 use super::{
     Cluster, Member, NodeStatus,
-    net::{Event, Net},
+    link::{Links, PeerEvent, Protocol},
 };
 use crate::{ClusterTimings, Seed};
 use driver::Driver;
 use foca::Config;
 use rand::rngs::StdRng;
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,
@@ -41,15 +42,15 @@ pub(super) struct Membership {
 }
 
 impl Membership {
-    /// Makes `local` part of the cluster over `net`: marks `cluster` as up,
-    /// starts the protocol and announces to the seeds. `events` is what `net`
-    /// received.
+    /// Makes `local` part of the cluster over `links`: marks `cluster` as up,
+    /// starts the protocol and announces to the seeds. `peers` reports what `links`
+    /// notices about its peers.
     pub(super) async fn start(
         cluster: Cluster,
         local: Member,
         options: Options,
-        net: Arc<dyn Net>,
-        events: mpsc::Receiver<Event>,
+        links: Links,
+        peers: mpsc::Receiver<PeerEvent>,
     ) -> Self {
         cluster.set_local(local);
         cluster.set_status(NodeStatus::Up);
@@ -59,10 +60,11 @@ impl Membership {
             .iter()
             .map(|seed| Member {
                 node: seed.node.clone(),
-                addr: seed.addr,
+                addr: seed.addr.clone(),
                 generation: 0,
             })
             .collect();
+        let inbox = links.subscribe(Protocol::MEMBERSHIP);
         let leave_grace = options.timings.leave_grace;
         let (commands, command_rx) = mpsc::channel(16);
         let task = tokio::spawn(
@@ -70,11 +72,11 @@ impl Membership {
                 cluster,
                 options.foca,
                 options.rng,
-                net,
+                links,
                 seeds.clone(),
                 options.timings,
             )
-            .run(events, command_rx),
+            .run(inbox, peers, command_rx),
         );
         let membership = Self {
             commands,

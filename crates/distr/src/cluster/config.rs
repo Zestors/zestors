@@ -1,39 +1,34 @@
-use crate::NodeId;
-use std::{net::SocketAddr, time::Duration};
+use crate::{Addr, NodeId};
+use std::time::Duration;
 
 /// A node to contact when joining the cluster.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seed {
     /// The seed's node name, which its certificate must carry.
     pub node: NodeId,
-    pub addr: SocketAddr,
+    pub addr: Addr,
 }
 
 impl Seed {
-    pub fn new(node: impl Into<NodeId>, addr: SocketAddr) -> Self {
+    pub fn new(node: impl Into<NodeId>, addr: impl Into<Addr>) -> Self {
         Self {
             node: node.into(),
-            addr,
+            addr: addr.into(),
         }
     }
 }
 
-/// The timeouts and intervals of the connection and membership layers.
+/// The timeouts and intervals of a cluster node.
 ///
 /// How quickly failures are *detected* is decided by the membership protocol's
-/// own settings instead, see [`ClusterConfig::foca_config`](crate::ClusterConfig::foca_config). The defaults suit
-/// real networks; shorten them for local tests.
+/// own settings instead, see [`ClusterConfig::foca_config`](crate::ClusterConfig::foca_config).
+/// The defaults suit real networks; shorten them for local tests.
 #[derive(Debug, Clone)]
 pub struct ClusterTimings {
     /// How long to wait for a connection to a peer to be established.
     pub connect_timeout: Duration,
     /// How long to wait for a new connection's identity exchange.
     pub handshake_timeout: Duration,
-    /// How often idle connections send a keep-alive packet. Must be shorter
-    /// than `idle_timeout`.
-    pub keep_alive: Duration,
-    /// How long a connection may go without any packets before it is dropped.
-    pub idle_timeout: Duration,
     /// How long the sender task for a peer lingers without messages to send.
     pub peer_idle: Duration,
     /// How long to wait after a failed attempt to connect to a peer before trying
@@ -59,8 +54,6 @@ impl Default for ClusterTimings {
         Self {
             connect_timeout: Duration::from_secs(5),
             handshake_timeout: Duration::from_secs(5),
-            keep_alive: Duration::from_secs(5),
-            idle_timeout: Duration::from_secs(30),
             peer_idle: Duration::from_secs(60),
             reconnect_backoff_min: Duration::from_millis(250),
             reconnect_backoff_max: Duration::from_secs(10),

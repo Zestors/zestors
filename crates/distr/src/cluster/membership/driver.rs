@@ -1,16 +1,16 @@
-use super::Command;
+use super::{Command, message::Message};
 use crate::{
     ClusterTimings, Member, NodeId, NodeStatus,
     cluster::{
         Cluster,
-        net::{Event, Frame, Incoming, Net},
+        link::{Incoming, Links, PeerEvent, Protocol},
     },
 };
 use foca::{
     AccumulatingRuntime, Config, Foca, NoCustomBroadcast, OwnedNotification, PostcardCodec, Timer,
 };
 use rand::rngs::StdRng;
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 use tokio::{
     sync::mpsc,
     time::{MissedTickBehavior, interval},
@@ -21,7 +21,7 @@ pub(super) struct Driver {
     foca: Foca<Member, PostcardCodec, StdRng, NoCustomBroadcast>,
     runtime: AccumulatingRuntime<Member>,
     cluster: Cluster,
-    transport: Arc<dyn Net>,
+    links: Links,
     seeds: Vec<Member>,
     timings: ClusterTimings,
     /// Set once we've announced our own departure, after which foca reports us as down.
@@ -39,14 +39,14 @@ impl Driver {
         cluster: Cluster,
         config: Config,
         rng: StdRng,
-        transport: Arc<dyn Net>,
+        links: Links,
         seeds: Vec<Member>,
         timings: ClusterTimings,
     ) -> Self {
         Self {
             foca: Foca::new(cluster.local(), config, rng, PostcardCodec),
             cluster,
-            transport,
+            links,
             seeds,
             timings,
             leaving: false,
@@ -59,7 +59,8 @@ impl Driver {
 
     pub(super) async fn run(
         mut self,
-        mut events: mpsc::Receiver<Event>,
+        mut inbox: mpsc::Receiver<Incoming>,
+        mut peers: mpsc::Receiver<PeerEvent>,
         mut commands: mpsc::Receiver<Command>,
     ) {
         let mut rejoin = interval(self.timings.seed_retry);
@@ -67,7 +68,8 @@ impl Driver {
 
         loop {
             tokio::select! {
-                Some(event) = events.recv() => self.on_event(event),
+                Some(message) = inbox.recv() => self.on_incoming(message),
+                Some(event) = peers.recv() => self.on_peer_event(event),
                 Some(expired) = std::future::poll_fn(|cx| self.timers.poll_expired(cx)) => {
                     if let Err(err) = self.foca.handle_timer(expired.into_inner(), &mut self.runtime) {
                         tracing::debug!("Failed to handle timer: {err}");
@@ -91,7 +93,7 @@ impl Driver {
                         self.cluster.set_status(NodeStatus::Leaving);
                         // Say goodbye directly first, so peers can tell this apart from a crash.
                         for member in self.cluster.members() {
-                            self.transport.send(&member, Frame::Departure);
+                            self.send(&member, Message::Departure);
                         }
                         if let Err(err) = self.foca.leave_cluster(&mut self.runtime) {
                             tracing::debug!("Failed to leave cluster: {err}");
@@ -107,30 +109,50 @@ impl Driver {
         }
     }
 
-    fn on_event(&mut self, event: Event) {
+    fn on_peer_event(&mut self, event: PeerEvent) {
         match event {
-            Event::Received(message) => self.on_incoming(message),
-            Event::Unreachable(node) => {
+            PeerEvent::Unreachable(node) => {
                 if let Some(member) = self.cluster.member_unreachable(&node) {
                     tracing::warn!(node = %member.node, addr = %member.addr, "Node unreachable");
                 }
             }
-            Event::Reachable(node) => {
+            PeerEvent::Reachable(node) => {
                 if let Some(member) = self.cluster.member_reachable(&node) {
                     tracing::info!(node = %member.node, addr = %member.addr, "Node reachable again");
                 }
             }
+            // Nothing here rides on a single connection: a lost one is
+            // replaced by the next message, and whether the node is still up
+            // is for the failure detector to say.
+            PeerEvent::Disconnected { node, generation } => {
+                tracing::debug!(%node, generation, "Connection to node lost");
+            }
+        }
+    }
+
+    /// Queues `message` for `to`. Membership tolerates loss, so a full queue
+    /// just drops it.
+    fn send(&self, to: &Member, message: Message) {
+        let sender = self
+            .links
+            .sender(to, Protocol::MEMBERSHIP, message.delivery());
+        if sender.try_send(message.encode()).is_err() {
+            tracing::debug!(node = %to.node, "Peer queue full or closed, dropping message");
         }
     }
 
     fn on_incoming(&mut self, message: Incoming) {
-        match message.frame {
-            Frame::Gossip(data) => {
+        let Some(decoded) = Message::decode(message.payload) else {
+            tracing::debug!(node = %message.from, "Dropping malformed membership message");
+            return;
+        };
+        match decoded {
+            Message::Gossip(data) => {
                 if let Err(err) = self.foca.handle_data(&data, &mut self.runtime) {
                     tracing::debug!("Failed to handle gossip message: {err}");
                 }
             }
-            Frame::Departure => {
+            Message::Departure => {
                 if let Some(member) = self.cluster.member_left(&message.from, message.generation) {
                     tracing::info!(node = %member.node, addr = %member.addr, "Node left");
                     self.cancel_pending(&member.node);
@@ -164,7 +186,7 @@ impl Driver {
     /// Carries out what foca asked for while handling the last input.
     fn drain(&mut self) {
         while let Some((to, data)) = self.runtime.to_send() {
-            self.transport.send(&to, Frame::Gossip(data));
+            self.send(&to, Message::Gossip(data));
         }
 
         while let Some((after, timer)) = self.runtime.to_schedule() {
@@ -185,7 +207,7 @@ impl Driver {
             }
             OwnedNotification::MemberDown(member) => {
                 tracing::info!(node = %member.node, addr = %member.addr, "Node down");
-                self.transport.forget(&member.node, member.generation);
+                self.links.forget(&member.node, member.generation);
                 // It may yet turn out to have left cleanly; see `ClusterTimings::departure_grace`.
                 if self.cluster.contains(&member) {
                     let key = self
@@ -198,7 +220,7 @@ impl Driver {
             }
             OwnedNotification::Rename(before, after) => {
                 self.cancel_pending(&before.node);
-                self.transport.forget(&before.node, before.generation);
+                self.links.forget(&before.node, before.generation);
                 self.cluster.member_renamed(&before, after);
             }
             OwnedNotification::Rejoin(new_identity) => {

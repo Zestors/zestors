@@ -1,27 +1,30 @@
 //! Which nodes make up the cluster, and the machinery that keeps it up to date.
 //!
 //! The submodules are layered: [`node`] runs a node, [`membership`] decides who
-//! is in the cluster using a [`net`] to talk to the others, and [`quic`] is
-//! that network. Each layer shares what it needs with its siblings through
-//! `pub(super)` items, which are visible in this module and nowhere else. The
-//! public API is re-exported from here.
+//! is in the cluster, [`link`] carries its messages, and [`backend`] is the
+//! network underneath. Layers share what they need with their siblings through `pub(super)`
+//! items, which are visible in this module and nowhere else. The public API is
+//! re-exported from here.
 
+mod addr;
+pub mod backend;
 mod config;
 mod generation;
+mod link;
 mod member;
 mod membership;
-mod net;
 mod node;
-mod quic;
 mod updates;
 
 #[cfg(feature = "sim")]
 pub mod sim;
 
+pub use addr::Addr;
+#[cfg(feature = "quic")]
+pub use backend::{Tls, TlsError};
 pub use config::{ClusterTimings, Seed};
 pub use member::Member;
 pub use node::{ClusterConfig, ClusterNode, ClusterNodeError};
-pub use quic::{Tls, TlsError};
 
 use crate::NodeId;
 use std::{
