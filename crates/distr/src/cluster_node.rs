@@ -1,11 +1,16 @@
 use crate::{
-    Cluster, ClusterConfig, ClusterNodeError, Member, NodeStatus, membership::Membership,
+    Cluster, ClusterConfig, ClusterNodeError, Member, NodeStatus,
+    generation,
+    membership::Membership,
+    net::{Event, Net},
     quic::Transport,
 };
+use rand::{SeedableRng, rngs::StdRng};
+use tokio::sync::mpsc;
 use std::{
     net::SocketAddr,
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 use zestors_supervision::{ChildSpec, RestartIntensity};
 use zestors_supervisor::{Node, NodeShutdown, SupervisorBlueprint};
@@ -88,7 +93,8 @@ impl ClusterNode {
             ));
         }
 
-        let generation = new_generation();
+        let generation = generation::next(config.generation_store.as_deref())
+            .map_err(ClusterNodeError::Generation)?;
         let (transport, events) = Transport::bind(
             config.bind,
             &config.tls,
@@ -103,42 +109,19 @@ impl ClusterNode {
             Some(addr) => addr,
             None => local_addr(&transport)?,
         };
-        cluster.set_local(Member {
-            node: config.node_id.clone(),
-            addr: local_addr,
-            generation,
-        });
-        cluster.set_status(NodeStatus::Up);
-        tracing::info!(node = %config.node_id, addr = %local_addr, "Cluster node started");
-
-        let seeds: Vec<Member> = config
-            .seeds
-            .iter()
-            .map(|seed| Member {
-                node: seed.node.clone(),
-                addr: seed.addr,
-                generation: 0,
-            })
-            .collect();
-        let foca_config = config.foca.unwrap_or_else(|| {
-            let mut foca = foca::Config::new_lan(config.expected_size);
-            // Small enough to travel as a single QUIC datagram; anything larger
-            // still gets through, but over a slower reliable stream.
-            foca.max_packet_size = std::num::NonZeroUsize::new(1000).unwrap();
-            foca
-        });
-
-        let membership = Membership::start(
-            cluster,
-            foca_config,
-            seeds.clone(),
-            config.timings.clone(),
+        let membership = join(
+            &cluster,
+            &config,
+            Member {
+                node: config.node_id.clone(),
+                addr: local_addr,
+                generation,
+            },
             transport.clone(),
             events,
-        );
-        for seed in seeds {
-            membership.announce(seed).await;
-        }
+        )
+        .await;
+        tracing::info!(node = %config.node_id, addr = %local_addr, "Cluster node started");
 
         let result = node.run().await;
 
@@ -149,15 +132,57 @@ impl ClusterNode {
     }
 }
 
-fn local_addr(transport: &Transport) -> Result<SocketAddr, ClusterNodeError> {
-    transport.local_addr().map_err(ClusterNodeError::Bind)
+/// Makes `local` part of the cluster over `net`: marks `cluster` as up, starts
+/// the membership protocol and announces to the seeds.
+///
+/// Everything a node does to join, short of creating the network it does so
+/// over, so that tests can run it over a simulated one.
+pub(crate) async fn join(
+    cluster: &Cluster,
+    config: &ClusterConfig,
+    local: Member,
+    net: Arc<dyn Net>,
+    events: mpsc::Receiver<Event>,
+) -> Membership {
+    cluster.set_local(local);
+    cluster.set_status(NodeStatus::Up);
+
+    let seeds: Vec<Member> = config
+        .seeds
+        .iter()
+        .map(|seed| Member {
+            node: seed.node.clone(),
+            addr: seed.addr,
+            generation: 0,
+        })
+        .collect();
+    let foca_config = config.foca.clone().unwrap_or_else(|| {
+        let mut foca = foca::Config::new_lan(config.expected_size);
+        // Small enough to travel as a single QUIC datagram; anything larger
+        // still gets through, but over a slower reliable stream.
+        foca.max_packet_size = std::num::NonZeroUsize::new(1000).unwrap();
+        foca
+    });
+    let rng = match config.rng_seed {
+        Some(seed) => StdRng::seed_from_u64(seed),
+        None => rand::make_rng(),
+    };
+
+    let membership = Membership::start(
+        cluster.clone(),
+        foca_config,
+        seeds.clone(),
+        config.timings.clone(),
+        net,
+        events,
+        rng,
+    );
+    for seed in seeds {
+        membership.announce(seed).await;
+    }
+    membership
 }
 
-/// Milliseconds since the Unix epoch: grows with every restart without
-/// needing to persist anything.
-fn new_generation() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(1)
+fn local_addr(transport: &Transport) -> Result<SocketAddr, ClusterNodeError> {
+    transport.local_addr().map_err(ClusterNodeError::Bind)
 }

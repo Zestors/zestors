@@ -25,7 +25,14 @@ pub use global_pid::*;
 mod tls;
 pub use tls::*;
 
+mod generation;
+
+mod net;
+
 mod quic;
+
+#[cfg(test)]
+mod sim;
 
 mod membership;
 pub use membership::Member;

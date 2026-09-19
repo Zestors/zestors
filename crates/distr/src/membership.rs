@@ -1,6 +1,6 @@
 use crate::{
     Cluster, ClusterEvent, ClusterTimings, NodeId, NodeStatus,
-    quic::{Event, Frame, Incoming, Transport},
+    net::{Event, Frame, Incoming, Net},
 };
 use foca::{
     AccumulatingRuntime, Config, Foca, Identity, NoCustomBroadcast, OwnedNotification,
@@ -71,8 +71,9 @@ impl Membership {
         config: Config,
         seeds: Vec<Member>,
         timings: ClusterTimings,
-        transport: Arc<Transport>,
+        transport: Arc<dyn Net>,
         events: mpsc::Receiver<Event>,
+        rng: StdRng,
     ) -> Self {
         let leave_grace = timings.leave_grace;
         let (commands, command_rx) = mpsc::channel(16);
@@ -81,7 +82,7 @@ impl Membership {
                 foca: Foca::new(
                     cluster.local(),
                     config,
-                    rand::make_rng::<StdRng>(),
+                    rng,
                     PostcardCodec,
                 ),
                 cluster,
@@ -129,7 +130,7 @@ struct Driver {
     foca: Foca<Member, PostcardCodec, StdRng, NoCustomBroadcast>,
     runtime: AccumulatingRuntime<Member>,
     cluster: Cluster,
-    transport: Arc<Transport>,
+    transport: Arc<dyn Net>,
     seeds: Vec<Member>,
     timings: ClusterTimings,
     /// Set once we've announced our own departure, after which foca reports us as down.
@@ -307,52 +308,42 @@ impl Driver {
     }
 }
 
-/// Membership changes are published while holding the members lock, so that
+/// Membership changes are published while holding the state lock, so that
 /// [`Cluster::subscribe_with_snapshot`], which subscribes under the same lock,
 /// sees each change either in its snapshot or as an event, never both or neither.
 impl Cluster {
     fn contains(&self, member: &Member) -> bool {
         self.shared
-            .members
+            .state
             .read()
             .expect("Not poisoned")
+            .members
             .get(&member.node)
             == Some(member)
+    }
+
+    fn write(&self) -> std::sync::RwLockWriteGuard<'_, crate::cluster::State> {
+        self.shared.state.write().expect("Not poisoned")
     }
 
     fn publish(&self, event: ClusterEvent) {
         let _ = self.shared.events.send(event);
     }
 
-    /// Forgets that `node` was unreachable. Call with the members lock held.
-    fn clear_unreachable(&self, node: &NodeId) {
-        self.shared
-            .unreachable
-            .write()
-            .expect("Not poisoned")
-            .remove(node);
-    }
-
     fn member_up(&self, member: Member) {
-        let mut members = self.shared.members.write().expect("Not poisoned");
-        let previous = members.insert(member.node.clone(), member.clone());
+        let mut state = self.write();
+        let previous = state.members.insert(member.node.clone(), member.clone());
         if previous.as_ref() != Some(&member) {
-            self.clear_unreachable(&member.node);
+            state.unreachable.remove(&member.node);
             self.publish(ClusterEvent::Up(member));
         }
     }
 
     /// This node can't connect to `node`. Returns the member if that is news.
     fn member_unreachable(&self, node: &NodeId) -> Option<Member> {
-        let members = self.shared.members.write().expect("Not poisoned");
-        let member = members.get(node)?.clone();
-        let newly = self
-            .shared
-            .unreachable
-            .write()
-            .expect("Not poisoned")
-            .insert(node.clone());
-        newly.then(|| {
+        let mut state = self.write();
+        let member = state.members.get(node)?.clone();
+        state.unreachable.insert(node.clone()).then(|| {
             self.publish(ClusterEvent::Unreachable(member.clone()));
             member
         })
@@ -361,15 +352,9 @@ impl Cluster {
     /// This node can connect to `node` again. Returns the member if it had been
     /// reported unreachable.
     fn member_reachable(&self, node: &NodeId) -> Option<Member> {
-        let members = self.shared.members.write().expect("Not poisoned");
-        let member = members.get(node)?.clone();
-        let was = self
-            .shared
-            .unreachable
-            .write()
-            .expect("Not poisoned")
-            .remove(node);
-        was.then(|| {
+        let mut state = self.write();
+        let member = state.members.get(node)?.clone();
+        state.unreachable.remove(node).then(|| {
             self.publish(ClusterEvent::Reachable(member.clone()));
             member
         })
@@ -377,32 +362,32 @@ impl Cluster {
 
     /// The node said goodbye. Returns it if it was known in that generation.
     fn member_left(&self, node: &NodeId, generation: u64) -> Option<Member> {
-        let mut members = self.shared.members.write().expect("Not poisoned");
-        if members.get(node)?.generation != generation {
+        let mut state = self.write();
+        if state.members.get(node)?.generation != generation {
             return None;
         }
-        let member = members.remove(node)?;
-        self.clear_unreachable(node);
+        let member = state.members.remove(node)?;
+        state.unreachable.remove(node);
         self.publish(ClusterEvent::Left(member.clone()));
         Some(member)
     }
 
     /// The node was declared down without saying goodbye.
     fn member_failed(&self, member: &Member) {
-        let mut members = self.shared.members.write().expect("Not poisoned");
-        if members.get(&member.node) == Some(member) {
-            members.remove(&member.node);
-            self.clear_unreachable(&member.node);
+        let mut state = self.write();
+        if state.members.get(&member.node) == Some(member) {
+            state.members.remove(&member.node);
+            state.unreachable.remove(&member.node);
             self.publish(ClusterEvent::Failed(member.clone()));
         }
     }
 
     /// A restarted node replaced its previous incarnation.
     fn member_renamed(&self, before: &Member, after: Member) {
-        let mut members = self.shared.members.write().expect("Not poisoned");
-        if members.get(&before.node) == Some(before) {
-            members.insert(after.node.clone(), after.clone());
-            self.clear_unreachable(&after.node);
+        let mut state = self.write();
+        if state.members.get(&before.node) == Some(before) {
+            state.members.insert(after.node.clone(), after.clone());
+            state.unreachable.remove(&after.node);
             self.publish(ClusterEvent::Failed(before.clone()));
             self.publish(ClusterEvent::Up(after));
         }

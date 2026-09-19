@@ -1,4 +1,7 @@
-use crate::{ClusterTimings, Member, NodeId, Tls};
+use crate::{
+    ClusterTimings, Member, NodeId, Tls,
+    net::{Event, Frame, Incoming, Net},
+};
 use bytes::{BufMut, Bytes, BytesMut};
 use quinn::{
     ClientConfig, Connection, Endpoint, IdleTimeout, SendStream, ServerConfig, TransportConfig,
@@ -35,15 +38,6 @@ const CLOSE_UNAUTHORIZED: u32 = 3;
 const CLOSE_VERSION: u32 = 4;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
-
-/// A message between two nodes.
-#[derive(Debug, Clone)]
-pub(crate) enum Frame {
-    /// Opaque membership protocol bytes.
-    Gossip(Bytes),
-    /// The sender is shutting down cleanly and is not going to come back.
-    Departure,
-}
 
 /// The version of the connection protocol (the [`Hello`] exchange and [`Frame`]
 /// encoding). Peers with a different version refuse each other, so bump it on
@@ -83,27 +77,6 @@ impl Frame {
             _ => None,
         }
     }
-}
-
-/// Something the transport reports to the membership layer.
-#[derive(Debug)]
-pub(crate) enum Event {
-    /// A message from a peer.
-    Received(Incoming),
-    /// Repeated attempts to connect to the peer have failed. It is retried with
-    /// growing pauses in between until it answers.
-    Unreachable(NodeId),
-    /// The peer can be connected to again, after having been reported unreachable.
-    Reachable(NodeId),
-}
-
-/// A [`Frame`] received from a peer whose identity was established when the
-/// connection was set up.
-#[derive(Debug)]
-pub(crate) struct Incoming {
-    pub(crate) from: NodeId,
-    pub(crate) generation: u64,
-    pub(crate) frame: Frame,
 }
 
 /// The first message on every connection, in both directions: who is on the
@@ -265,31 +238,6 @@ impl Transport {
         self.inner.endpoint.local_addr()
     }
 
-    /// Queues `frame` for delivery to `to`.
-    ///
-    /// Never blocks. The message is dropped if the peer's queue is full.
-    pub(crate) fn send(&self, to: &Member, frame: Frame) {
-        self.inner.send(to, frame.encode(), frame.is_datagram());
-    }
-
-    /// Closes the connection to `node` if it belongs to that generation or an
-    /// older one, so the next message dials afresh, and stops sending to it.
-    /// Called when the node has been declared down or has moved.
-    pub(crate) fn forget(&self, node: &NodeId, generation: u64) {
-        // Ends the peer's sender task once it has sent what is queued, including
-        // one that is backing off from an unreachable peer.
-        self.inner.peers.lock().expect("Not poisoned").remove(node);
-
-        let mut conns = self.inner.conns.lock().expect("Not poisoned");
-        if conns
-            .get(node)
-            .is_some_and(|registered| registered.generation <= generation)
-            && let Some(registered) = conns.remove(node)
-        {
-            registered.conn.close(CLOSE_FORGOTTEN.into(), b"forgotten");
-        }
-    }
-
     /// Delivers what is already queued, then closes all connections.
     pub(crate) async fn shutdown(&self, grace: Duration) {
         // Dropping the senders lets every peer task finish its queue and exit.
@@ -304,6 +252,33 @@ impl Transport {
             .close(CLOSE_SHUTDOWN.into(), b"shutdown");
         let _ = timeout(grace, self.inner.endpoint.wait_idle()).await;
         self.inner.token.cancel();
+    }
+}
+
+impl Net for Transport {
+    /// Queues `frame` for delivery to `to`.
+    ///
+    /// Never blocks. The message is dropped if the peer's queue is full.
+    fn send(&self, to: &Member, frame: Frame) {
+        self.inner.send(to, frame.encode(), frame.is_datagram());
+    }
+
+    /// Closes the connection to `node` if it belongs to that generation or an
+    /// older one, so the next message dials afresh, and stops sending to it.
+    /// Called when the node has been declared down or has moved.
+    fn forget(&self, node: &NodeId, generation: u64) {
+        // Ends the peer's sender task once it has sent what is queued, including
+        // one that is backing off from an unreachable peer.
+        self.inner.peers.lock().expect("Not poisoned").remove(node);
+
+        let mut conns = self.inner.conns.lock().expect("Not poisoned");
+        if conns
+            .get(node)
+            .is_some_and(|registered| registered.generation <= generation)
+            && let Some(registered) = conns.remove(node)
+        {
+            registered.conn.close(CLOSE_FORGOTTEN.into(), b"forgotten");
+        }
     }
 }
 

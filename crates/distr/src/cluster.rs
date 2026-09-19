@@ -2,6 +2,7 @@ use crate::{Member, NodeId, Tls};
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
+    path::PathBuf,
     num::NonZeroU32,
     sync::{Arc, RwLock},
     time::Duration,
@@ -77,12 +78,19 @@ impl ClusterSnapshot {
     }
 }
 
+/// What this node knows about the cluster. Kept under one lock so that readers
+/// never see the parts disagree, and so that events can be published with a
+/// change made under it (see `membership.rs`).
+pub(crate) struct State {
+    pub(crate) local: Member,
+    pub(crate) members: HashMap<NodeId, Member>,
+    /// Members in `members` that can't currently be connected to.
+    pub(crate) unreachable: HashSet<NodeId>,
+}
+
 pub(crate) struct Shared {
     pub(crate) status: watch::Sender<NodeStatus>,
-    pub(crate) local: RwLock<Member>,
-    pub(crate) members: RwLock<HashMap<NodeId, Member>>,
-    /// Members in `members` that can't currently be connected to.
-    pub(crate) unreachable: RwLock<HashSet<NodeId>>,
+    pub(crate) state: RwLock<State>,
     pub(crate) events: broadcast::Sender<ClusterEvent>,
 }
 
@@ -101,9 +109,11 @@ impl Cluster {
         Self {
             shared: Arc::new(Shared {
                 status: watch::channel(NodeStatus::Starting).0,
-                local: RwLock::new(local),
-                members: RwLock::new(HashMap::new()),
-                unreachable: RwLock::new(HashSet::new()),
+                state: RwLock::new(State {
+                    local,
+                    members: HashMap::new(),
+                    unreachable: HashSet::new(),
+                }),
                 events: broadcast::channel(256).0,
             }),
         }
@@ -111,50 +121,33 @@ impl Cluster {
 
     /// This node, as the rest of the cluster knows it.
     pub fn local(&self) -> Member {
-        self.shared.local.read().expect("Not poisoned").clone()
+        self.state().local.clone()
+    }
+
+    fn state(&self) -> std::sync::RwLockReadGuard<'_, State> {
+        self.shared.state.read().expect("Not poisoned")
     }
 
     pub(crate) fn set_local(&self, local: Member) {
-        *self.shared.local.write().expect("Not poisoned") = local;
+        self.shared.state.write().expect("Not poisoned").local = local;
     }
 
     /// The other nodes currently considered up, in no particular order.
     pub fn members(&self) -> Vec<Member> {
-        self.shared
-            .members
-            .read()
-            .expect("Not poisoned")
-            .values()
-            .cloned()
-            .collect()
+        self.state().members.values().cloned().collect()
     }
 
     /// The other node named `node`, if it is currently up.
     pub fn member(&self, node: &NodeId) -> Option<Member> {
-        self.shared
-            .members
-            .read()
-            .expect("Not poisoned")
-            .get(node)
-            .cloned()
+        self.state().members.get(node).cloned()
     }
 
     /// Whether `node` is a member that this node can currently connect to.
     /// False for nodes that aren't members, and for those reported as
     /// [`ClusterEvent::Unreachable`].
     pub fn is_reachable(&self, node: &NodeId) -> bool {
-        // Lock order: members, then unreachable.
-        self.shared
-            .members
-            .read()
-            .expect("Not poisoned")
-            .contains_key(node)
-            && !self
-                .shared
-                .unreachable
-                .read()
-                .expect("Not poisoned")
-                .contains(node)
+        let state = self.state();
+        state.members.contains_key(node) && !state.unreachable.contains(node)
     }
 
     /// Subscribes to membership changes.
@@ -172,17 +165,12 @@ impl Cluster {
     /// them: each change is either in the snapshot or delivered as an event,
     /// never both and never neither.
     pub fn subscribe_with_snapshot(&self) -> (ClusterSnapshot, broadcast::Receiver<ClusterEvent>) {
-        // Changes are published under the members lock (see `membership.rs`).
-        let members = self.shared.members.read().expect("Not poisoned");
+        // Changes are published under the state lock (see `membership.rs`).
+        let state = self.state();
         let events = self.shared.events.subscribe();
         let snapshot = ClusterSnapshot {
-            members: members.values().cloned().collect(),
-            unreachable: self
-                .shared
-                .unreachable
-                .read()
-                .expect("Not poisoned")
-                .clone(),
+            members: state.members.values().cloned().collect(),
+            unreachable: state.unreachable.clone(),
         };
         (snapshot, events)
     }
@@ -336,6 +324,8 @@ pub struct ClusterConfig {
     pub(crate) foca: Option<foca::Config>,
     pub(crate) expected_size: NonZeroU32,
     pub(crate) timings: ClusterTimings,
+    pub(crate) rng_seed: Option<u64>,
+    pub(crate) generation_store: Option<PathBuf>,
 }
 
 impl ClusterConfig {
@@ -353,6 +343,8 @@ impl ClusterConfig {
             foca: None,
             expected_size: NonZeroU32::new(32).unwrap(),
             timings: ClusterTimings::default(),
+            rng_seed: None,
+            generation_store: None,
         }
     }
 
@@ -383,6 +375,24 @@ impl ClusterConfig {
         self
     }
 
+    /// Records the node's generation in `path`, so that it keeps growing across
+    /// restarts even if the system clock is set back in between. Without it, a
+    /// node started after such a step can be ignored by peers that still
+    /// remember its earlier incarnation, until they forget it.
+    ///
+    /// The node fails to start if the file can't be read or written.
+    pub fn generation_store(mut self, path: impl Into<PathBuf>) -> Self {
+        self.generation_store = Some(path.into());
+        self
+    }
+
+    /// Seeds the membership protocol's random choices (whom to probe and gossip
+    /// with), so that its behavior is reproducible. Random by default.
+    pub fn rng_seed(mut self, seed: u64) -> Self {
+        self.rng_seed = Some(seed);
+        self
+    }
+
     /// Replaces the membership protocol settings entirely. This decides how
     /// quickly a crashed node is detected.
     ///
@@ -406,6 +416,11 @@ pub enum ClusterNodeError {
     #[error("Failed to bind cluster endpoint: {0}")]
     Bind(#[source] std::io::Error),
 
+    /// The generation could not be read from or recorded in the file given to
+    /// [`ClusterConfig::generation_store`].
+    #[error("Failed to use the generation store: {0}")]
+    Generation(#[source] std::io::Error),
+
     /// The wrapped [`Node`](zestors_supervisor::Node) stopped with an error.
     #[error(transparent)]
     Node(#[from] NodeError),
@@ -416,7 +431,9 @@ impl ClusterNodeError {
     pub fn exit_code(&self) -> i32 {
         match self {
             ClusterNodeError::Node(err) => err.exit_code(),
-            ClusterNodeError::InvalidNodeName(_) | ClusterNodeError::Bind(_) => 1,
+            ClusterNodeError::InvalidNodeName(_)
+            | ClusterNodeError::Bind(_)
+            | ClusterNodeError::Generation(_) => 1,
         }
     }
 }

@@ -232,95 +232,6 @@ async fn node_cannot_claim_a_name_its_certificate_lacks() {
     }
 }
 
-/// A node that stops answering is reported unreachable, while still a member,
-/// long before the (here deliberately slow) failure detector declares it down.
-#[tokio::test(flavor = "multi_thread")]
-async fn crashed_node_is_unreachable_before_it_is_failed() {
-    let mut slow = fast_foca_config();
-    slow.suspect_to_down_after = Duration::from_secs(4);
-
-    let (a_addr, b_addr) = (free_addr(), free_addr());
-    let a = start_with(
-        config("node-a", a_addr, Tls::insecure_dev().unwrap()).foca_config(slow.clone()),
-    );
-    let b = start_with(
-        config("node-b", b_addr, Tls::insecure_dev().unwrap())
-            .foca_config(slow)
-            .seed(Seed::new("node-a", a_addr)),
-    );
-    let b_id = NodeId::new("node-b");
-    eventually("a sees b", || a.cluster.is_reachable(&b_id)).await;
-
-    let mut events = a.cluster.subscribe();
-    b.handle.abort();
-
-    let mut saw_unreachable = false;
-    loop {
-        match tokio::time::timeout(Duration::from_secs(30), events.recv())
-            .await
-            .expect("Timed out waiting for events")
-            .expect("Event stream open")
-        {
-            ClusterEvent::Unreachable(m) => {
-                assert_eq!(m.node, b_id);
-                assert!(a.cluster.member(&b_id).is_some(), "still a member");
-                assert!(!a.cluster.is_reachable(&b_id));
-                saw_unreachable = true;
-            }
-            ClusterEvent::Failed(m) => {
-                assert_eq!(m.node, b_id);
-                break;
-            }
-            _ => {}
-        }
-    }
-    assert!(saw_unreachable, "reported unreachable before failed");
-    assert!(a.cluster.member(&b_id).is_none());
-    assert!(!a.cluster.is_reachable(&b_id));
-
-    a.shutdown.signal_shutdown();
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn snapshot_and_events_line_up() {
-    let (a_addr, b_addr) = (free_addr(), free_addr());
-    let a = start("node-a", a_addr, None);
-
-    let (snapshot, mut events) = a.cluster.subscribe_with_snapshot();
-    assert!(snapshot.members.is_empty());
-
-    let b = start("node-b", b_addr, Some(("node-a", a_addr)));
-    let b_id = NodeId::new("node-b");
-
-    // The change made after the snapshot arrives as an event...
-    let up = within(async {
-        loop {
-            if let Ok(event @ ClusterEvent::Up(_)) = events.recv().await {
-                break event;
-            }
-        }
-    })
-    .await;
-    assert_eq!(up.member().node, b_id);
-
-    // ...and a later snapshot contains it, with no second event for it.
-    let (snapshot, mut events) = a.cluster.subscribe_with_snapshot();
-    assert_eq!(snapshot.members.len(), 1);
-    assert!(snapshot.is_reachable(&b_id));
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(matches!(
-        events.try_recv(),
-        Err(broadcast::error::TryRecvError::Empty)
-    ));
-
-    // wait_until sees the state at once when it already holds.
-    let members = within(a.cluster.wait_until(|m| m.iter().any(|m| m.node == b_id))).await;
-    assert_eq!(members.len(), 1);
-
-    a.shutdown.signal_shutdown();
-    b.shutdown.signal_shutdown();
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn status_follows_the_node_lifecycle() {
     let addr = free_addr();
@@ -339,4 +250,31 @@ async fn status_follows_the_node_lifecycle() {
     shutdown.shutdown();
     handle.await.unwrap().unwrap();
     assert_eq!(cluster.status(), NodeStatus::Leaving);
+}
+
+/// With a generation store, a restart always has a higher generation than the
+/// run before it, even if the store claims that run happened in the future
+/// (as it would after the clock was set back).
+#[tokio::test(flavor = "multi_thread")]
+async fn generation_store_keeps_generations_growing() {
+    let store = std::env::temp_dir().join(format!("zestors-generation-{}", std::process::id()));
+    let future = 32_503_680_000_000u64; // The year 3000, in milliseconds.
+    std::fs::write(&store, future.to_string()).unwrap();
+
+    let node = ClusterNode::new(
+        Supervisor::blueprint().rand_pid(),
+        config("node-a", free_addr(), Tls::insecure_dev().unwrap()).generation_store(&store),
+    )
+    .with_exit_delay(Duration::ZERO);
+    let (cluster, shutdown) = (node.cluster(), node.shutdown_handle());
+    let handle = tokio::spawn(node.run());
+    within(cluster.wait_for_status(NodeStatus::Up)).await;
+
+    let generation = cluster.local().generation;
+    assert!(generation > future);
+    assert_eq!(std::fs::read_to_string(&store).unwrap(), generation.to_string());
+
+    shutdown.shutdown();
+    handle.await.unwrap().unwrap();
+    let _ = std::fs::remove_file(&store);
 }
