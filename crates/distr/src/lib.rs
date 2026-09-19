@@ -5,6 +5,7 @@ mod _prelude {
     pub use crate::*;
 }
 
+#[doc(hidden)]
 pub mod prelude {}
 
 mod message_id;

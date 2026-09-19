@@ -154,4 +154,5 @@ impl ApiServer {
     }
 }
 
+#[doc(hidden)]
 pub mod prelude {}

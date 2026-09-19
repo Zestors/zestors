@@ -108,6 +108,7 @@ pub(crate) use messages::*;
 mod tree;
 pub use tree::*;
 
+#[doc(hidden)]
 pub mod prelude {
     pub use crate::{BlueprintSupervisionExt as _, childspec::ChildSpec};
 }

@@ -149,6 +149,7 @@ use std::time::Duration;
 use tokio::sync::Notify;
 pub(crate) use zestors_interface::*;
 
+#[doc(hidden)]
 pub mod prelude {
     pub use crate::{
         Accepts as _, ActorOps as _, Address, Child, Inbox, InboxEvent, IntoDyn as _, Pid, Signal,

@@ -195,6 +195,7 @@ mod _prelude {
     pub use zestors_supervision::prelude::*;
 }
 
+#[doc(hidden)]
 pub mod prelude {
     pub use crate::SupervisionStrategy;
     pub use crate::{SupervisorBlueprint, SupervisorInterface};
