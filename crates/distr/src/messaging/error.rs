@@ -32,6 +32,10 @@ pub enum RemoteError {
     /// The reply is too large to send back.
     #[error("The reply is too large to send")]
     TooLarge,
+    /// The node answered with an error this one doesn't know, which a node
+    /// running a later version may do. The call is answered either way.
+    #[error("The node answered with an error this version doesn't know")]
+    Unknown,
 }
 
 /// Why a message couldn't be sent, without the message itself. See

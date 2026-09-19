@@ -147,6 +147,8 @@ const E_NO_REPLY: u8 = 6;
 const E_DECODE: u8 = 7;
 const E_ENCODE: u8 = 8;
 const E_TOO_LARGE: u8 = 9;
+/// Not sent by this version; what an error it doesn't know decodes to.
+const E_UNKNOWN: u8 = 0;
 
 fn put_error(buf: &mut BytesMut, error: &RemoteError) {
     match error {
@@ -165,6 +167,7 @@ fn put_error(buf: &mut BytesMut, error: &RemoteError) {
             buf.put_slice(reason.as_bytes());
         }
         RemoteError::TooLarge => buf.put_u8(E_TOO_LARGE),
+        RemoteError::Unknown => buf.put_u8(E_UNKNOWN),
     }
 }
 
@@ -179,7 +182,10 @@ fn get_error(mut bytes: Bytes) -> Option<RemoteError> {
         E_DECODE => RemoteError::Decode(String::from_utf8_lossy(&bytes).into_owned()),
         E_ENCODE => RemoteError::Encode(String::from_utf8_lossy(&bytes).into_owned()),
         E_TOO_LARGE => RemoteError::TooLarge,
-        _ => return None,
+        // An error a later version knows and this one doesn't. Answering the
+        // call with it is right; dropping the reply would leave the caller
+        // waiting out its timeout for an answer that already came.
+        _ => RemoteError::Unknown,
     })
 }
 
@@ -238,12 +244,35 @@ mod tests {
             RemoteError::Decode("bad".into()),
             RemoteError::Encode("worse".into()),
             RemoteError::TooLarge,
+            RemoteError::Unknown,
         ] {
             round_trips(Frame::Reply {
                 call_id: 1,
                 result: Err(error),
             });
         }
+    }
+
+    /// A node that knows an error this one doesn't must still answer the call:
+    /// dropping the reply would leave the caller waiting out its timeout.
+    #[test]
+    fn an_error_from_a_newer_node_still_answers_the_call() {
+        let mut bytes = BytesMut::new();
+        bytes.put_u8(KIND_REPLY);
+        bytes.put_u64(1);
+        bytes.put_u8(ERR);
+        bytes.put_u8(0xfe); // An error tag from some later version.
+        let frame = Frame::decode(bytes.freeze());
+        assert!(
+            matches!(
+                frame,
+                Some(Frame::Reply {
+                    call_id: 1,
+                    result: Err(RemoteError::Unknown),
+                })
+            ),
+            "Expected an unknown error, got {frame:?}"
+        );
     }
 
     #[test]

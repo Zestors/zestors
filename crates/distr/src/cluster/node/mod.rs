@@ -102,7 +102,9 @@ impl ClusterNode {
 
         let result = node.run().await;
 
-        messaging.stop();
+        // Stops taking messages and gives up on the calls still waiting, which
+        // its `Drop` would also do if this node never got here.
+        drop(messaging);
         membership.leave().await;
         links.shutdown().await;
 

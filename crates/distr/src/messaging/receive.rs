@@ -340,8 +340,10 @@ impl Router {
             tracing::warn!("Dropping a message for an actor with too much waiting: {error}");
         }
         for call_id in answers {
+            // One id having nowhere to go is no reason to give up on the rest,
+            // even though today they would all fail the same way.
             let Some(lane) = self.session.reply_lane(&work.from, call_id) else {
-                return;
+                continue;
             };
             let _ = lane.try_send(
                 Frame::Reply {

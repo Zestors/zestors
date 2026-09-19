@@ -4,7 +4,7 @@ use super::{
     Decode, Encode,
     reply::{RemoteReceipt, RemoteReply},
 };
-use crate::StableId;
+use crate::{MessageId, StableId};
 use std::time::Duration;
 use zestors_interface::{Call, Cast, Message, MessageKind, ReceiptOf};
 
@@ -85,6 +85,102 @@ impl<T: Send + 'static> RemoteMessageKind<T> for Call {
         RemoteReply::local(receipt, timeout)
     }
 }
+
+/// A set of message types — a tuple, or an [`Interface`](zestors_interface::Interface)'s
+/// [`Set`](zestors_interface::Interface::Set) — of which every one can be sent
+/// to an actor on another node.
+///
+/// This is what [`Cluster::address`](crate::Cluster::address) needs in order to
+/// name the messages to the node the actor is on: each is asked about by its
+/// [`MessageId`], which only a [`RemoteMessage`] has. There is nothing to
+/// implement; it holds for every tuple of up to 24 remote messages.
+///
+/// An interface with a message that can't cross the network is therefore not
+/// addressable as a whole. Reach the rest of it with
+/// [`Cluster::address_dyn`](crate::Cluster::address_dyn):
+///
+/// ```compile_fail
+/// # use zestors_distr::{Cluster, GlobalName};
+/// # use zestors_interface::Message;
+/// // An ordinary message, but with no `StableId` to name it by and no way to
+/// // encode it, so it can only be delivered on this node.
+/// #[derive(Message)]
+/// # #[zestors(interface_path = "zestors_interface")]
+/// struct Local(u32);
+///
+/// # async fn example(cluster: Cluster, target: GlobalName) {
+/// // `Local` is not a `RemoteMessage`, so this does not compile.
+/// let _ = cluster.address_dyn::<(Local,)>(target).await;
+/// # }
+/// ```
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` contains a message that can't be sent to another node",
+    label = "not every message here is a `RemoteMessage`",
+    note = "a message crosses the network when it has a `StableId` and can be encoded and decoded",
+    note = "to address only part of an interface, use `Cluster::address_dyn` with the messages that can"
+)]
+pub trait RemoteSet {
+    /// The id each message in the set goes by on the wire.
+    const MESSAGE_IDS: &'static [MessageId];
+}
+
+macro_rules! impl_remote_set {
+    ($($member:ident),*) => {
+        impl<$($member: RemoteMessage,)*> RemoteSet for ($($member,)*) {
+            const MESSAGE_IDS: &'static [MessageId] = &[$($member::Id,)*];
+        }
+    };
+}
+
+// The same arity that `type_sets` supports for a set.
+impl_remote_set!();
+impl_remote_set!(M1);
+impl_remote_set!(M1, M2);
+impl_remote_set!(M1, M2, M3);
+impl_remote_set!(M1, M2, M3, M4);
+impl_remote_set!(M1, M2, M3, M4, M5);
+impl_remote_set!(M1, M2, M3, M4, M5, M6);
+impl_remote_set!(M1, M2, M3, M4, M5, M6, M7);
+impl_remote_set!(M1, M2, M3, M4, M5, M6, M7, M8);
+impl_remote_set!(M1, M2, M3, M4, M5, M6, M7, M8, M9);
+impl_remote_set!(M1, M2, M3, M4, M5, M6, M7, M8, M9, M10);
+impl_remote_set!(M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11);
+impl_remote_set!(M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12);
+impl_remote_set!(M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13);
+impl_remote_set!(M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14);
+impl_remote_set!(
+    M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15
+);
+impl_remote_set!(
+    M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16
+);
+impl_remote_set!(
+    M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17
+);
+impl_remote_set!(
+    M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18
+);
+impl_remote_set!(
+    M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19
+);
+impl_remote_set!(
+    M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20
+);
+impl_remote_set!(
+    M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20, M21
+);
+impl_remote_set!(
+    M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20, M21,
+    M22
+);
+impl_remote_set!(
+    M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20, M21,
+    M22, M23
+);
+impl_remote_set!(
+    M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12, M13, M14, M15, M16, M17, M18, M19, M20, M21,
+    M22, M23, M24
+);
 
 #[cfg(test)]
 mod tests {

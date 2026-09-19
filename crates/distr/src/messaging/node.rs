@@ -3,7 +3,7 @@
 
 use super::{
     AddressError, ClusterAddress, RemoteActorOps as _, RemoteAddress, RemoteError, RemoteMessage,
-    RemoteOpError, RemoteReplyError,
+    RemoteOpError, RemoteReplyError, RemoteSet,
     dispatch::{Handler, Typed},
     ops,
     pending::Pending,
@@ -15,7 +15,6 @@ use crate::{
 };
 use dashmap::DashMap;
 use std::{
-    any::TypeId,
     marker::PhantomData,
     sync::{Arc, RwLock, atomic::AtomicU64},
     time::Duration,
@@ -32,8 +31,6 @@ pub(crate) struct CommunicationView {
     /// How many lanes to a peer messages between actors are spread over.
     pub(super) shards: u8,
     pub(super) handlers: DashMap<MessageId, Arc<dyn Handler>>,
-    /// The id each registered message type goes by on the wire.
-    pub(super) type_ids: DashMap<TypeId, MessageId>,
     /// Set while the node runs.
     pub(super) running: RwLock<Option<Started>>,
     pub(super) next_call: AtomicU64,
@@ -54,7 +51,6 @@ impl CommunicationView {
             call_timeout,
             shards,
             handlers,
-            type_ids: DashMap::new(),
             running: RwLock::new(None),
             next_call: AtomicU64::new(0),
         }
@@ -67,7 +63,6 @@ impl CommunicationView {
     pub(super) fn register<M: RemoteMessage>(&self) {
         self.handlers
             .insert(M::Id, Arc::new(Typed::<M>(PhantomData)));
-        self.type_ids.insert(TypeId::of::<M>(), M::Id);
     }
 }
 
@@ -78,9 +73,9 @@ impl Cluster {
     /// to any actor on this node that accepts them. Messages of a type that
     /// isn't registered are answered with [`RemoteError::UnknownMessage`].
     ///
-    /// Also what makes [`Cluster::address`] check that an actor on another node
-    /// accepts `M`: it can only tell the other node about the messages that are
-    /// registered here. Sending a message needn't be registered otherwise.
+    /// Only receiving needs it. Sending a message doesn't, and neither does
+    /// [`Cluster::address`], which names the messages it asks about by the
+    /// [`MessageId`] on their type.
     pub fn register<M: RemoteMessage>(&self) -> &Self {
         self.messaging().register::<M>();
         self
@@ -96,19 +91,25 @@ impl Cluster {
     /// [`ClusterAddress::Remote`]. `I` is what it accepts.
     ///
     /// The actor is looked up where it is: in the registry of this node, or by
-    /// asking the node it is on. It has to be running, and accept `I`. For an
-    /// actor on another node, that needs the node to be a reachable member,
-    /// and it is only checked to accept the messages in `I` that are
-    /// [registered](Cluster::register) on this node, and on its own node. Use [`Cluster::address_unchecked`] to skip the check, or
-    /// [`Cluster::address_dyn`] for a set of messages.
+    /// asking the node it is on. It has to be running, and accept `I`.
+    ///
+    /// For an actor on another node, that node has to be a reachable member,
+    /// and every message in `I` is asked about — which is why `I`'s messages
+    /// must all be able to cross the network, see [`RemoteSet`].
+    ///
+    /// Use [`Cluster::address_unchecked`] to skip all of this, or
+    /// [`Cluster::address_dyn`] for a set of messages instead of an interface.
     pub async fn address<I: Interface>(
         &self,
         target: GlobalName,
-    ) -> Result<ClusterAddress<I>, AddressError> {
+    ) -> Result<ClusterAddress<I>, AddressError>
+    where
+        I::Set: RemoteSet,
+    {
         if *target.node() == self.name() {
             return Ok(ClusterAddress::Local(target.name().typed_address::<I>()?));
         }
-        self.resolve(target, <I::Set as Members>::members())
+        self.resolve(target, <I::Set as RemoteSet>::MESSAGE_IDS)
             .await
             .map(ClusterAddress::Remote)
     }
@@ -120,32 +121,26 @@ impl Cluster {
         target: GlobalName,
     ) -> Result<ClusterAddress<Dyn<S>>, AddressError>
     where
-        S: AsTypeSet + Members + 'static,
+        S: AsTypeSet + Members + RemoteSet + 'static,
     {
         if *target.node() == self.name() {
             return Ok(ClusterAddress::Local(target.name().dyn_address::<S>()?));
         }
-        self.resolve(target, S::members())
+        self.resolve(target, S::MESSAGE_IDS)
             .await
             .map(ClusterAddress::Remote)
     }
 
     /// Asks the node `target` is on whether the actor is there, and accepts
-    /// the messages of `types`.
+    /// the messages with these ids.
     async fn resolve<C: Context>(
         &self,
         target: GlobalName,
-        types: &[TypeId],
+        ids: &'static [MessageId],
     ) -> Result<RemoteAddress<C>, AddressError> {
-        // A message that isn't registered has no id to tell the other node, and
-        // can't be sent through the address either.
-        let ids: Vec<MessageId> = types
-            .iter()
-            .filter_map(|ty| self.messaging().type_ids.get(ty).map(|id| *id))
-            .collect();
         let name = target.name().clone();
         let address = RemoteAddress::new(self.clone(), target);
-        match address.is_superset_of(&ids).await {
+        match address.is_superset_of(ids).await {
             Ok(true) => Ok(address),
             Ok(false) => Err(AddressError::TypeMismatch(name)),
             Err(RemoteOpError::Reply(RemoteReplyError::Remote(RemoteError::NoSuchActor))) => {
@@ -153,13 +148,6 @@ impl Cluster {
             }
             Err(error) => Err(AddressError::Remote(error)),
         }
-    }
-
-    /// Like [`Cluster::address`], but without looking for the actor, so that it
-    /// isn't async and doesn't need the node to be reachable. What is wrong is
-    /// then answered when a message is sent.
-    pub fn address_unchecked<C: Context>(&self, target: GlobalName) -> RemoteAddress<C> {
-        RemoteAddress::new(self.clone(), target)
     }
 
     /// Starts taking in messages, and sends what is asked to, until the returned
@@ -188,15 +176,20 @@ impl Cluster {
     }
 }
 
-/// Messaging while the node runs. Stops when stopped or dropped.
+/// Messaging while the node runs. Stops when dropped, however that happens:
+/// the node exiting on its own, or its task being cancelled part way.
 pub(crate) struct Serving {
     cluster: Cluster,
     _stop: DropGuard,
 }
 
-impl Serving {
+impl Drop for Serving {
     /// Stops taking in messages, and gives up on the calls still waiting.
-    pub(crate) fn stop(self) {
+    ///
+    /// This is in `Drop` and not a method that the node remembers to call, so
+    /// that a node which stops without getting that far still tells whoever is
+    /// waiting, rather than leaving them to wait out the call timeout.
+    fn drop(&mut self) {
         if let Some(running) = self
             .cluster
             .messaging()

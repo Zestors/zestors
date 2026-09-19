@@ -533,6 +533,27 @@ async fn a_call_fails_when_the_node_crashes() {
     ));
 }
 
+/// The node that sent the call stops, rather than the one it went to. Whoever
+/// was waiting is told straight away, instead of waiting out the call timeout
+/// for a node that isn't listening any more.
+#[tokio::test(start_paused = true)]
+async fn a_call_fails_when_this_node_stops_without_saying_so() {
+    let pair = Pair::start().await;
+    let _worker = worker("sender-stops", Log::default());
+
+    let reply = pair
+        .on_b::<WorkerInterface>("sender-stops")
+        .cast(Hang)
+        .await
+        .unwrap();
+    // This node stops without the graceful path that gives up on its calls.
+    pair.a.task.abort();
+    assert!(matches!(
+        within(reply.wait()).await,
+        Err(RemoteReplyError::Disconnected)
+    ));
+}
+
 #[tokio::test(start_paused = true)]
 async fn messages_that_cant_be_sent_are_given_back() {
     let pair = Pair::start().await;
@@ -737,6 +758,27 @@ async fn a_request_fails_when_the_node_holding_it_is_lost() {
     tokio::time::sleep(Duration::from_secs(5)).await;
     pair.b.task.abort();
     assert!(within(answer).await.is_err());
+}
+
+/// A request the actor keeps forever must run out of time like a call does.
+/// Otherwise the sender waits for an answer that is never coming, and the entry
+/// waiting for it is never cleaned up.
+#[tokio::test(start_paused = true)]
+async fn a_request_the_actor_never_answers_runs_out_of_time() {
+    let pair = Pair::start().await;
+    let _worker = worker("request-held", Log::default());
+
+    let (reply, answer) = RemoteRequest::new();
+    pair.on_b::<WorkerInterface>("request-held")
+        .cast(FetchAndHang { reply })
+        .await
+        .unwrap();
+
+    // The node stays up and the actor keeps the request: only the deadline ends this.
+    assert!(
+        within(answer).await.is_err(),
+        "The request should have run out of time"
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -1060,6 +1102,25 @@ async fn a_local_call_can_time_out_and_a_closed_actor_is_told() {
             ..
         })
     ));
+}
+
+/// `Unknown` is a `RemoteMessage` that no node has registered, and the actor
+/// doesn't accept it either. Asking for an address for it must fail rather than
+/// quietly skip the message it couldn't check.
+#[tokio::test(start_paused = true)]
+async fn an_address_is_not_made_for_a_message_that_could_not_be_checked() {
+    let pair = Pair::start().await;
+    let _worker = worker("unchecked-message", Log::default());
+
+    let address = pair
+        .a
+        .cluster
+        .address_dyn::<(Unknown,)>(GlobalName::new("unchecked-message", "node-b"))
+        .await;
+    assert!(
+        matches!(address, Err(AddressError::TypeMismatch(_))),
+        "The actor doesn't accept it, so the address must be refused: {address:?}"
+    );
 }
 
 #[tokio::test(start_paused = true)]

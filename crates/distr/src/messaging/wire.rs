@@ -78,20 +78,23 @@ impl Wire {
     /// It is answered by whoever is on the other end of the connection, so a
     /// reply is accepted only from the node it went to. If that node is lost,
     /// or answers with an error, `request` is dropped without a reply.
+    ///
+    /// It gets the node's
+    /// [`call_timeout`](crate::ClusterConfig::call_timeout), as a call does:
+    /// an actor that keeps a request rather than answering it would otherwise
+    /// leave the sender waiting for good, and the entry waiting for it behind.
     pub(super) fn export<T: Decode + Send + 'static>(&self, request: Request<T>) -> u64 {
-        let id = self
-            .session
-            .cluster()
-            .messaging()
-            .next_call
-            .fetch_add(1, Ordering::Relaxed);
+        let messaging = self.session.cluster().messaging();
+        let id = messaging.next_call.fetch_add(1, Ordering::Relaxed);
+        let deadline = messaging.call_timeout;
         let (answer, answered) = oneshot::channel();
         self.session.pending().insert(id, self.peer.clone(), answer);
         self.exported.lock().expect("Not poisoned").push(id);
 
+        let pending = self.session.pending().clone();
         tokio::spawn(async move {
-            match answered.await {
-                Ok(Ok(bytes)) => match T::decode(bytes) {
+            match tokio::time::timeout(deadline, answered).await {
+                Ok(Ok(Ok(bytes))) => match T::decode(bytes) {
                     Ok(value) => {
                         let _ = request.reply(value);
                     }
@@ -100,7 +103,13 @@ impl Wire {
                         request.no_reply();
                     }
                 },
-                _ => request.no_reply(),
+                Ok(_) => request.no_reply(),
+                Err(_) => {
+                    tracing::debug!(id, "A request was not answered in time");
+                    // Nothing is waiting for it any more, so stop expecting it.
+                    pending.remove(id);
+                    request.no_reply();
+                }
             }
         });
         id

@@ -75,7 +75,7 @@ pub use error::{
     AddressError, CastFailure, RemoteCallError, RemoteCastError, RemoteError, RemoteOpError,
     RemoteReplyError,
 };
-pub use message::RemoteMessage;
+pub use message::{RemoteMessage, RemoteSet};
 pub use ops::{RemoteActorOps, RemoteInfo};
 pub use reply::{RemoteReceipt, RemoteReply};
 pub use request::RemoteRequest;
