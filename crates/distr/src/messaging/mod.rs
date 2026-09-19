@@ -51,6 +51,8 @@
 
 mod accepts;
 mod actor_ops;
+#[cfg(feature = "auto-register")]
+mod auto_register;
 mod cluster_address;
 mod codec;
 mod context;
@@ -66,6 +68,9 @@ mod wire;
 
 pub use accepts::{RemoteAccepts, RemoteCallOptions};
 pub use actor_ops::{RemoteActorOps, RemoteActorRef, Route};
+#[cfg(feature = "auto-register")]
+#[doc(hidden)]
+pub use auto_register::{IfNot, IfRemote, Probe, Registration};
 pub use cluster_address::ClusterAddress;
 pub use codec::{Decode, DecodeError, Encode, EncodeError};
 pub use error::{

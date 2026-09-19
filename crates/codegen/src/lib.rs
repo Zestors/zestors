@@ -38,6 +38,7 @@ struct Attrs {
     actor_path: Option<syn::Path>,
     reply: Option<syn::Type>,
     id: Option<syn::LitStr>,
+    no_auto_register: darling::util::Flag,
 }
 
 impl Attrs {
@@ -310,6 +311,10 @@ pub fn derive_message(input: TokenStream) -> TokenStream {
 /// The id is set with `#[msg(id = "<uuid>")]`. If it is missing, compilation
 /// fails with a freshly generated random id that can be pasted in.
 ///
+/// With the `auto-register` feature of `zestors-distr`, a type that isn't
+/// generic is also collected for `Cluster::auto_register`, which registers it
+/// if it is a `RemoteMessage`. `#[msg(no_auto_register)]` leaves it out.
+///
 /// # Example
 /// ```
 /// # use zestors_distr::*;
@@ -353,10 +358,15 @@ pub fn derive_message_id(input: TokenStream) -> TokenStream {
 
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
+    // A generic type has no one type to register.
+    let auto_register = (input.generics.params.is_empty() && !attrs.no_auto_register.is_present())
+        .then(|| quote!(#distr_path::__auto_register!(#name);));
+
     TokenStream::from(quote! {
         impl #impl_generics #distr_path::StableId for #name #ty_generics #where_clause {
             const Id: #distr_path::Id = #distr_path::Id::from_u128(#uuid);
         }
+        #auto_register
     })
 }
 

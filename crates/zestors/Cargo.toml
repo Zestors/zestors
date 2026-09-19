@@ -27,4 +27,6 @@ rootcause.workspace = true
 serde.workspace = true
 
 [features]
-_ra = []
+_ra = ["auto-register"]
+# See `zestors_distr::Cluster::auto_register`.
+auto-register = ["zestors-distr/auto-register"]

@@ -55,7 +55,7 @@ struct Unwanted;
 
 /// Not registered anywhere.
 #[derive(Message, StableId, Serialize, Deserialize, Debug)]
-#[msg(reply = u32, id = "6b0e3f0e-6c2a-4c9b-8f57-0d7a5f8d0a07")]
+#[msg(reply = u32, id = "6b0e3f0e-6c2a-4c9b-8f57-0d7a5f8d0a07", no_auto_register)]
 struct Unknown;
 
 #[derive(Message, StableId, Serialize, Deserialize, Debug)]
@@ -318,23 +318,10 @@ impl Pair {
         within(a.cluster.wait_for_members(1)).await;
         within(b.cluster.wait_for_members(1)).await;
 
-        // What both accept: node-b for receiving, node-a for checking the
+        // What both accept, everything with a `StableId` but `Unknown`: node-b for receiving, node-a for checking the
         // actors it addresses.
         for node in [&a, &b] {
-            node.cluster
-                .register::<Double>()
-                .register::<Note>()
-                .register::<Hang>()
-                .register::<Forget>()
-                .register::<Slow>()
-                .register::<Unwanted>()
-                .register::<Blob>()
-                .register::<Reverse>()
-                .register::<Fetch>()
-                .register::<FetchAndForget>()
-                .register::<FetchAndHang>()
-                .register::<Both>()
-                .register::<BigFetch>();
+            node.cluster.auto_register();
         }
         Self { a, b }
     }

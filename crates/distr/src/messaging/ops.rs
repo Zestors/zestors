@@ -6,6 +6,8 @@
 //! every node handles them without them being registered. Unlike messages,
 //! they are for the actor's channel and not its mailbox: they don't wait
 //! behind the messages queued for the actor, just as signals don't locally.
+//! That is why they opt out of `auto_register`, which would make them messages
+//! for the mailbox.
 
 use super::{
     RemoteError,
@@ -23,19 +25,19 @@ use super::Cluster;
 /// Sends a [`Signal`] to the actor. Answered with whether it was accepted:
 /// `false` if the actor was already exiting or dead.
 #[derive(Message, StableId, Serialize, Deserialize, Debug)]
-#[msg(reply = bool, id = "b5c3f7a0-5f0e-4b0f-9f7e-2f6c1f0a0001")]
+#[msg(reply = bool, id = "b5c3f7a0-5f0e-4b0f-9f7e-2f6c1f0a0001", no_auto_register)]
 #[zestors(interface_path = "zestors_interface", distr_path = "crate")]
 pub(super) struct SignalOp(pub(super) Signal);
 
 /// Waits for the actor to process a signal. Answered once it has.
 #[derive(Message, StableId, Serialize, Deserialize, Debug)]
-#[msg(reply = (), id = "b5c3f7a0-5f0e-4b0f-9f7e-2f6c1f0a0002")]
+#[msg(reply = (), id = "b5c3f7a0-5f0e-4b0f-9f7e-2f6c1f0a0002", no_auto_register)]
 #[zestors(interface_path = "zestors_interface", distr_path = "crate")]
 pub(super) struct PingOp;
 
 /// Asks about the state of the actor.
 #[derive(Message, StableId, Serialize, Deserialize, Debug)]
-#[msg(reply = RemoteInfo, id = "b5c3f7a0-5f0e-4b0f-9f7e-2f6c1f0a0003")]
+#[msg(reply = RemoteInfo, id = "b5c3f7a0-5f0e-4b0f-9f7e-2f6c1f0a0003", no_auto_register)]
 #[zestors(interface_path = "zestors_interface", distr_path = "crate")]
 pub(super) struct InfoOp;
 

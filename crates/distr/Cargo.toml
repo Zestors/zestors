@@ -28,6 +28,7 @@ postcard = { version = "1.1", features = ["use-std"] }
 type-sets.workspace = true
 tokio-util = { version = "0.7", features = ["time"] }
 jiff.workspace = true
+inventory = { workspace = true, optional = true }
 
 [dev-dependencies]
 zestors.workspace = true
@@ -36,9 +37,12 @@ zestors-distr-quic.workspace = true
 rcgen.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 # Enables the `sim` feature for this crate's own tests.
-zestors-distr = { path = ".", features = ["sim"] }
+zestors-distr = { path = ".", features = ["sim", "auto-register"] }
 
 [features]
-_ra = []
+_ra = ["auto-register"]
+# `Cluster::auto_register`: registers every message type in the binary that
+# derives `StableId`, see `auto_register`.
+auto-register = ["dep:inventory"]
 # In-process simulated clusters for tests, see `sim`.
 sim = []

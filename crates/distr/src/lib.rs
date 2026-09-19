@@ -17,6 +17,38 @@ pub mod prelude {
     };
 }
 
+/// Collects a message type for [`Cluster::auto_register`], used by the derive
+/// of `StableId`.
+#[cfg(feature = "auto-register")]
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __auto_register {
+    ($ty:ty) => {
+        $crate::__private::inventory::submit! {
+            $crate::__private::Registration::new(|cluster| {
+                #[allow(unused_imports)]
+                use $crate::__private::{IfNot as _, IfRemote as _};
+                (&$crate::__private::Probe::<$ty>::new()).register(cluster);
+            })
+        }
+    };
+}
+
+/// Without the `auto-register` feature, there is nothing to collect.
+#[cfg(not(feature = "auto-register"))]
+#[macro_export]
+#[doc(hidden)]
+macro_rules! __auto_register {
+    ($ty:ty) => {};
+}
+
+#[cfg(feature = "auto-register")]
+#[doc(hidden)]
+pub mod __private {
+    pub use crate::messaging::{IfNot, IfRemote, Probe, Registration};
+    pub use inventory;
+}
+
 mod stable_id;
 pub use stable_id::*;
 
