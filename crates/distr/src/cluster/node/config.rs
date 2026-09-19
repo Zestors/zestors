@@ -1,8 +1,6 @@
 use crate::NodeAddr;
 use crate::{
-    ClusterTimings, NodeId, Seed,
-    backend::Backend,
-    cluster::{link::Starter, membership::Options},
+    ClusterTimings, NodeId, Seed, backend::Backend, cluster::membership::Options, link::Starter,
 };
 use rand::{SeedableRng, rngs::StdRng};
 #[cfg(feature = "quic")]

@@ -4,11 +4,11 @@
 mod driver;
 mod message;
 
-use super::{
-    Cluster, Member, NodeStatus,
+use super::{Cluster, Member, NodeStatus};
+use crate::{
+    ClusterTimings, Seed,
     link::{Links, Protocol},
 };
-use crate::{ClusterTimings, Seed};
 use driver::Driver;
 use foca::Config;
 use rand::rngs::StdRng;

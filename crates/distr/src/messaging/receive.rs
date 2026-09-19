@@ -3,11 +3,8 @@
 
 use super::{RemoteError, Running, SHARDS, Shared, send::Pending, wire::Frame};
 use crate::{
-    Id, NodeId,
-    cluster::{
-        ClusterEvent,
-        link::{Delivery, Incoming, Links, PeerEvent, Protocol},
-    },
+    ClusterEvent, Id, NodeId,
+    link::{Delivery, Incoming, Links, PeerEvent, Protocol},
 };
 use bytes::Bytes;
 use std::{

@@ -1,5 +1,5 @@
 //! How messages between actors are laid out, on
-//! [`Protocol::ACTORS`](crate::cluster::link::Protocol::ACTORS): a kind byte,
+//! [`Protocol::ACTORS`](crate::link::Protocol::ACTORS): a kind byte,
 //! then the fields of that kind.
 
 use super::RemoteError;

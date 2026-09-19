@@ -4,10 +4,8 @@ use super::{
 };
 use crate::{
     ClusterTimings, Member, NodeId, NodeStatus,
-    cluster::{
-        Cluster,
-        link::{Incoming, Links, PeerEvent, Protocol},
-    },
+    cluster::Cluster,
+    link::{Incoming, Links, PeerEvent, Protocol},
 };
 use foca::{
     AccumulatingRuntime, Config, Foca, NoCustomBroadcast, OwnedNotification, PostcardCodec, Timer,
@@ -255,11 +253,7 @@ impl Driver {
 #[cfg(all(test, feature = "sim"))]
 mod tests {
     use super::*;
-    use crate::{
-        Cluster, NodeAddr,
-        backend::LocalNode,
-        cluster::{link::Starter, sim::SimNetwork},
-    };
+    use crate::{Cluster, NodeAddr, backend::LocalNode, cluster::sim::SimNetwork, link::Starter};
     use foca::Foca;
     use rand::SeedableRng;
 

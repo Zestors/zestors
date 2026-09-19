@@ -32,10 +32,12 @@ mod fabric;
 use super::{
     Cluster, ClusterTimings, Member, NodeAddr, Seed,
     backend::{Backend, LocalNode},
-    link::{Links, Starter},
     membership::{Membership, Options},
 };
-use crate::NodeId;
+use crate::{
+    NodeId,
+    link::{Links, Starter},
+};
 use fabric::{Fabric, SimEndpoint};
 use rand::{SeedableRng, rngs::StdRng};
 use std::{net::SocketAddr, num::NonZeroU32, time::Duration};

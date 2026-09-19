@@ -1,7 +1,7 @@
 //! Which nodes make up the cluster, and the machinery that keeps it up to date.
 //!
 //! The submodules are layered: [`node`] runs a node, [`membership`] decides who
-//! is in the cluster, [`link`] carries its messages, and [`backend`] is the
+//! is in the cluster, and [`backend`] is the
 //! network underneath. Layers share what they need with their siblings through `pub(super)`
 //! items, which are visible in this module and nowhere else. The public API is
 //! re-exported from here.
@@ -9,12 +9,10 @@
 pub mod backend;
 mod config;
 mod generation;
-mod link;
 mod member;
 mod membership;
 mod node;
 mod node_addr;
-mod remote;
 mod updates;
 
 #[cfg(feature = "sim")]
@@ -26,11 +24,6 @@ pub use config::{ClusterTimings, Seed};
 pub use member::Member;
 pub use node::{ClusterConfig, ClusterNode, ClusterNodeError};
 pub use node_addr::NodeAddr;
-pub use remote::{
-    Decode, DecodeError, Encode, EncodeError, Remote, RemoteAccepts, RemoteAddress,
-    RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError, RemoteMessage, RemoteReceipt,
-    RemoteReply, RemoteReplyError,
-};
 
 use crate::NodeId;
 use std::{

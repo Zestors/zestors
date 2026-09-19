@@ -55,7 +55,7 @@ pub use error::{RemoteCallError, RemoteCastError, RemoteError, RemoteReplyError}
 pub use message::RemoteMessage;
 pub use send::{RemoteAccepts, RemoteAddress, RemoteCallOptions, RemoteReceipt, RemoteReply};
 
-use super::{
+use crate::{
     Cluster,
     link::{Links, Protocol},
 };

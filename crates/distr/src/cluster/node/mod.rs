@@ -1,10 +1,8 @@
 mod config;
 mod error;
 
-use super::{
-    Cluster, Member, NodeAddr, backend::LocalNode, generation, membership::Membership,
-    remote::Remote,
-};
+use super::{Cluster, Member, NodeAddr, backend::LocalNode, generation, membership::Membership};
+use crate::messaging::Remote;
 pub use config::ClusterConfig;
 pub use error::ClusterNodeError;
 use std::{net::SocketAddr, time::Duration};

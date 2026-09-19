@@ -6,7 +6,7 @@ use super::{
 };
 use crate::{
     GlobalPid, NodeId,
-    cluster::link::{Delivery, Protocol},
+    link::{Delivery, Protocol},
 };
 use bytes::Bytes;
 use dashmap::DashMap;

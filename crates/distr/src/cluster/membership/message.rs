@@ -1,4 +1,4 @@
-use crate::{Member, NodeId, cluster::link::Delivery};
+use crate::{Member, NodeId, link::Delivery};
 use bytes::{BufMut, Bytes, BytesMut};
 use foca::{Codec, PostcardCodec};
 

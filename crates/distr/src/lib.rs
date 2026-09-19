@@ -30,14 +30,19 @@ mod global_pid;
 pub use global_pid::*;
 
 mod cluster;
+mod link;
+mod messaging;
 pub use cluster::backend;
 #[cfg(feature = "sim")]
 pub use cluster::sim;
 pub use cluster::{
     Cluster, ClusterConfig, ClusterEvent, ClusterNode, ClusterNodeError, ClusterSnapshot,
-    ClusterTimings, Decode, DecodeError, Encode, EncodeError, Member, NodeAddr, NodeStatus, Remote,
-    RemoteAccepts, RemoteAddress, RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError,
-    RemoteMessage, RemoteReceipt, RemoteReply, RemoteReplyError, Seed,
+    ClusterTimings, Member, NodeAddr, NodeStatus, Seed,
 };
 #[cfg(feature = "quic")]
 pub use cluster::{Tls, TlsError};
+pub use messaging::{
+    Decode, DecodeError, Encode, EncodeError, Remote, RemoteAccepts, RemoteAddress,
+    RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError, RemoteMessage, RemoteReceipt,
+    RemoteReply, RemoteReplyError,
+};
