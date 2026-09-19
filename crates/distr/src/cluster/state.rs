@@ -24,6 +24,11 @@ struct MembershipView {
 }
 
 struct ClusterInner {
+    /// This node's own name. Kept out of the lock because it never changes and
+    /// every address made asks for it: `Cluster::new` takes it from the config,
+    /// and the only later writes go through `set_local`, which keeps it (see
+    /// the assertion there).
+    local_name: NodeName,
     members: MembershipView,
     messaging: CommunicationView,
 }
@@ -43,6 +48,7 @@ impl Cluster {
     pub(crate) fn new(local: Member, call_timeout: Duration, shards: u8) -> Self {
         Self {
             inner: Arc::new(ClusterInner {
+                local_name: local.name.clone(),
                 members: MembershipView {
                     status_sender: watch::channel(NodeStatus::Starting).0,
                     members: RwLock::new(MemberList {
@@ -66,6 +72,11 @@ impl Cluster {
         &self.inner.messaging
     }
 
+    /// The name of this node, which never changes once it is set.
+    pub fn name(&self) -> &NodeName {
+        &self.inner.local_name
+    }
+
     /// This node, as the rest of the cluster knows it.
     pub fn local_member(&self) -> Member {
         self.state().local.clone()
@@ -75,7 +86,15 @@ impl Cluster {
         self.inner.members.members.read().expect("Not poisoned")
     }
 
+    /// Only the address and the generation of this node ever change: a rejoin
+    /// renews the generation (`Member::renew`) and the backend fills in the
+    /// address once it is bound. The name is fixed, and [`Cluster::name`]
+    /// depends on that.
     pub(super) fn set_local(&self, local: Member) {
+        debug_assert_eq!(
+            local.name, self.inner.local_name,
+            "This node cannot be renamed"
+        );
         self.inner
             .members
             .members

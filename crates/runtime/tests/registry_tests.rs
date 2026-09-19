@@ -236,7 +236,7 @@ fn name_conversions_round_trip_through_string() {
 }
 
 #[tokio::test]
-async fn name_address_and_typed_address_mirror_the_registry() {
+async fn a_names_address_mirrors_the_registry() {
     let name = common::test_name("name_helper_methods");
     let child = spawn(name.clone(), |mut inbox: Inbox<PingInterface>| async move {
         while inbox.recv().await.is_some() {}
@@ -245,8 +245,12 @@ async fn name_address_and_typed_address_mirror_the_registry() {
     .unwrap();
 
     assert!(name.address().is_some());
-    assert!(name.typed_address::<PingInterface>().is_ok());
-    assert!(name.typed_address::<OtherInterface>().is_err());
+    assert!(Registry::local().get_typed::<PingInterface>(&name).is_ok());
+    assert!(
+        Registry::local()
+            .get_typed::<OtherInterface>(&name)
+            .is_err()
+    );
 
     child.signal_shutdown();
     child.watch_exit().await.unwrap();

@@ -125,9 +125,6 @@ pub enum RemoteOpError {
     /// The request was sent, but no answer came.
     #[error(transparent)]
     Reply(#[from] RemoteReplyError),
-    /// The actor is on this node, which can't answer that.
-    #[error("Not supported for an actor on this node")]
-    Unsupported,
 }
 
 /// An address for an actor couldn't be made.

@@ -17,11 +17,10 @@ use zestors::{
     supervisor::Supervisor,
 };
 use zestors_distr::{
-    AddressError, CastFailure, Cluster, ClusterAddress, ClusterConfig, ClusterNode,
-    ClusterNodeError, Decode, DecodeError, Encode, EncodeError, GlobalName, RemoteAccepts,
-    RemoteActorOps, RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError,
-    RemoteOpError, RemoteReceipt as _, RemoteReplyError, RemoteRequest, Seed, StableId,
-    sim::SimNetwork,
+    AddressError, CastFailure, Cluster, ClusterActorOps, ClusterAddress, ClusterConfig,
+    ClusterNode, ClusterNodeError, Decode, DecodeError, Encode, EncodeError, GlobalName,
+    RemoteAccepts, RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError, RemoteOpError,
+    RemoteReceipt as _, RemoteReplyError, RemoteRequest, Seed, StableId, sim::SimNetwork,
 };
 use zestors_runtime::Registry;
 
@@ -777,6 +776,7 @@ async fn a_request_for_an_actor_that_is_not_there_fails_its_reply() {
     // message arrives.
     gone.signal_shutdown();
     within(gone.watch_exit()).await.unwrap();
+    drop(gone);
 
     let (reply, answer) = RemoteRequest::new();
     address.cast(FetchAndForget { reply }).await.unwrap();
@@ -956,6 +956,7 @@ async fn operations_report_why_they_failed() {
     let nobody = pair.on_b::<WorkerInterface>("ops-nobody").await;
     gone.signal_shutdown();
     within(gone.watch_exit()).await.unwrap();
+    drop(gone);
     assert!(matches!(
         nobody.ping().await,
         Err(RemoteOpError::Reply(RemoteReplyError::Remote(
@@ -1237,16 +1238,10 @@ async fn an_address_for_an_actor_on_this_node_is_local() {
     assert!(matches!(itself, ClusterAddress::Local(_)));
     assert_eq!(itself.call(Double(1)).await.unwrap(), 2);
 
-    // let address = Name::new_static("cluster-check")
-    //     .typed_address::<WorkerInterface>()
-    //     .unwrap();
     let address = Registry::local()
         .get_typed::<WorkerInterface>(&"cluster-check".into())
         .unwrap();
-    assert!(matches!(
-        ClusterAddress::from(address),
-        ClusterAddress::Local(_)
-    ));
+    assert!(matches!(b.local_address(address), ClusterAddress::Local(_)));
 }
 
 #[tokio::test(start_paused = true)]
@@ -1265,16 +1260,13 @@ async fn a_local_actor_can_be_operated_on_through_a_cluster_address() {
     assert!(local.accepts::<Double>().await.unwrap());
     assert!(!local.accepts::<Unwanted>().await.unwrap());
 
-    // What needs the node's registry of messages isn't known for a local actor.
-    assert!(matches!(
-        local.members().await,
-        Err(RemoteOpError::Unsupported)
-    ));
-    assert!(matches!(
-        local.accepts_id(Double::Id).await,
-        Err(RemoteOpError::Unsupported)
-    ));
-    assert!(local.info().await.unwrap().accepts.is_none());
+    // What needs the node's registry of messages is answered for a local actor
+    // too, from the same registry the node would consult for a remote one.
+    assert!(local.members().await.unwrap().contains(&Double::Id));
+    assert!(!local.members().await.unwrap().contains(&Unknown::Id));
+    assert!(local.accepts_id(Double::Id).await.unwrap());
+    assert!(!local.accepts_id(Unknown::Id).await.unwrap());
+    assert!(!local.info().await.unwrap().accepts.is_empty());
 
     assert!(local.signal_suspend().await.unwrap());
     local.ping().await.unwrap();
@@ -1290,5 +1282,13 @@ async fn a_local_actor_can_be_operated_on_through_a_cluster_address() {
     let remote = remote_on_b(&pair, "cluster-ops-remote").await;
     assert!(remote.accepts::<Double>().await.unwrap());
     assert!(remote.members().await.unwrap().contains(&Double::Id));
-    assert!(remote.info().await.unwrap().accepts.is_some());
+    assert!(!remote.info().await.unwrap().accepts.is_empty());
+
+    // The point of all this: the same actor gives the same answer whether it is
+    // asked here or over the network.
+    let here = local_on_b(&pair, "cluster-ops-remote").await;
+    assert_eq!(
+        here.members().await.unwrap(),
+        remote.members().await.unwrap()
+    );
 }

@@ -1,7 +1,8 @@
 //! Registering every message type in the binary at once, see
 //! [`Cluster::auto_register`].
 
-use super::{Cluster, RemoteMessage};
+use super::RemoteMessage;
+use crate::Cluster;
 use std::marker::PhantomData;
 
 /// A message type to register, collected from wherever it is derived.

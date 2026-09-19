@@ -66,7 +66,7 @@ mod request;
 mod send;
 mod wire;
 
-pub use address::{ClusterAddress, RemoteActorRef, RemoteAddress, Route};
+pub use address::{ClusterActorRef, ClusterAddress, LocalAddress, RemoteAddress, ClusterActorRouteRef};
 #[cfg(feature = "auto-register")]
 #[doc(hidden)]
 pub use auto_register::{IfNot, IfRemote, Probe, Registration};
@@ -76,11 +76,10 @@ pub use error::{
     RemoteReplyError,
 };
 pub use message::{RemoteMessage, RemoteSet};
-pub use ops::{RemoteActorOps, RemoteInfo};
+pub use ops::{ClusterActorOps, RemoteInfo};
 pub use reply::{RemoteReceipt, RemoteReply};
 pub use request::RemoteRequest;
 
-use crate::Cluster;
 pub(crate) use node::CommunicationView;
 use node::Started;
 pub use send::{RemoteAccepts, RemoteCallOptions};

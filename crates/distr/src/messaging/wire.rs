@@ -85,6 +85,8 @@ impl Wire {
     /// leave the sender waiting for good, and the entry waiting for it behind.
     pub(super) fn export<T: Decode + Send + 'static>(&self, request: Request<T>) -> u64 {
         let messaging = self.session.cluster().messaging();
+        // The same counter calls use, on purpose: a request is answered the
+        // same way and waits in the same table, so the two share one id space.
         let id = messaging.next_call.fetch_add(1, Ordering::Relaxed);
         let deadline = messaging.call_timeout;
         let (answer, answered) = oneshot::channel();

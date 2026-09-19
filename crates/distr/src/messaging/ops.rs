@@ -10,7 +10,8 @@
 //! for the mailbox.
 
 use super::{
-    RemoteActorRef, RemoteError, RemoteMessage, RemoteOpError, RemoteReplyError, Route,
+    ClusterActorRef, ClusterActorRouteRef, RemoteError, RemoteMessage, RemoteOpError,
+    RemoteReplyError,
     dispatch::{Builtin, Handler, Operation},
 };
 use crate::{Cluster, MessageId, StableId};
@@ -49,9 +50,25 @@ pub struct RemoteInfo {
     /// Whether the actor's mailbox is full, so that sending to it waits.
     pub reached_backpressure: bool,
     /// The ids of the message types that the actor accepts and that its node
-    /// has registered with [`Cluster::register`](crate::Cluster::register). `None`
-    /// for an actor on this node, which can't tell.
-    pub accepts: Option<Vec<MessageId>>,
+    /// has registered with [`Cluster::register`](crate::Cluster::register),
+    /// sorted. A message the node hasn't registered is not listed, wherever the
+    /// actor is: the node has no id to name it by.
+    pub accepts: Vec<MessageId>,
+}
+
+/// The ids `address` accepts, among the messages `cluster` has registered. The
+/// one answer to that question, so that a node gives the same one about an
+/// actor whether it is asked from here or from another node.
+fn accepted_ids(cluster: &Cluster, address: &Address) -> Vec<MessageId> {
+    let mut accepts: Vec<MessageId> = cluster
+        .messaging()
+        .handlers
+        .iter()
+        .filter(|handler| handler.accepts(address))
+        .map(|handler| *handler.key())
+        .collect();
+    accepts.sort();
+    accepts
 }
 
 impl Operation for SignalOp {
@@ -81,18 +98,10 @@ impl Operation for InfoOp {
         cluster: Cluster,
     ) -> super::dispatch::BoxFuture<Result<RemoteInfo, RemoteError>> {
         Box::pin(async move {
-            let mut accepts: Vec<MessageId> = cluster
-                .messaging()
-                .handlers
-                .iter()
-                .filter(|handler| handler.accepts(&address))
-                .map(|handler| *handler.key())
-                .collect();
-            accepts.sort();
             Ok(RemoteInfo {
                 snapshot: address.snapshot(),
                 reached_backpressure: address.reached_backpressure(),
-                accepts: Some(accepts),
+                accepts: accepted_ids(&cluster, &address),
             })
         })
     }
@@ -122,14 +131,14 @@ pub(super) fn register(handlers: &DashMap<MessageId, Arc<dyn Handler>>) {
 /// change isn't supported yet.
 ///
 /// The operations aren't queued behind the messages waiting for the actor.
-pub trait RemoteActorOps: RemoteActorRef + sealed::Sealed {
+pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
     /// Sends the given [`Signal`] to the actor. Returns `false` if the actor
     /// was already exiting or dead.
     fn signal(&self, signal: Signal) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
         async move {
             match self.route() {
-                Route::Local(address) => Ok(address.signal(signal)),
-                Route::Remote(address) => address.call_op(SignalOp(signal)).await,
+                ClusterActorRouteRef::Local(local) => Ok(local.address().signal(signal)),
+                ClusterActorRouteRef::Remote(address) => address.call_op(SignalOp(signal)).await,
             }
         }
     }
@@ -158,10 +167,10 @@ pub trait RemoteActorOps: RemoteActorRef + sealed::Sealed {
     fn ping(&self) -> impl Future<Output = Result<(), RemoteOpError>> + Send {
         async move {
             match self.route() {
-                Route::Local(address) => address.ping().await.map_err(|_| {
+                ClusterActorRouteRef::Local(local) => local.address().ping().await.map_err(|_| {
                     RemoteOpError::Reply(RemoteReplyError::Remote(RemoteError::NoReply))
                 }),
-                Route::Remote(address) => address.call_op(PingOp).await,
+                ClusterActorRouteRef::Remote(address) => address.call_op(PingOp).await,
             }
         }
     }
@@ -171,12 +180,15 @@ pub trait RemoteActorOps: RemoteActorRef + sealed::Sealed {
     fn info(&self) -> impl Future<Output = Result<RemoteInfo, RemoteOpError>> + Send {
         async move {
             match self.route() {
-                Route::Local(address) => Ok(RemoteInfo {
-                    snapshot: address.snapshot(),
-                    reached_backpressure: address.reached_backpressure(),
-                    accepts: None,
-                }),
-                Route::Remote(address) => address.call_op(InfoOp).await,
+                ClusterActorRouteRef::Local(local) => {
+                    let address = local.address();
+                    Ok(RemoteInfo {
+                        snapshot: address.snapshot(),
+                        reached_backpressure: address.reached_backpressure(),
+                        accepts: accepted_ids(local.cluster(), &address.clone().into_dyn::<()>()),
+                    })
+                }
+                ClusterActorRouteRef::Remote(address) => address.call_op(InfoOp).await,
             }
         }
     }
@@ -184,27 +196,56 @@ pub trait RemoteActorOps: RemoteActorRef + sealed::Sealed {
     /// Captures a [`ChannelSnapshot`] of the actor. Its timestamps are from the
     /// clock of the actor's node.
     fn snapshot(&self) -> impl Future<Output = Result<ChannelSnapshot, RemoteOpError>> + Send {
-        async move { Ok(self.info().await?.snapshot) }
+        async move {
+            match self.route() {
+                ClusterActorRouteRef::Local(local) => Ok(local.address().snapshot()),
+                ClusterActorRouteRef::Remote(address) => Ok(address.info().await?.snapshot),
+            }
+        }
     }
 
     /// The actor's current [`ActorStatus`].
     fn status(&self) -> impl Future<Output = Result<ActorStatus, RemoteOpError>> + Send {
-        async move { Ok(self.info().await?.snapshot.status) }
+        async move {
+            match self.route() {
+                ClusterActorRouteRef::Local(local) => Ok(local.address().status()),
+                ClusterActorRouteRef::Remote(address) => Ok(address.info().await?.snapshot.status),
+            }
+        }
     }
 
     /// Whether the actor's status is [`ActorStatus::Exiting`].
     fn is_exiting(&self) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
-        async move { Ok(self.status().await?.is_exiting()) }
+        async move {
+            match self.route() {
+                ClusterActorRouteRef::Local(local) => Ok(local.address().is_exiting()),
+                ClusterActorRouteRef::Remote(address) => {
+                    Ok(address.info().await?.snapshot.status.is_exiting())
+                }
+            }
+        }
     }
 
     /// Whether the actor's status is [`ActorStatus::Exited`].
     fn is_dead(&self) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
-        async move { Ok(self.status().await?.is_dead()) }
+        async move {
+            match self.route() {
+                ClusterActorRouteRef::Local(local) => Ok(local.address().is_dead()),
+                ClusterActorRouteRef::Remote(address) => {
+                    Ok(address.info().await?.snapshot.status.is_dead())
+                }
+            }
+        }
     }
 
     /// The number of messages currently queued for the actor.
     fn msg_len(&self) -> impl Future<Output = Result<usize, RemoteOpError>> + Send {
-        async move { Ok(self.info().await?.snapshot.msg_len) }
+        async move {
+            match self.route() {
+                ClusterActorRouteRef::Local(local) => Ok(local.address().msg_len()),
+                ClusterActorRouteRef::Remote(address) => Ok(address.info().await?.snapshot.msg_len),
+            }
+        }
     }
 
     /// Whether no messages are currently queued for the actor.
@@ -214,7 +255,14 @@ pub trait RemoteActorOps: RemoteActorRef + sealed::Sealed {
 
     /// The number of signals currently queued for the actor.
     fn signal_len(&self) -> impl Future<Output = Result<usize, RemoteOpError>> + Send {
-        async move { Ok(self.info().await?.snapshot.signal_len) }
+        async move {
+            match self.route() {
+                ClusterActorRouteRef::Local(local) => Ok(local.address().signal_len()),
+                ClusterActorRouteRef::Remote(address) => {
+                    Ok(address.info().await?.snapshot.signal_len)
+                }
+            }
+        }
     }
 
     /// Whether no signals are currently queued for the actor.
@@ -224,19 +272,35 @@ pub trait RemoteActorOps: RemoteActorRef + sealed::Sealed {
 
     /// Whether the actor's mailbox is full, so that sending to it waits.
     fn reached_backpressure(&self) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
-        async move { Ok(self.info().await?.reached_backpressure) }
+        async move {
+            match self.route() {
+                ClusterActorRouteRef::Local(local) => Ok(local.address().reached_backpressure()),
+                ClusterActorRouteRef::Remote(address) => {
+                    Ok(address.info().await?.reached_backpressure)
+                }
+            }
+        }
     }
 
     /// When the actor was last spawned, on the clock of its node, or `None` if
     /// it never was.
     fn last_spawned_at(&self) -> impl Future<Output = Result<Option<Zoned>, RemoteOpError>> + Send {
-        async move { Ok(self.info().await?.snapshot.spawns.last().cloned()) }
+        async move {
+            match self.route() {
+                ClusterActorRouteRef::Local(local) => {
+                    Ok(local.address().snapshot().spawns.last().cloned())
+                }
+                ClusterActorRouteRef::Remote(address) => {
+                    Ok(address.info().await?.snapshot.spawns.last().cloned())
+                }
+            }
+        }
     }
 
     /// The ids of the message types the actor accepts and that its node has
-    /// registered, see [`RemoteInfo::accepts`]. Not supported for a local actor.
+    /// registered, see [`RemoteInfo::accepts`].
     fn members(&self) -> impl Future<Output = Result<Vec<MessageId>, RemoteOpError>> + Send {
-        async move { self.info().await?.accepts.ok_or(RemoteOpError::Unsupported) }
+        async move { Ok(self.info().await?.accepts) }
     }
 
     /// Whether the actor accepts messages of type `M`. For a remote actor,
@@ -246,14 +310,14 @@ pub trait RemoteActorOps: RemoteActorRef + sealed::Sealed {
     ) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
         async move {
             match self.route() {
-                Route::Local(address) => Ok(address.accepts::<M>()),
-                Route::Remote(_) => self.accepts_id(M::Id).await,
+                ClusterActorRouteRef::Local(local) => Ok(local.address().accepts::<M>()),
+                ClusterActorRouteRef::Remote(_) => self.accepts_id(M::Id).await,
             }
         }
     }
 
     /// Whether the actor accepts messages with the id `id`, see
-    /// [`RemoteActorOps::accepts`]. Not supported for a local actor.
+    /// [`RemoteActorOps::accepts`].
     fn accepts_id(
         &self,
         id: MessageId,
@@ -261,8 +325,7 @@ pub trait RemoteActorOps: RemoteActorRef + sealed::Sealed {
         async move { Ok(self.members().await?.contains(&id)) }
     }
 
-    /// Whether the actor accepts every message type in `ids`. Not supported for
-    /// a local actor.
+    /// Whether the actor accepts every message type in `ids`.
     fn is_superset_of<'a>(
         &'a self,
         ids: &'a [MessageId],
@@ -276,15 +339,15 @@ pub trait RemoteActorOps: RemoteActorRef + sealed::Sealed {
     /// The actor's name.
     fn name(&self) -> &Name {
         match self.route() {
-            Route::Local(address) => address.name(),
-            Route::Remote(address) => address.name().name(),
+            ClusterActorRouteRef::Local(local) => local.address().name(),
+            ClusterActorRouteRef::Remote(address) => address.name().name(),
         }
     }
 }
 
-impl<T: RemoteActorRef> RemoteActorOps for T {}
+impl<T: ClusterActorRef> ClusterActorOps for T {}
 
 mod sealed {
     pub trait Sealed {}
-    impl<T: super::RemoteActorRef> Sealed for T {}
+    impl<T: super::ClusterActorRef> Sealed for T {}
 }

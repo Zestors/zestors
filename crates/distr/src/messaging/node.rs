@@ -2,15 +2,15 @@
 //! addresses it makes, and the state it has while it runs.
 
 use super::{
-    AddressError, ClusterAddress, RemoteActorOps as _, RemoteAddress, RemoteError, RemoteMessage,
-    RemoteOpError, RemoteReplyError, RemoteSet,
+    AddressError, ClusterActorOps as _, ClusterAddress, LocalAddress, RemoteAddress, RemoteError,
+    RemoteMessage, RemoteOpError, RemoteReplyError, RemoteSet,
     dispatch::{Handler, Typed},
     ops,
     pending::Pending,
     receive,
 };
 use crate::{
-    Cluster, GlobalName, MessageId, NodeName,
+    Cluster, GlobalName, MessageId,
     link::{Links, Protocol},
 };
 use dashmap::DashMap;
@@ -22,7 +22,7 @@ use std::{
 use tokio_util::sync::{CancellationToken, DropGuard};
 use type_sets::{AsTypeSet, Members};
 use zestors_interface::Interface;
-use zestors_runtime::{Context, Dyn, Registry};
+use zestors_runtime::{Address, Context, Dyn, Registry};
 
 /// What a node needs to message actors on other nodes, kept inside a
 /// [`Cluster`].
@@ -33,6 +33,10 @@ pub(crate) struct CommunicationView {
     pub(super) handlers: DashMap<MessageId, Arc<dyn Handler>>,
     /// Set while the node runs.
     pub(super) running: RwLock<Option<Started>>,
+    /// Numbers the answers this node is waiting for. Both a call and a request
+    /// handed to another node inside a message draw from it, because both are
+    /// answered by a [`Frame::Reply`](super::frame::Frame::Reply) and looked up
+    /// in the one [`Pending`] table: two counters would collide there.
     pub(super) next_call: AtomicU64,
 }
 
@@ -81,9 +85,12 @@ impl Cluster {
         self
     }
 
-    /// This node.
-    pub fn name(&self) -> NodeName {
-        self.local_member().name
+    /// An actor on this node as a [`ClusterAddress`], so that it can be
+    /// operated on the same way as one anywhere else in the cluster. The
+    /// cluster is needed because the operations that go by
+    /// [`MessageId`] answer from its registry.
+    pub fn local_address<C: Context>(&self, address: Address<C>) -> ClusterAddress<C> {
+        ClusterAddress::Local(LocalAddress::new(self.clone(), address))
     }
 
     /// The actor `target`, whether it is on this node or another: a
@@ -106,10 +113,9 @@ impl Cluster {
     where
         I::Set: RemoteSet,
     {
-        if *target.node() == self.name() {
-            return Ok(ClusterAddress::Local(
-                Registry::local().get_typed::<I>(&target.name())?,
-            ));
+        if target.node() == self.name() {
+            let address = Registry::local().get_typed::<I>(target.name())?;
+            return Ok(self.local_address(address));
         }
         self.resolve(target, <I::Set as RemoteSet>::MESSAGE_IDS)
             .await
@@ -125,10 +131,9 @@ impl Cluster {
     where
         S: AsTypeSet + Members + RemoteSet + 'static,
     {
-        if *target.node() == self.name() {
-            return Ok(ClusterAddress::Local(
-                Registry::local().get_dyn::<S>(&target.name())?,
-            ));
+        if target.node() == self.name() {
+            let address = Registry::local().get_dyn::<S>(target.name())?;
+            return Ok(self.local_address(address));
         }
         self.resolve(target, S::MESSAGE_IDS)
             .await

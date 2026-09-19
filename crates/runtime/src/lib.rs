@@ -119,7 +119,7 @@
 //! ```
 //! # use std::time::Duration;
 //! # use zestors::runtime::prelude::*;
-//! # use zestors::runtime::spawn;
+//! # use zestors::runtime::{Registry, spawn};
 //! # #[tokio::main]
 //! # async fn main() {
 //! let name = Name::new("counter");
@@ -130,7 +130,9 @@
 //! .unwrap();
 //!
 //! // Elsewhere in the process, with only the `Name` in hand:
-//! let found = name.typed_address::<()>().expect("still registered");
+//! let found = Registry::local()
+//!     .get_typed::<()>(&name)
+//!     .expect("still registered");
 //! found.cast(()).await.unwrap();
 //!
 //! // `shutdown_abort` signals a shutdown and gives the actor a grace

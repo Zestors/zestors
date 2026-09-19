@@ -2,8 +2,8 @@
 //! to an actor on another node or on this one.
 
 use super::{
-    CastFailure, Decode, RemoteActorRef, RemoteAddress, RemoteCallError, RemoteCastError,
-    RemoteMessage, RemoteOpError, RemoteReceipt, RemoteReply, Route,
+    CastFailure, ClusterActorRef, ClusterActorRouteRef, Decode, RemoteAddress, RemoteCallError,
+    RemoteCastError, RemoteMessage, RemoteOpError, RemoteReceipt, RemoteReply,
     frame::Frame,
     message::RemoteMessageKind,
     receive::Session,
@@ -292,7 +292,7 @@ pub trait RemoteAccepts<M: RemoteMessage>: Sync {
 impl<M, T> RemoteAccepts<M> for T
 where
     M: RemoteMessage,
-    T: RemoteActorRef,
+    T: ClusterActorRef,
     <T::Ctx as Context>::Set: Contains<M>,
 {
     async fn cast_with(
@@ -301,8 +301,8 @@ where
         options: RemoteCallOptions,
     ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
         match self.route() {
-            Route::Remote(address) => address.cast_remote(msg, options).await,
-            Route::Local(address) => cast(address, msg, options).await,
+            ClusterActorRouteRef::Remote(address) => address.cast_remote(msg, options).await,
+            ClusterActorRouteRef::Local(local) => cast(local.address(), msg, options).await,
         }
     }
 
@@ -312,8 +312,8 @@ where
         options: RemoteCallOptions,
     ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
         match self.route() {
-            Route::Remote(address) => address.try_cast_remote(msg, options),
-            Route::Local(address) => try_cast(address, msg, options),
+            ClusterActorRouteRef::Remote(address) => address.try_cast_remote(msg, options),
+            ClusterActorRouteRef::Local(local) => try_cast(local.address(), msg, options),
         }
     }
 }
