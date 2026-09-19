@@ -69,8 +69,7 @@ fn start(name: &str, addr: SocketAddr, seed: Option<(&str, SocketAddr)>) -> Test
     if let Some((seed_name, seed_addr)) = seed {
         config = config.seed(Seed::new(seed_name, seed_addr));
     }
-    let node = ClusterNode::new(Supervisor::blueprint().rand_name(), config)
-        .with_exit_delay(Duration::ZERO);
+    let node = ClusterNode::new(Supervisor::blueprint().rand_name(), config);
     TestNode {
         cluster: node.cluster(),
         shutdown: node.root_supervisor().address().clone(),
@@ -115,6 +114,14 @@ async fn departure_of(rx: &mut broadcast::Receiver<ClusterEvent>, node: &str) ->
     .unwrap_or_else(|_| panic!("Timed out waiting for {node} to be reported gone"))
 }
 
+/// Shuts a node down through its root supervisor, once that takes signals: it
+/// is initializing or running. Sooner, they are dropped.
+async fn stop(root: &zestors::runtime::Address<zestors_supervisor::SupervisorInterface>) {
+    use zestors::runtime::prelude::*;
+    root.watch_accepts_messages().await;
+    root.signal_shutdown();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn nodes_discover_each_other_and_notice_departures() {
     let (a_addr, b_addr, c_addr) = (free_addr(), free_addr(), free_addr());
@@ -130,7 +137,7 @@ async fn nodes_discover_each_other_and_notice_departures() {
     let mut a_events = a.cluster.subscribe();
 
     // A node that stops gracefully is reported as having left.
-    c.shutdown.signal_shutdown();
+    stop(&c.shutdown).await;
     c.handle.await.unwrap().unwrap();
     assert!(matches!(
         departure_of(&mut a_events, "node-c").await,
@@ -166,8 +173,8 @@ async fn nodes_discover_each_other_and_notice_departures() {
     })
     .await;
 
-    a.shutdown.signal_shutdown();
-    c2.shutdown.signal_shutdown();
+    stop(&a.shutdown).await;
+    stop(&c2.shutdown).await;
     let (a_exit, c2_exit) = tokio::join!(a.handle, c2.handle);
     a_exit.unwrap().unwrap();
     c2_exit.unwrap().unwrap();
@@ -203,8 +210,7 @@ impl Ca {
 }
 
 fn start_with(config: ClusterConfig) -> TestNode {
-    let node = ClusterNode::new(Supervisor::blueprint().rand_name(), config)
-        .with_exit_delay(Duration::ZERO);
+    let node = ClusterNode::new(Supervisor::blueprint().rand_name(), config);
     TestNode {
         cluster: node.cluster(),
         shutdown: node.root_supervisor().address().clone(),
@@ -247,7 +253,7 @@ async fn node_cannot_use_a_name_its_certificate_lacks() {
     assert!(a.cluster.member(&NodeName::new("node-b")).is_none());
 
     for node in [&a, &b] {
-        node.shutdown.signal_shutdown();
+        stop(&node.shutdown).await;
     }
 }
 
@@ -257,16 +263,15 @@ async fn status_follows_the_node_lifecycle() {
     let node = ClusterNode::new(
         Supervisor::blueprint().rand_name(),
         config("node-a", addr, Tls::insecure_dev().unwrap()),
-    )
-    .with_exit_delay(Duration::ZERO);
+    );
     let cluster = node.cluster();
-    let shutdown = node.shutdown_handle();
+    let shutdown = node.root_supervisor().address().clone();
     assert_eq!(cluster.status(), NodeStatus::Starting);
 
     let handle = tokio::spawn(node.run());
     within(cluster.wait_for_status(NodeStatus::Up)).await;
 
-    shutdown.shutdown();
+    stop(&shutdown).await;
     handle.await.unwrap().unwrap();
     assert_eq!(cluster.status(), NodeStatus::Leaving);
 }
@@ -283,9 +288,8 @@ async fn generation_store_keeps_generations_growing() {
     let node = ClusterNode::new(
         Supervisor::blueprint().rand_name(),
         config("node-a", free_addr(), Tls::insecure_dev().unwrap()).generation_store(&store),
-    )
-    .with_exit_delay(Duration::ZERO);
-    let (cluster, shutdown) = (node.cluster(), node.shutdown_handle());
+    );
+    let (cluster, shutdown) = (node.cluster(), node.root_supervisor().address().clone());
     let handle = tokio::spawn(node.run());
     within(cluster.wait_for_status(NodeStatus::Up)).await;
 
@@ -296,7 +300,7 @@ async fn generation_store_keeps_generations_growing() {
         generation.to_string()
     );
 
-    shutdown.shutdown();
+    stop(&shutdown).await;
     handle.await.unwrap().unwrap();
     let _ = std::fs::remove_file(&store);
 }

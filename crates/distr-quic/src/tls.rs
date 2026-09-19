@@ -1,4 +1,3 @@
-use zestors_distr_backend::NodeName;
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::rustls::{
     self, ClientConfig, DigitallySignedStruct, DistinguishedName, RootCertStore, ServerConfig,
@@ -12,6 +11,7 @@ use quinn::rustls::{
     },
 };
 use std::{io, sync::Arc};
+use zestors_distr_backend::NodeName;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 

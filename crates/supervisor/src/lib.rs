@@ -19,8 +19,8 @@
 //!   [`RegisterChild`](messages::RegisterChild)/[`DeregisterChild`](messages::DeregisterChild)
 //!   messages defined in [`messages`].
 //! - [`Node`] runs a single root [`Supervisor`] as an entire program: it
-//!   starts it, restarts it if it crashes, and shuts it down gracefully on a
-//!   Ctrl+C/SIGTERM.
+//!   starts it, and shuts it down gracefully on a Ctrl+C/SIGTERM. It exits
+//!   whenever the supervisor does.
 //!
 //! The shared building blocks — [`ChildSpec`](zestors_supervision::ChildSpec),
 //! [`ChildConfig`](zestors_supervision::ChildConfig),
@@ -104,9 +104,7 @@
 //!
 //! [`Node`] takes a [`ChildSpec<SupervisorBlueprint>`](zestors_supervision::ChildSpec)
 //! for a *root* supervisor and runs it as an entire program: [`Node::run`]
-//! starts it, restarts it up to a configured
-//! [`RestartIntensity`](zestors_supervision::RestartIntensity) if it exits
-//! with an error, and shuts it down gracefully - on a Ctrl+C/SIGTERM in a
+//! starts it, and shuts it down gracefully - on a Ctrl+C/SIGTERM in a
 //! real program, or, as below, on an ordinary
 //! [`ActorOps::signal_shutdown`] sent to its address like any other actor.
 //!
@@ -162,7 +160,7 @@
 //! // The root supervisor exiting on its own - here, because we asked it
 //! // to - is a normal, successful stop for the whole node. (Once the
 //! // supervisor is running, as it is here, signalling its address works.
-//! // Before that, use `Node::shutdown_handle`, which can't be missed.)
+//! // Before that, a signal is dropped, so wait for it as above.)
 //! root.signal_shutdown();
 //! assert!(node_task.await.unwrap().is_ok());
 //! # }

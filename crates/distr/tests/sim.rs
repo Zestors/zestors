@@ -65,6 +65,14 @@ async fn departure_of(rx: &mut broadcast::Receiver<ClusterEvent>, node: &str) ->
     .await
 }
 
+/// Shuts a node down through its root supervisor, once that takes signals: it
+/// is initializing or running.
+async fn stop(root: &zestors::runtime::Address<zestors_supervisor::SupervisorInterface>) {
+    use zestors::runtime::prelude::*;
+    root.watch_accepts_messages().await;
+    root.signal_shutdown();
+}
+
 #[tokio::test(start_paused = true)]
 async fn nodes_discover_each_other_and_notice_departures() {
     let mut sim = new_network(1);
@@ -242,25 +250,26 @@ async fn cluster_nodes_run_over_the_simulated_network() {
     let config = |name: &str, n: u8| {
         ClusterConfig::new(name, net.backend(addr(n))).foca_config(fast_foca_config())
     };
-    let a = ClusterNode::new(Supervisor::blueprint().rand_name(), config("node-a", 1))
-        .with_exit_delay(Duration::ZERO);
+    let a = ClusterNode::new(Supervisor::blueprint().rand_name(), config("node-a", 1));
     let b = ClusterNode::new(
         Supervisor::blueprint().rand_name(),
         config("node-b", 2).seed(Seed::new("node-a", addr(1))),
-    )
-    .with_exit_delay(Duration::ZERO);
+    );
 
     let (a_cluster, b_cluster) = (a.cluster(), b.cluster());
-    let (a_shutdown, b_shutdown) = (a.shutdown_handle(), b.shutdown_handle());
+    let (a_shutdown, b_shutdown) = (
+        a.root_supervisor().address().clone(),
+        b.root_supervisor().address().clone(),
+    );
     let (a_task, b_task) = (tokio::spawn(a.run()), tokio::spawn(b.run()));
 
     within(a_cluster.wait_for_members(1)).await;
     within(b_cluster.wait_for_members(1)).await;
 
-    b_shutdown.shutdown();
+    stop(&b_shutdown).await;
     b_task.await.unwrap().unwrap();
     within(a_cluster.wait_for_members(0)).await;
 
-    a_shutdown.shutdown();
+    stop(&a_shutdown).await;
     a_task.await.unwrap().unwrap();
 }

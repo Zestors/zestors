@@ -250,7 +250,7 @@ fn fast_foca() -> foca::Config {
 
 struct Node {
     cluster: Cluster,
-    shutdown: zestors_supervisor::NodeShutdown,
+    shutdown: zestors::runtime::Address<zestors_supervisor::SupervisorInterface>,
     task: JoinHandle<Result<(), ClusterNodeError>>,
 }
 
@@ -275,14 +275,14 @@ fn node_with_lanes(
             addr(seed),
         ));
     }
-    ClusterNode::new(Supervisor::blueprint().rand_name(), config).with_exit_delay(Duration::ZERO)
+    ClusterNode::new(Supervisor::blueprint().rand_name(), config)
 }
 
 impl Node {
     fn run(node: ClusterNode) -> Self {
         Self {
             cluster: node.cluster(),
-            shutdown: node.shutdown_handle(),
+            shutdown: node.root_supervisor().address().clone(),
             task: tokio::spawn(node.run()),
         }
     }
@@ -332,6 +332,14 @@ impl Pair {
             .cluster
             .address_unchecked(GlobalName::new(name, "node-b"))
     }
+}
+
+/// Shuts a node down through its root supervisor, once that takes signals: it
+/// is initializing or running. Sooner, they are dropped.
+async fn stop(root: &zestors::runtime::Address<zestors_supervisor::SupervisorInterface>) {
+    use zestors::runtime::prelude::*;
+    root.watch_accepts_messages().await;
+    root.signal_shutdown();
 }
 
 #[tokio::test(start_paused = true)]
@@ -499,7 +507,7 @@ async fn a_call_fails_when_the_node_leaves() {
         .cast(Hang)
         .await
         .unwrap();
-    pair.b.shutdown.shutdown();
+    stop(&pair.b.shutdown).await;
     assert!(matches!(
         within(reply.wait()).await,
         Err(RemoteReplyError::Disconnected)

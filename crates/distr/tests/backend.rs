@@ -189,23 +189,29 @@ fn config(hub: &Hub, name: &str, n: u8) -> ClusterConfig {
     .foca_config(foca)
 }
 
+/// Shuts a node down through its root supervisor, once that takes signals: it
+/// is initializing or running.
+async fn stop(root: &zestors::runtime::Address<zestors_supervisor::SupervisorInterface>) {
+    use zestors::runtime::prelude::*;
+    root.watch_accepts_messages().await;
+    root.signal_shutdown();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn nodes_join_over_a_custom_backend() {
     let hub = Hub::default();
     let a = ClusterNode::new(
         Supervisor::blueprint().rand_name(),
         config(&hub, "node-a", 1),
-    )
-    .with_exit_delay(Duration::ZERO);
+    );
     let b = ClusterNode::new(
         Supervisor::blueprint().rand_name(),
         config(&hub, "node-b", 2).seed(Seed::new("node-a", addr(1))),
-    )
-    .with_exit_delay(Duration::ZERO);
+    );
 
     let (a_cluster, b_cluster) = (a.cluster(), b.cluster());
-    let b_shutdown = b.shutdown_handle();
-    let a_shutdown = a.shutdown_handle();
+    let b_shutdown = b.root_supervisor().address().clone();
+    let a_shutdown = a.root_supervisor().address().clone();
     let a_task = tokio::spawn(a.run());
     let b_task = tokio::spawn(b.run());
 
@@ -221,7 +227,7 @@ async fn nodes_join_over_a_custom_backend() {
     wait(b_cluster).await;
 
     // The departure of b arrives as a frame like any other.
-    b_shutdown.shutdown();
+    stop(&b_shutdown).await;
     b_task.await.unwrap().unwrap();
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
@@ -235,7 +241,7 @@ async fn nodes_join_over_a_custom_backend() {
     .await
     .expect("Timed out waiting for b to leave");
 
-    a_shutdown.shutdown();
+    stop(&a_shutdown).await;
     a_task.await.unwrap().unwrap();
 }
 
@@ -247,10 +253,9 @@ async fn a_node_cannot_get_in_under_a_name_the_backend_does_not_know_it_by() {
     let a = ClusterNode::new(
         Supervisor::blueprint().rand_name(),
         config(&hub, "node-a", 1),
-    )
-    .with_exit_delay(Duration::ZERO);
+    );
     let a_cluster = a.cluster();
-    let a_shutdown = a.shutdown_handle();
+    let a_shutdown = a.root_supervisor().address().clone();
     let a_task = tokio::spawn(a.run());
 
     // Known to the hub, and so to node-a, as "mallory", but gossiping as node-b.
@@ -264,18 +269,16 @@ async fn a_node_cannot_get_in_under_a_name_the_backend_does_not_know_it_by() {
     )
     .seed(Seed::new("node-a", addr(1)))
     .foca_config(fast_foca());
-    let mallory = ClusterNode::new(Supervisor::blueprint().rand_name(), mallory)
-        .with_exit_delay(Duration::ZERO);
-    let mallory_shutdown = mallory.shutdown_handle();
+    let mallory = ClusterNode::new(Supervisor::blueprint().rand_name(), mallory);
+    let mallory_shutdown = mallory.root_supervisor().address().clone();
     let mallory_task = tokio::spawn(mallory.run());
 
     // An honest node joins meanwhile, so we know node-a is listening.
     let c = ClusterNode::new(
         Supervisor::blueprint().rand_name(),
         config(&hub, "node-c", 3).seed(Seed::new("node-a", addr(1))),
-    )
-    .with_exit_delay(Duration::ZERO);
-    let c_shutdown = c.shutdown_handle();
+    );
+    let c_shutdown = c.root_supervisor().address().clone();
     let c_task = tokio::spawn(c.run());
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
@@ -292,8 +295,8 @@ async fn a_node_cannot_get_in_under_a_name_the_backend_does_not_know_it_by() {
     assert!(a_cluster.member(&NodeName::new("node-b")).is_none());
     assert_eq!(a_cluster.members().len(), 1);
 
-    for shutdown in [a_shutdown, mallory_shutdown, c_shutdown] {
-        shutdown.shutdown();
+    for root in [a_shutdown, mallory_shutdown, c_shutdown] {
+        stop(&root).await;
     }
     for task in [a_task, mallory_task, c_task] {
         task.await.unwrap().unwrap();

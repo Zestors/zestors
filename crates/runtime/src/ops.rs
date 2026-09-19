@@ -210,6 +210,19 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         })
     }
 
+    /// Waits until the actor takes signals and messages: it is
+    /// [`ActorStatus::Initializing`], [`ActorStatus::Running`] or
+    /// [`ActorStatus::Suspended`], see [`ActorStatus::accepts_messages`]. Sooner
+    /// than that, a signal is rejected and dropped.
+    ///
+    /// Unlike [`ActorOps::watch_running`], this doesn't wait for the actor to
+    /// start receiving, so it also returns for an actor that is still
+    /// initializing. Never returns for an actor that exits without ever
+    /// accepting a message.
+    fn watch_accepts_messages(&self) -> impl Future<Output = ()> + Send {
+        self.watch(|status| status.accepts_messages().then_some(()))
+    }
+
     /// Waits until the actor reaches [`ActorStatus::Exited`], returning the
     /// outcome as a `Result`.
     fn watch_exit(&self) -> impl Future<Output = Result<(), ExitError>> + Send {

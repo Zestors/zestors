@@ -5,14 +5,14 @@ use super::{Cluster, Member, generation, membership::Membership};
 use crate::{NodeAddr, backend::NodeIncarnation};
 pub use config::{ClusterConfig, ClusterTimings, Seed};
 pub use error::ClusterNodeError;
-use std::{net::SocketAddr, time::Duration};
-use zestors_supervision::{ChildSpec, RestartIntensity};
-use zestors_supervisor::{Node, NodeShutdown, SupervisorBlueprint};
+use std::net::SocketAddr;
+use zestors_supervision::ChildSpec;
+use zestors_supervisor::{Node, SupervisorBlueprint};
 
 /// A [`Node`] that also joins a cluster.
 ///
-/// It runs the same root supervisor with the same restart and shutdown
-/// behavior as [`Node`], and additionally takes part in a gossip-based
+/// It runs the same root supervisor with the same shutdown behavior as
+/// [`Node`], and additionally takes part in a gossip-based
 /// membership protocol over a [backend](crate::backend) (mutually
 /// authenticated QUIC with `zestors-distr-quic`). Observe the cluster
 /// through [`ClusterNode::cluster`].
@@ -48,24 +48,6 @@ impl ClusterNode {
             config,
             cluster,
         }
-    }
-
-    /// See [`Node::with_restart_intensity`].
-    pub fn with_restart_intensity(mut self, intensity: RestartIntensity) -> Self {
-        self.node = self.node.with_restart_intensity(intensity);
-        self
-    }
-
-    /// See [`Node::with_exit_delay`].
-    pub fn with_exit_delay(mut self, delay: Duration) -> Self {
-        self.node = self.node.with_exit_delay(delay);
-        self
-    }
-
-    /// See [`Node::shutdown_handle`]: shuts the node down gracefully at any time,
-    /// also before [`ClusterNode::run`] has started it.
-    pub fn shutdown_handle(&self) -> NodeShutdown {
-        self.node.shutdown_handle()
     }
 
     /// Returns the root supervisor's [`ChildSpec`].

@@ -66,8 +66,7 @@ async fn main() {
             .rand_name(),
     );
 
-    // Starts the supervisor, restarts it on error, and shuts it down
-    // gracefully on Ctrl+C/SIGTERM.
+    // Starts the supervisor, and shuts it down gracefully on Ctrl+C/SIGTERM.
     node.run().await.unwrap();
 }
 ```

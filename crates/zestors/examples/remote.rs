@@ -4,7 +4,7 @@
 //! a `StableId`; the actor's node also has to register the messages it accepts.
 //! Run it with `cargo run --example remote`.
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
 use zestors::{
     distr::{ClusterConfig, ClusterNode, GlobalName, RemoteAccepts, RemoteRequest, Seed},
     distr_quic::{Quic, Tls},
@@ -39,7 +39,7 @@ fn node(name: &str, addr: SocketAddr, seed: Option<(&str, SocketAddr)>) -> Clust
     if let Some((seed, seed_addr)) = seed {
         config = config.seed(Seed::new(seed, seed_addr));
     }
-    ClusterNode::new(Supervisor::blueprint().rand_name(), config).with_exit_delay(Duration::ZERO)
+    ClusterNode::new(Supervisor::blueprint().rand_name(), config)
 }
 
 #[tokio::main]
@@ -83,8 +83,8 @@ async fn main() {
     let host_remote = host.cluster();
     let (caller_cluster, host_shutdown, caller_shutdown) = (
         caller.cluster(),
-        host.shutdown_handle(),
-        caller.shutdown_handle(),
+        host.root_supervisor().address().clone(),
+        caller.root_supervisor().address().clone(),
     );
     let (host_task, caller_task) = (tokio::spawn(host.run()), tokio::spawn(caller.run()));
 
@@ -119,7 +119,14 @@ async fn main() {
         .unwrap();
     println!("{} letters", count.await.unwrap());
 
-    host_shutdown.shutdown();
-    caller_shutdown.shutdown();
+    stop(&host_shutdown).await;
+    stop(&caller_shutdown).await;
     let _ = tokio::join!(host_task, caller_task);
+}
+
+/// Shuts a node down through its root supervisor, once that takes signals: it
+/// is initializing or running. Sooner, they are dropped.
+async fn stop(root: &zestors::runtime::Address<zestors::supervisor::SupervisorInterface>) {
+    root.watch_accepts_messages().await;
+    root.signal_shutdown();
 }

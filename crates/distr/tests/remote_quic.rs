@@ -50,7 +50,15 @@ fn node(name: &str, addr: SocketAddr, seed: Option<(&str, SocketAddr)>) -> Clust
     if let Some((seed, seed_addr)) = seed {
         config = config.seed(Seed::new(seed, seed_addr));
     }
-    ClusterNode::new(Supervisor::blueprint().rand_name(), config).with_exit_delay(Duration::ZERO)
+    ClusterNode::new(Supervisor::blueprint().rand_name(), config)
+}
+
+/// Shuts a node down through its root supervisor, once that takes signals: it
+/// is initializing or running.
+async fn stop(root: &zestors::runtime::Address<zestors_supervisor::SupervisorInterface>) {
+    use zestors::runtime::prelude::*;
+    root.watch_accepts_messages().await;
+    root.signal_shutdown();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -59,8 +67,11 @@ async fn actors_on_another_node_can_be_called_and_cast_to() {
     let a = node("node-a", a_addr, None);
     let b = node("node-b", b_addr, Some(("node-a", a_addr)));
     let (a_remote, b_remote) = (a.cluster(), b.cluster());
-    let (a_cluster, a_shutdown, b_shutdown) =
-        (a.cluster(), a.shutdown_handle(), b.shutdown_handle());
+    let (a_cluster, a_shutdown, b_shutdown) = (
+        a.cluster(),
+        a.root_supervisor().address().clone(),
+        b.root_supervisor().address().clone(),
+    );
     let (a_task, b_task) = (tokio::spawn(a.run()), tokio::spawn(b.run()));
 
     b_remote.register::<Greet>().register::<Note>();
@@ -106,8 +117,8 @@ async fn actors_on_another_node_can_be_called_and_cast_to() {
     greeter.call(Greet("done".into())).await.unwrap();
     assert_eq!(*notes.lock().unwrap(), (0..500).collect::<Vec<_>>());
 
-    a_shutdown.shutdown();
-    b_shutdown.shutdown();
+    stop(&a_shutdown).await;
+    stop(&b_shutdown).await;
     a_task.await.unwrap().unwrap();
     b_task.await.unwrap().unwrap();
 }
