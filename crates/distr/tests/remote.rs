@@ -233,7 +233,7 @@ struct Node {
 }
 
 fn node(net: &SimNetwork, name: &str, n: u8, seed: Option<u8>) -> ClusterNode {
-    let mut config = ClusterConfig::with_backend(name, net.backend(addr(n)))
+    let mut config = ClusterConfig::new(name, net.backend(addr(n)))
         .foca_config(fast_foca())
         .call_timeout(Duration::from_secs(10));
     if let Some(seed) = seed {

@@ -1,0 +1,19 @@
+[package]
+name = "zestors-distr-quic"
+version = "0.2.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+description = "A QUIC backend for zestors-distr clusters"
+repository = "https://github.com/Zestors/zestors"
+
+[dependencies]
+zestors-distr.workspace = true
+quinn.workspace = true
+rcgen.workspace = true
+rustls-webpki.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tokio-util = { version = "0.7", features = ["time"] }

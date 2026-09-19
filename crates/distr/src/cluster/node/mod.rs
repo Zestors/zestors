@@ -14,7 +14,7 @@ use zestors_supervisor::{Node, NodeShutdown, SupervisorBlueprint};
 /// It runs the same root supervisor with the same restart and shutdown
 /// behavior as [`Node`], and additionally takes part in a gossip-based
 /// membership protocol over a [backend](crate::backend) (mutually
-/// authenticated QUIC by default). Observe the cluster
+/// authenticated QUIC with `zestors-distr-quic`). Observe the cluster
 /// through [`ClusterNode::cluster`].
 pub struct ClusterNode {
     node: Node,

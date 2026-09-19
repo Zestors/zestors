@@ -1,4 +1,4 @@
-use crate::NodeId;
+use zestors_distr::NodeId;
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::rustls::{
     self, ClientConfig, DigitallySignedStruct, DistinguishedName, RootCertStore, ServerConfig,
@@ -43,7 +43,7 @@ pub enum TlsError {
 /// cluster's CA and verifies the certificates of its peers (mutual TLS).
 ///
 /// A certificate belongs to one node: it carries exactly one DNS name, the
-/// node's [`NodeId`](crate::NodeId). That name is how a node is dialed (as the
+/// node's [`NodeId`](zestors_distr::NodeId). That name is how a node is dialed (as the
 /// TLS server name), and who a peer is, as far as the cluster is concerned, is
 /// the name in the certificate it presented.
 ///

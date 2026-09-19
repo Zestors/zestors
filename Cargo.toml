@@ -11,6 +11,7 @@ members = [
   "crates/interface",
   "crates/supervisor",
   "crates/distr",
+  "crates/distr-quic",
 ]
 
 
@@ -26,6 +27,7 @@ zestors-actor = { path = "crates/actor", version = "0.2.0" }
 zestors-interface = { path = "crates/interface", version = "0.2.0" }
 zestors-supervisor = { path = "crates/supervisor", version = "0.2.0" }
 zestors-distr = { path = "crates/distr", version = "0.2.0" }
+zestors-distr-quic = { path = "crates/distr-quic", version = "0.2.0" }
 
 
 type-sets = { version = "0.2.2" }

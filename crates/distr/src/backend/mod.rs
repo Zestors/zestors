@@ -8,9 +8,8 @@
 //! unreachable from down, ordering and framing messages, and routing them to
 //! the layer they are for.
 //!
-//! [`Quic`] is the default backend, behind the `quic` feature. To run a
-//! cluster over something else, implement [`Backend`], [`Endpoint`] and
-//! [`Connection`], and hand the backend to
+//! A cluster runs over any implementation of [`Backend`], [`Endpoint`] and
+//! [`Connection`], handed to
 //! [`ClusterConfig::with_backend`](crate::ClusterConfig::with_backend).
 //!
 //! # What a backend must provide
@@ -28,12 +27,6 @@
 //!   streams gets for free, and one without has to arrange.
 //! - **Datagrams**, if it has them. A backend without returns
 //!   [`DatagramError::Unsupported`], and the cluster uses streams instead.
-
-#[cfg(feature = "quic")]
-mod quic;
-
-#[cfg(feature = "quic")]
-pub use quic::{Quic, QuicTimings, Tls, TlsError};
 
 use crate::{NodeAddr, NodeId};
 use bytes::Bytes;

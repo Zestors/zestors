@@ -2,7 +2,7 @@
 //!
 //! A [`Fabric`] is a network that any number of simulated nodes are bound to.
 //! Its endpoints and connections implement the same [`Endpoint`] and
-//! [`Connection`] traits as [`Quic`](crate::backend::Quic) does, so the real
+//! [`Connection`] traits as a real backend does, so the real
 //! cluster code runs on top of them unchanged. Bytes travel through pipes that
 //! hold them back for the link's latency, so under
 //! `#[tokio::test(start_paused = true)]` a whole cluster runs on virtual time.

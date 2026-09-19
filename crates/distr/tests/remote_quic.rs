@@ -13,10 +13,8 @@ use zestors::{
     runtime::{Inbox, Name, spawn},
     supervisor::Supervisor,
 };
-use zestors_distr::{
-    ClusterConfig, ClusterNode, GlobalName, RemoteAddress, Seed, StableId, Tls,
-    backend::{Quic, QuicTimings},
-};
+use zestors_distr::{ClusterConfig, ClusterNode, GlobalName, RemoteAddress, Seed, StableId};
+use zestors_distr_quic::{Quic, QuicTimings, Tls};
 
 #[derive(Message, StableId, Serialize, Deserialize, Debug)]
 #[msg(reply = String, id = "2f8a6a52-63d3-4c0e-9c5b-8a4d5d7e1b01")]
@@ -48,7 +46,7 @@ fn node(name: &str, addr: SocketAddr, seed: Option<(&str, SocketAddr)>) -> Clust
         keep_alive: Duration::from_millis(200),
         idle_timeout: Duration::from_secs(1),
     });
-    let mut config = ClusterConfig::with_backend(name, quic).foca_config(foca);
+    let mut config = ClusterConfig::new(name, quic).foca_config(foca);
     if let Some((seed, seed_addr)) = seed {
         config = config.seed(Seed::new(seed, seed_addr));
     }

@@ -2,8 +2,6 @@ use crate::{
     LinkTimings, NodeAddr, NodeId, backend::Backend, cluster::membership::Options, link::Starter,
 };
 use rand::{SeedableRng, rngs::StdRng};
-#[cfg(feature = "quic")]
-use std::net::SocketAddr;
 use std::{num::NonZeroU32, path::PathBuf, time::Duration};
 
 /// How a [`ClusterNode`](crate::ClusterNode) joins and behaves in a cluster.
@@ -22,18 +20,9 @@ pub struct ClusterConfig {
 }
 
 impl ClusterConfig {
-    /// Configures a node named `node_id` that listens on `bind` and talks to
-    /// the others over [`Quic`](crate::backend::Quic) with the identity `tls`.
-    ///
-    /// The node name must be a valid DNS name; with [`Tls::from_pem`](crate::Tls::from_pem) it must
-    /// also be a subject alternative name of the node's certificate.
-    #[cfg(feature = "quic")]
-    pub fn new(node_id: impl Into<NodeId>, bind: SocketAddr, tls: crate::Tls) -> Self {
-        Self::with_backend(node_id, crate::backend::Quic::new(bind, tls))
-    }
-
-    /// Configures a node named `node_id` that talks to the others over `backend`.
-    pub fn with_backend(node_id: impl Into<NodeId>, backend: impl Backend) -> Self {
+    /// Configures a node named `node_id` that talks to the others over
+    /// `backend`, for example the QUIC backend of `zestors-distr-quic`.
+    pub fn new(node_id: impl Into<NodeId>, backend: impl Backend) -> Self {
         Self {
             node_id: node_id.into(),
             backend: Starter::new(backend),

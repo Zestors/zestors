@@ -176,7 +176,7 @@ fn fast_foca() -> foca::Config {
 
 fn config(hub: &Hub, name: &str, n: u8) -> ClusterConfig {
     let foca = fast_foca();
-    ClusterConfig::with_backend(
+    ClusterConfig::new(
         name,
         HubBackend {
             hub: hub.clone(),
@@ -252,7 +252,7 @@ async fn a_node_cannot_get_in_under_a_name_the_backend_does_not_know_it_by() {
     let a_task = tokio::spawn(a.run());
 
     // Known to the hub, and so to node-a, as "mallory", but gossiping as node-b.
-    let mallory = ClusterConfig::with_backend(
+    let mallory = ClusterConfig::new(
         "node-b",
         HubBackend {
             hub: hub.clone(),

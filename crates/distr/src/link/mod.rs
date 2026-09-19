@@ -16,7 +16,7 @@ mod dynamic;
 mod lane;
 mod wire;
 
-#[cfg(all(test, feature = "quic"))]
+#[cfg(all(test, feature = "sim"))]
 mod tests;
 
 use crate::{NodeAddr, NodeId, backend::LocalNode};

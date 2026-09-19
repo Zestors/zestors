@@ -3,9 +3,9 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use zestors::{prelude::*, supervisor::Supervisor};
 use zestors_distr::{
     Cluster, ClusterConfig, ClusterEvent, ClusterNode, ClusterNodeError, ClusterTimings,
-    LinkTimings, NodeId, NodeStatus, Seed, Tls,
-    backend::{Quic, QuicTimings},
+    LinkTimings, NodeId, NodeStatus, Seed,
 };
+use zestors_distr_quic::{Quic, QuicTimings, Tls};
 
 fn free_addr() -> SocketAddr {
     let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -52,7 +52,7 @@ fn fast_quic_timings() -> QuicTimings {
 
 /// A node over QUIC tuned for localhost.
 fn quic(name: &str, addr: SocketAddr, tls: Tls) -> ClusterConfig {
-    ClusterConfig::with_backend(name, Quic::new(addr, tls).timings(fast_quic_timings()))
+    ClusterConfig::new(name, Quic::new(addr, tls).timings(fast_quic_timings()))
 }
 
 struct TestNode {

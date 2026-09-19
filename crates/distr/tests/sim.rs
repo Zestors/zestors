@@ -240,7 +240,7 @@ async fn cluster_nodes_run_over_the_simulated_network() {
 
     let net = SimNetwork::new(5);
     let config = |name: &str, n: u8| {
-        ClusterConfig::with_backend(name, net.backend(addr(n))).foca_config(fast_foca_config())
+        ClusterConfig::new(name, net.backend(addr(n))).foca_config(fast_foca_config())
     };
     let a = ClusterNode::new(Supervisor::blueprint().rand_name(), config("node-a", 1))
         .with_exit_delay(Duration::ZERO);

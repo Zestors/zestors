@@ -13,6 +13,7 @@
 //! | [`supervision`] | The supervisor's vocabulary: `ChildSpec` pairs a blueprint with its `ChildConfig`, and `RestartIntensity` bounds how often a child may restart. |
 //! | [`supervisor`] | The supervision actors: `Supervisor` starts, watches, and restarts children per a `SupervisionStrategy`; `Node` runs a root supervisor as a whole program. |
 //! | [`distr`] | Distributed messaging: nodes form a cluster, and `RemoteAddress` sends messages to actors on other nodes. `StableId` gives each message type a stable, globally unique `Id`. |
+//! | [`distr_quic`] | The QUIC backend for [`distr`] clusters, with mutually authenticated nodes: `Quic` and `Tls`. |
 //! | [`api_server`] | HTTP introspection: `ApiServer` exposes `/processes`, `/snapshots`, and `/health` for a running tree. |
 //! | `zestors_inspector` | The `zestors-inspector` GUI — a separate workspace crate, not re-exported here — visualizes the same tree data that [`api_server`] exposes. |
 //!
@@ -348,6 +349,7 @@ pub mod prelude {
     pub use zestors_api_server::prelude::*;
     pub use zestors_codegen::{HandlerInterface, Interface, Message, StableId};
     pub use zestors_distr::prelude::*;
+    pub use zestors_distr_quic::Tls;
     pub use zestors_interface::prelude::*;
     pub use zestors_runtime::prelude::*;
     pub use zestors_supervision::prelude::*;
@@ -374,3 +376,6 @@ pub use zestors_supervisor as supervisor;
 
 #[doc(inline)]
 pub use zestors_distr as distr;
+
+#[doc(inline)]
+pub use zestors_distr_quic as distr_quic;

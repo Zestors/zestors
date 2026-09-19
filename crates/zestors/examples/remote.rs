@@ -6,7 +6,8 @@
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::Duration};
 use zestors::{
-    distr::{ClusterConfig, ClusterNode, GlobalName, RemoteAccepts, RemoteRequest, Seed, Tls},
+    distr::{ClusterConfig, ClusterNode, GlobalName, RemoteAccepts, RemoteRequest, Seed},
+    distr_quic::{Quic, Tls},
     interface::{Envelope, Interface, Message},
     prelude::*,
     runtime::{Inbox, Name, spawn},
@@ -34,7 +35,7 @@ enum GreeterInterface {
 
 fn node(name: &str, addr: SocketAddr, seed: Option<(&str, SocketAddr)>) -> ClusterNode {
     // Development only: use `Tls::from_pem` to authenticate cluster members.
-    let mut config = ClusterConfig::new(name, addr, Tls::insecure_dev().unwrap());
+    let mut config = ClusterConfig::new(name, Quic::new(addr, Tls::insecure_dev().unwrap()));
     if let Some((seed, seed_addr)) = seed {
         config = config.seed(Seed::new(seed, seed_addr));
     }
