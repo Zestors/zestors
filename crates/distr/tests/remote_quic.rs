@@ -58,7 +58,7 @@ async fn actors_on_another_node_can_be_called_and_cast_to() {
     let (a_addr, b_addr) = (free_addr(), free_addr());
     let a = node("node-a", a_addr, None);
     let b = node("node-b", b_addr, Some(("node-a", a_addr)));
-    let (a_remote, b_remote) = (a.remote(), b.remote());
+    let (a_remote, b_remote) = (a.cluster(), b.cluster());
     let (a_cluster, a_shutdown, b_shutdown) =
         (a.cluster(), a.shutdown_handle(), b.shutdown_handle());
     let (a_task, b_task) = (tokio::spawn(a.run()), tokio::spawn(b.run()));

@@ -2,7 +2,7 @@ mod config;
 mod error;
 
 use super::{Cluster, Member, generation, membership::Membership};
-use crate::{NodeAddr, backend::NodeIncarnation, messaging::NodeRef};
+use crate::{NodeAddr, backend::NodeIncarnation};
 pub use config::{ClusterConfig, ClusterTimings, Seed};
 pub use error::ClusterNodeError;
 use std::{net::SocketAddr, time::Duration};
@@ -20,7 +20,6 @@ pub struct ClusterNode {
     node: Node,
     config: ClusterConfig,
     cluster: Cluster,
-    remote: NodeRef,
 }
 
 impl ClusterNode {
@@ -31,21 +30,23 @@ impl ClusterNode {
 
     /// Adds cluster membership to an existing [`Node`].
     pub fn from_node(node: Node, config: ClusterConfig) -> Self {
-        let cluster = Cluster::new(Member {
-            node: config.node_id.clone(),
-            // Not known until the backend has started, unless configured.
-            addr: config
-                .advertise
-                .clone()
-                .unwrap_or_else(|| NodeAddr::from(SocketAddr::from(([0, 0, 0, 0], 0)))),
-            generation: 0,
-        });
-        let remote = NodeRef::new(cluster.clone(), config.call_timeout, config.lanes.get());
+        let cluster = Cluster::new(
+            Member {
+                name: config.node_id.clone(),
+                // Not known until the backend has started, unless configured.
+                addr: config
+                    .advertise
+                    .clone()
+                    .unwrap_or_else(|| NodeAddr::from(SocketAddr::from(([0, 0, 0, 0], 0)))),
+                generation: 0,
+            },
+            config.call_timeout,
+            config.lanes.get(),
+        );
         Self {
             node,
             config,
             cluster,
-            remote,
         }
     }
 
@@ -72,15 +73,10 @@ impl ClusterNode {
         self.node.root_supervisor()
     }
 
-    /// A handle for messaging actors on other nodes, and for registering the
-    /// messages this node accepts from them. Cheap to clone and usable from
-    /// anywhere, also before [`ClusterNode::run`] is called.
-    pub fn remote(&self) -> NodeRef {
-        self.remote.clone()
-    }
-
-    /// A handle for observing the cluster. Cheap to clone and usable from
-    /// anywhere, also before [`ClusterNode::run`] is called.
+    /// A handle for observing the cluster, for messaging actors on other
+    /// nodes, and for registering the messages this node accepts from them.
+    /// Cheap to clone and usable from anywhere, also before
+    /// [`ClusterNode::run`] is called.
     pub fn cluster(&self) -> Cluster {
         self.cluster.clone()
     }
@@ -93,7 +89,6 @@ impl ClusterNode {
             node,
             config,
             cluster,
-            remote,
         } = self;
 
         let generation = generation::next(config.generation_store.as_deref())
@@ -109,9 +104,9 @@ impl ClusterNode {
             .map_err(ClusterNodeError::Backend)?;
         let local_addr = config.advertise.clone().unwrap_or(addr);
         let membership = Membership::start(
-            cluster,
+            cluster.clone(),
             Member {
-                node: config.node_id.clone(),
+                name: config.node_id.clone(),
                 addr: local_addr.clone(),
                 generation,
             },
@@ -121,7 +116,7 @@ impl ClusterNode {
         .await;
         tracing::info!(node = %config.node_id, addr = %local_addr, "Cluster node started");
 
-        let messaging = remote.start(links.clone());
+        let messaging = cluster.start(links.clone());
 
         let result = node.run().await;
 

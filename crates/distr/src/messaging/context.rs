@@ -7,7 +7,7 @@
 //! the duration of the encoding or decoding of one message, in a thread-local.
 //! Both are synchronous, so nothing else can observe it in between.
 
-use super::{Decode, Encode, RemoteError, SharedNode, Started, receive, reply::Pending};
+use super::{Cluster, Decode, Encode, RemoteError, Started, receive, reply::Pending};
 use crate::NodeName;
 use std::{
     cell::RefCell,
@@ -23,7 +23,7 @@ thread_local! {
 /// The node a message is being encoded for, or was decoded from.
 #[derive(Clone)]
 pub(super) struct Wire {
-    shared: Arc<SharedNode>,
+    cluster: Cluster,
     started: Started,
     peer: NodeName,
     /// The requests handed to the node while encoding: see [`Wire::export`].
@@ -45,9 +45,9 @@ pub(super) fn current() -> Option<Wire> {
 }
 
 impl Wire {
-    pub(super) fn new(shared: Arc<SharedNode>, started: Started, peer: NodeName) -> Self {
+    pub(super) fn new(cluster: Cluster, started: Started, peer: NodeName) -> Self {
         Self {
-            shared,
+            cluster,
             started,
             peer,
             exported: Arc::default(),
@@ -55,8 +55,8 @@ impl Wire {
     }
 
     /// Runs `f`, which encodes or decodes one message, with this as its [`current`] wire.
-    pub(super) fn shared(&self) -> &Arc<SharedNode> {
-        &self.shared
+    pub(super) fn cluster(&self) -> &Cluster {
+        &self.cluster
     }
 
     pub(super) fn scope<R>(&self, f: impl FnOnce() -> R) -> R {
@@ -81,7 +81,11 @@ impl Wire {
     /// reply is accepted only from the node it went to. If that node is lost,
     /// or answers with an error, `request` is dropped without a reply.
     pub(super) fn export<T: Decode + Send + 'static>(&self, request: Request<T>) -> u64 {
-        let id = self.shared.next_call.fetch_add(1, Ordering::Relaxed);
+        let id = self
+            .cluster
+            .messaging()
+            .next_call
+            .fetch_add(1, Ordering::Relaxed);
         let (answer, answered) = oneshot::channel();
         self.started.pending.insert(id, self.peer.clone(), answer);
         self.exported.lock().expect("Not poisoned").push(id);
@@ -108,8 +112,8 @@ impl Wire {
     /// tells the node so.
     pub(super) fn import<T: Encode + Send + 'static>(&self, id: u64) -> Request<T> {
         let (request, reply) = Request::<T>::new();
-        let (shared, links, peer) = (
-            self.shared.clone(),
+        let (cluster, links, peer) = (
+            self.cluster.clone(),
             self.started.links.clone(),
             self.peer.clone(),
         );
@@ -120,7 +124,7 @@ impl Wire {
                     .map_err(|error| RemoteError::Encode(error.to_string())),
                 Err(_) => Err(RemoteError::NoReply),
             };
-            receive::reply(&shared, &links, &peer, id, result).await;
+            receive::reply(&cluster, &links, &peer, id, result).await;
         });
         request
     }

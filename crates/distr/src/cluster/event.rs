@@ -66,6 +66,6 @@ pub struct ClusterSnapshot {
 impl ClusterSnapshot {
     /// Whether `node` was a member that could be connected to.
     pub fn is_reachable(&self, node: &NodeName) -> bool {
-        !self.unreachable.contains(node) && self.members.iter().any(|m| m.node == *node)
+        !self.unreachable.contains(node) && self.members.iter().any(|m| m.name == *node)
     }
 }

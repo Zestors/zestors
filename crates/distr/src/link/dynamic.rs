@@ -4,7 +4,9 @@
 
 use crate::{
     NodeAddr, NodeName,
-    backend::{Backend, Connection, DatagramError, Endpoint, NodeIncarnation, RecvStream, SendStream},
+    backend::{
+        Backend, Connection, DatagramError, Endpoint, NodeIncarnation, RecvStream, SendStream,
+    },
 };
 use bytes::Bytes;
 use std::{future::Future, io, pin::Pin, sync::Arc, time::Duration};

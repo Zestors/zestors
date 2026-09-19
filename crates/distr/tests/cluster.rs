@@ -102,7 +102,7 @@ async fn departure_of(rx: &mut broadcast::Receiver<ClusterEvent>, node: &str) ->
             match rx.recv().await {
                 Ok(event)
                     if matches!(event, ClusterEvent::Left(_) | ClusterEvent::Failed(_))
-                        && event.member().node.as_str() == node =>
+                        && event.member().name.as_str() == node =>
                 {
                     return event;
                 }
@@ -143,7 +143,7 @@ async fn nodes_discover_each_other_and_notice_departures() {
 
     // A node is identified by its name, not its address: restarted somewhere
     // else, it replaces its previous incarnation.
-    let old_generation = c.cluster.local().generation;
+    let old_generation = c.cluster.local_member().generation;
     let c2_addr = free_addr();
     assert_ne!(c_addr, c2_addr);
     let c2 = start("node-c", c2_addr, Some(("node-a", a_addr)));
@@ -153,7 +153,7 @@ async fn nodes_discover_each_other_and_notice_departures() {
             && a.cluster.member(&NodeName::new("node-c")).map(|m| m.addr) == Some(c2_addr.into())
     })
     .await;
-    assert!(c2.cluster.local().generation > old_generation);
+    assert!(c2.cluster.local_member().generation > old_generation);
 
     // A node that vanishes without saying goodbye is reported as failed.
     b.handle.abort();
@@ -289,7 +289,7 @@ async fn generation_store_keeps_generations_growing() {
     let handle = tokio::spawn(node.run());
     within(cluster.wait_for_status(NodeStatus::Up)).await;
 
-    let generation = cluster.local().generation;
+    let generation = cluster.local_member().generation;
     assert!(generation > future);
     assert_eq!(
         std::fs::read_to_string(&store).unwrap(),

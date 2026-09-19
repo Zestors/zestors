@@ -58,7 +58,7 @@ impl Message {
 /// speak for another.
 pub(super) fn sender_of(packet: &[u8]) -> Option<NodeName> {
     let header = Codec::<Member>::decode_header(&mut PostcardCodec, packet).ok()?;
-    Some(header.src.node)
+    Some(header.src.name)
 }
 
 #[cfg(test)]
@@ -87,7 +87,7 @@ mod tests {
         use rand::{SeedableRng, rngs::StdRng};
 
         let member = |name: &str| Member {
-            node: NodeName::new(name),
+            name: NodeName::new(name),
             addr: format!("{name}:7000").into(),
             generation: 1,
         };

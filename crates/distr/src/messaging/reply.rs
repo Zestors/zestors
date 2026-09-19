@@ -190,7 +190,12 @@ impl Pending {
     }
 
     /// `node` answered the call `call_id`.
-    pub(super) fn complete(&self, node: &NodeName, call_id: u64, result: Result<Bytes, RemoteError>) {
+    pub(super) fn complete(
+        &self,
+        node: &NodeName,
+        call_id: u64,
+        result: Result<Bytes, RemoteError>,
+    ) {
         match self.calls.remove_if(&call_id, |_, call| call.node == *node) {
             Some((_, call)) => {
                 let _ = call.reply.send(result.map_err(RemoteReplyError::Remote));

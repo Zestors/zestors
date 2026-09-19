@@ -7,7 +7,7 @@
 //! the process.
 //!
 //! Which message types a node accepts is decided by registering them with
-//! [`Remote::register`]. Any registered message can then reach any local actor
+//! [`Cluster::register`]. Any registered message can then reach any local actor
 //! that accepts it, addressed by its [`Name`](zestors_runtime::Name).
 //!
 //! Nothing here requires a message to be serde: it must be [`Encode`] and
@@ -36,11 +36,11 @@
 //!
 //! # async fn example(node: ClusterNode) -> Result<(), Box<dyn std::error::Error>> {
 //! // On the node that runs the actor: accept the message from other nodes.
-//! node.remote().register::<Double>();
+//! node.cluster().register::<Double>();
 //!
 //! // On another node: address the actor, and call it.
 //! let counter: RemoteAddress<CounterInterface> = node
-//!     .remote()
+//!     .cluster()
 //!     .address(GlobalName::new("counter", "node-b"))?;
 //! let doubled = counter.call(Double(21)).await?;
 //! # Ok(())
@@ -101,19 +101,9 @@ fn check<T>(found: Result<T, TypedRegistryError>) -> Result<(), AddressError> {
     }
 }
 
-/// A node's messaging between actors: registers what it accepts, and makes
-/// [`RemoteAddress`]es to send with. Get it from
-/// [`ClusterNode::remote`](crate::ClusterNode::remote).
-///
-/// Cheap to clone, and usable before the node has started; sending fails until
-/// it has.
-#[derive(Clone)]
-pub struct NodeRef {
-    shared: Arc<SharedNode>,
-}
-
-struct SharedNode {
-    cluster: Cluster,
+/// What a node needs to message actors on other nodes, kept inside a
+/// [`Cluster`].
+pub(crate) struct MessageHandler {
     call_timeout: Duration,
     /// How many lanes to a peer messages between actors are spread over.
     shards: u8,
@@ -130,35 +120,34 @@ struct Started {
     pending: Arc<Pending>,
 }
 
-impl SharedNode {
+impl MessageHandler {
+    pub(crate) fn new(call_timeout: Duration, shards: u8) -> Self {
+        let handlers = DashMap::new();
+        ops::register(&handlers);
+        Self {
+            call_timeout,
+            shards,
+            handlers,
+            running: RwLock::new(None),
+            next_call: AtomicU64::new(0),
+        }
+    }
+
     fn running(&self) -> Option<Started> {
         self.running.read().expect("Not poisoned").clone()
     }
 }
 
-impl NodeRef {
-    pub(super) fn new(cluster: Cluster, call_timeout: Duration, shards: u8) -> Self {
-        let handlers = DashMap::new();
-        ops::register(&handlers);
-        Self {
-            shared: Arc::new(SharedNode {
-                cluster,
-                call_timeout,
-                shards,
-                handlers,
-                running: RwLock::new(None),
-                next_call: AtomicU64::new(0),
-            }),
-        }
-    }
-
+/// Messaging between actors: registers what this node accepts, and makes
+/// [`RemoteAddress`]es to send with.
+impl Cluster {
     /// Makes messages of type `M` acceptable from other nodes: they can be sent
     /// to any actor on this node that accepts them. Messages of a type that
     /// isn't registered are answered with [`RemoteError::UnknownMessage`].
     ///
     /// Only receiving needs it; sending a message doesn't.
     pub fn register<M: RemoteMessage>(&self) -> &Self {
-        self.shared
+        self.messaging()
             .handlers
             .insert(M::Id, Arc::new(Typed::<M>(PhantomData)));
         self
@@ -166,7 +155,7 @@ impl NodeRef {
 
     /// This node.
     pub fn node(&self) -> NodeName {
-        self.shared.cluster.local().node
+        self.local_member().name
     }
 
     /// The actor `target` on another node, to send messages to. `I` is what it
@@ -175,8 +164,8 @@ impl NodeRef {
     /// Fails if an actor with that name is running in this process, and doesn't
     /// accept `I`. An actor on another node can't be looked at, so it isn't
     /// checked that it exists, or accepts `I`; that is answered when a message
-    /// is sent. Use [`Remote::address_unchecked`] to skip the check, or
-    /// [`Remote::address_dyn`] for a set of messages.
+    /// is sent. Use [`Cluster::address_unchecked`] to skip the check, or
+    /// [`Cluster::address_dyn`] for a set of messages.
     pub fn address<I: Interface>(
         &self,
         target: GlobalName,
@@ -185,7 +174,7 @@ impl NodeRef {
         Ok(RemoteAddress::new(self.clone(), target))
     }
 
-    /// Like [`Remote::address`], for the actor to accept a set of messages like
+    /// Like [`Cluster::address`], for the actor to accept a set of messages like
     /// `Dyn<(Ping, Double)>`.
     pub fn address_dyn<S>(&self, target: GlobalName) -> Result<RemoteAddress<Dyn<S>>, AddressError>
     where
@@ -195,7 +184,7 @@ impl NodeRef {
         Ok(RemoteAddress::new(self.clone(), target))
     }
 
-    /// Like [`Remote::address`], but without looking whether an actor with that
+    /// Like [`Cluster::address`], but without looking whether an actor with that
     /// name is running in this process.
     pub fn address_unchecked<C: Context>(&self, target: GlobalName) -> RemoteAddress<C> {
         RemoteAddress::new(self.clone(), target)
@@ -207,7 +196,7 @@ impl NodeRef {
     ///
     /// For an actor on this node it has to be running, and accept `I`;
     /// otherwise this fails. For one on another node it is checked as with
-    /// [`Remote::address`].
+    /// [`Cluster::address`].
     pub fn cluster_address<I: Interface>(
         &self,
         target: GlobalName,
@@ -218,7 +207,7 @@ impl NodeRef {
         self.address(target).map(ClusterAddress::Remote)
     }
 
-    /// Like [`Remote::cluster_address`], for the actor to accept a set of
+    /// Like [`Cluster::cluster_address`], for the actor to accept a set of
     /// messages like `Dyn<(Ping, Double)>`.
     pub fn cluster_address_dyn<S>(
         &self,
@@ -242,33 +231,40 @@ impl NodeRef {
         };
         let token = CancellationToken::new();
         let serving = receive::serve(
-            self.shared.clone(),
+            self.clone(),
             running.clone(),
             links.subscribe(Protocol::ACTORS),
             links.peer_events(),
-            self.shared.cluster.subscribe(),
+            self.subscribe(),
         );
         tokio::spawn(token.clone().run_until_cancelled_owned(async move {
             serving.await;
         }));
-        *self.shared.running.write().expect("Not poisoned") = Some(running);
+        *self.messaging().running.write().expect("Not poisoned") = Some(running);
         Serving {
-            shared: self.shared.clone(),
+            cluster: self.clone(),
             _stop: token.drop_guard(),
         }
     }
 }
 
-/// [`Remote`] while the node runs. Stops when stopped or dropped.
+/// Messaging while the node runs. Stops when stopped or dropped.
 pub(super) struct Serving {
-    shared: Arc<SharedNode>,
+    cluster: Cluster,
     _stop: DropGuard,
 }
 
 impl Serving {
     /// Stops taking in messages, and gives up on the calls still waiting.
     pub(super) fn stop(self) {
-        if let Some(running) = self.shared.running.write().expect("Not poisoned").take() {
+        if let Some(running) = self
+            .cluster
+            .messaging()
+            .running
+            .write()
+            .expect("Not poisoned")
+            .take()
+        {
             running.pending.fail_all();
         }
     }

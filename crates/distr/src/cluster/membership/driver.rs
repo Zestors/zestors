@@ -45,7 +45,7 @@ impl Driver {
         timings: ClusterTimings,
     ) -> Self {
         Self {
-            foca: Foca::new(cluster.local(), config, rng, PostcardCodec),
+            foca: Foca::new(cluster.local_member(), config, rng, PostcardCodec),
             cluster,
             links,
             seeds,
@@ -79,7 +79,7 @@ impl Driver {
                 }
                 Some(expired) = std::future::poll_fn(|cx| self.pending_down.poll_expired(cx)) => {
                     let member = expired.into_inner();
-                    self.pending_keys.remove(&member.node);
+                    self.pending_keys.remove(&member.name);
                     self.cluster.member_failed(&member);
                 }
                 _ = rejoin.tick() => {
@@ -115,12 +115,12 @@ impl Driver {
         match event {
             PeerEvent::Unreachable(node) => {
                 if let Some(member) = self.cluster.member_unreachable(&node) {
-                    tracing::warn!(node = %member.node, addr = %member.addr, "Node unreachable");
+                    tracing::warn!(node = %member.name, addr = %member.addr, "Node unreachable");
                 }
             }
             PeerEvent::Reachable(node) => {
                 if let Some(member) = self.cluster.member_reachable(&node) {
-                    tracing::info!(node = %member.node, addr = %member.addr, "Node reachable again");
+                    tracing::info!(node = %member.name, addr = %member.addr, "Node reachable again");
                 }
             }
             // Nothing here rides on a single connection: a lost one is
@@ -136,14 +136,14 @@ impl Driver {
     /// just drops it.
     fn send(&self, to: &Member, message: Message) {
         let sender = self.links.sender(
-            &to.node,
+            &to.name,
             &to.addr,
             Protocol::MEMBERSHIP,
             message.delivery(),
             0,
         );
         if sender.try_send(message.encode()).is_err() {
-            tracing::debug!(node = %to.node, "Peer queue full or closed, dropping message");
+            tracing::debug!(node = %to.name, "Peer queue full or closed, dropping message");
         }
     }
 
@@ -165,8 +165,8 @@ impl Driver {
             }
             Message::Departure => {
                 if let Some(member) = self.cluster.member_left(&message.from, message.generation) {
-                    tracing::info!(node = %member.node, addr = %member.addr, "Node left");
-                    self.cancel_pending(&member.node);
+                    tracing::info!(node = %member.name, addr = %member.addr, "Node left");
+                    self.cancel_pending(&member.name);
                 }
             }
         }
@@ -186,7 +186,7 @@ impl Driver {
     }
 
     fn announce(&mut self, seed: Member) {
-        if seed.node == self.cluster.local().node {
+        if seed.name == self.cluster.local_member().name {
             return;
         }
         if let Err(err) = self.foca.announce(seed, &mut self.runtime) {
@@ -212,26 +212,26 @@ impl Driver {
     fn notify(&mut self, notification: OwnedNotification<Member>) {
         match notification {
             OwnedNotification::MemberUp(member) => {
-                tracing::info!(node = %member.node, addr = %member.addr, "Node up");
-                self.cancel_pending(&member.node);
+                tracing::info!(node = %member.name, addr = %member.addr, "Node up");
+                self.cancel_pending(&member.name);
                 self.cluster.member_up(member);
             }
             OwnedNotification::MemberDown(member) => {
-                tracing::info!(node = %member.node, addr = %member.addr, "Node down");
-                self.links.forget(&member.node, member.generation);
+                tracing::info!(node = %member.name, addr = %member.addr, "Node down");
+                self.links.forget(&member.name, member.generation);
                 // It may yet turn out to have left cleanly; see `ClusterTimings::departure_grace`.
                 if self.cluster.contains(&member) {
                     let key = self
                         .pending_down
                         .insert(member.clone(), self.timings.departure_grace);
-                    if let Some(old) = self.pending_keys.insert(member.node, key) {
+                    if let Some(old) = self.pending_keys.insert(member.name, key) {
                         self.pending_down.try_remove(&old);
                     }
                 }
             }
             OwnedNotification::Rename(before, after) => {
-                self.cancel_pending(&before.node);
-                self.links.forget(&before.node, before.generation);
+                self.cancel_pending(&before.name);
+                self.links.forget(&before.name, before.generation);
                 self.cluster.member_renamed(&before, after);
             }
             OwnedNotification::Rejoin(new_identity) => {
@@ -266,7 +266,7 @@ mod tests {
 
     fn member(name: &str) -> Member {
         Member {
-            node: NodeName::new(name),
+            name: NodeName::new(name),
             addr: NodeAddr::new(format!("{name}:7000")),
             generation: 1,
         }
@@ -283,7 +283,7 @@ mod tests {
             .await
             .unwrap();
         Driver::new(
-            Cluster::new(member("node-a")),
+            Cluster::membership_only(member("node-a")),
             Config::simple(),
             StdRng::seed_from_u64(1),
             links,

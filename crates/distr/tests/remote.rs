@@ -18,8 +18,8 @@ use zestors::{
 };
 use zestors_distr::{
     AddressError, Cluster, ClusterAddress, ClusterConfig, ClusterNode, ClusterNodeError, Decode,
-    DecodeError, Encode, EncodeError, GlobalName, NodeRef, RemoteAccepts, RemoteActorOps,
-    RemoteAddress, RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError, RemoteOpError,
+    DecodeError, Encode, EncodeError, GlobalName, RemoteAccepts, RemoteActorOps, RemoteAddress,
+    RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError, RemoteOpError,
     RemoteReceipt as _, RemoteReplyError, RemoteRequest, Seed, StableId, sim::SimNetwork,
 };
 
@@ -249,7 +249,6 @@ fn fast_foca() -> foca::Config {
 }
 
 struct Node {
-    remote: NodeRef,
     cluster: Cluster,
     shutdown: zestors_supervisor::NodeShutdown,
     task: JoinHandle<Result<(), ClusterNodeError>>,
@@ -282,7 +281,6 @@ fn node_with_lanes(
 impl Node {
     fn run(node: ClusterNode) -> Self {
         Self {
-            remote: node.remote(),
             cluster: node.cluster(),
             shutdown: node.shutdown_handle(),
             task: tokio::spawn(node.run()),
@@ -321,7 +319,7 @@ impl Pair {
         within(b.cluster.wait_for_members(1)).await;
 
         // What node-b accepts.
-        b.remote
+        b.cluster
             .register::<Double>()
             .register::<Note>()
             .register::<Hang>()
@@ -341,7 +339,7 @@ impl Pair {
     /// The actor `name` on node-b, as node-a sees it.
     fn on_b<C: zestors::runtime::Context>(&self, name: &'static str) -> RemoteAddress<C> {
         self.a
-            .remote
+            .cluster
             .address_unchecked(GlobalName::new(name, "node-b"))
     }
 }
@@ -543,7 +541,7 @@ async fn messages_that_cant_be_sent_are_given_back() {
     // A node that isn't in the cluster.
     let stranger: RemoteAddress<Dyn<(Note,)>> = pair
         .a
-        .remote
+        .cluster
         .address_unchecked(GlobalName::new("any", "node-z"));
     let Err(RemoteCastError::NotAMember(Note(3))) = stranger.cast(Note(3)).await else {
         panic!("Expected the message back")
@@ -564,7 +562,7 @@ async fn messages_that_cant_be_sent_are_given_back() {
 async fn nothing_is_sent_before_the_node_runs() {
     let net = SimNetwork::new(1);
     let node = node(&net, "node-a", 1, None);
-    let remote = node.remote();
+    let remote = node.cluster();
 
     let target: RemoteAddress<Dyn<(Note,)>> =
         remote.address_unchecked(GlobalName::new("any", "node-b"));
@@ -866,7 +864,7 @@ async fn operations_report_why_they_failed() {
 
     let stranger: RemoteAddress<WorkerInterface> = pair
         .a
-        .remote
+        .cluster
         .address_unchecked(GlobalName::new("ops-nobody", "node-z"));
     assert!(matches!(
         stranger.signal_shutdown().await,
@@ -878,7 +876,7 @@ async fn operations_report_why_they_failed() {
 fn local_on_b(pair: &Pair, name: &'static str) -> ClusterAddress<WorkerInterface> {
     let address = pair
         .b
-        .remote
+        .cluster
         .cluster_address::<WorkerInterface>(GlobalName::new(name, "node-b"))
         .unwrap();
     assert!(matches!(address, ClusterAddress::Local(_)));
@@ -889,7 +887,7 @@ fn local_on_b(pair: &Pair, name: &'static str) -> ClusterAddress<WorkerInterface
 fn remote_on_b(pair: &Pair, name: &'static str) -> ClusterAddress<WorkerInterface> {
     let address = pair
         .a
-        .remote
+        .cluster
         .cluster_address::<WorkerInterface>(GlobalName::new(name, "node-b"))
         .unwrap();
     assert!(matches!(address, ClusterAddress::Remote(_)));
@@ -968,7 +966,7 @@ async fn a_local_message_is_not_encoded() {
 async fn a_local_actor_is_reached_without_the_node_running() {
     let net = SimNetwork::new(1);
     let idle = node(&net, "node-x", 9, None);
-    let remote = idle.remote();
+    let remote = idle.cluster();
     let _worker = worker("cluster-idle", Log::default());
 
     let local = remote
@@ -1029,7 +1027,7 @@ async fn a_local_call_can_time_out_and_a_closed_actor_is_told() {
 async fn making_an_address_checks_the_actor_on_this_node() {
     let pair = Pair::start().await;
     let _worker = worker("cluster-check", Log::default());
-    let (a, b) = (&pair.a.remote, &pair.b.remote);
+    let (a, b) = (&pair.a.cluster, &pair.b.cluster);
 
     // On this node the actor has to be there, and accept what is asked.
     assert!(matches!(

@@ -1,7 +1,7 @@
 //! The sending side: [`RemoteAddress`], and how a message is put on its way.
 
 use super::{
-    Decode, NodeRef, RemoteCallOptions, RemoteCastError, RemoteMessage, RemoteOpError,
+    Cluster, Decode, RemoteCallOptions, RemoteCastError, RemoteMessage, RemoteOpError,
     RemoteReceipt as _, RemoteReply,
     context::{Exports, Wire},
     reply::RemoteMessageKind,
@@ -26,7 +26,7 @@ use zestors_runtime::{Context, Dyn, Name};
 /// An actor on another node, that messages can be sent to: the remote analog of
 /// [`Address`](zestors_runtime::Address).
 ///
-/// Made with [`Remote::address`]. `C` is what the actor is expected to accept,
+/// Made with [`Cluster::address`]. `C` is what the actor is expected to accept,
 /// either its [`Interface`](zestors_interface::Interface) or a set of messages
 /// like `Dyn<(Ping, Double)>`, and only those can be sent. Whether the actor
 /// really does is up to the node it runs on to say: a message it doesn't accept
@@ -37,7 +37,7 @@ use zestors_runtime::{Context, Dyn, Name};
 /// in the order they were sent. A message that is not answered is not sent
 /// again; delivery is at most once.
 pub struct RemoteAddress<C: Context = Dyn> {
-    node: NodeRef,
+    node: Cluster,
     target: GlobalName,
     timeout: Option<Duration>,
     _ctx: PhantomData<fn() -> C>,
@@ -94,7 +94,7 @@ struct Prepared {
 }
 
 impl<C: Context> RemoteAddress<C> {
-    pub(super) fn new(node: NodeRef, target: GlobalName) -> Self {
+    pub(super) fn new(node: Cluster, target: GlobalName) -> Self {
         Self {
             node,
             target,
@@ -181,28 +181,24 @@ impl<C: Context> RemoteAddress<C> {
         msg: &M,
         options: RemoteCallOptions,
     ) -> Result<Sending<M>, Refusal> {
-        let shared = &self.node.shared;
-        let running = shared.running().ok_or(Refusal::NotRunning)?;
-        let member = shared
-            .cluster
+        let cluster = &self.node;
+        let messaging = cluster.messaging();
+        let running = messaging.running().ok_or(Refusal::NotRunning)?;
+        let member = cluster
             .member(self.target.node())
             .ok_or(Refusal::NotAMember)?;
-        if !shared.cluster.is_reachable(self.target.node()) {
+        if !cluster.is_reachable(self.target.node()) {
             return Err(Refusal::Unreachable);
         }
 
-        let wire = Wire::new(
-            self.node.shared.clone(),
-            running.clone(),
-            member.node.clone(),
-        );
+        let wire = Wire::new(self.node.clone(), running.clone(), member.name.clone());
         let payload = wire.scope(|| msg.encode());
         // Forgets the requests in the message again if it isn't sent.
         let exports = wire.exports();
         let payload = payload.map_err(Refusal::Encode)?;
         let (target, id) = (self.target.name().clone(), M::Id);
         let call_id = <M::Kind as RemoteMessageKind<M::Output>>::REPLIES
-            .then(|| shared.next_call.fetch_add(1, Ordering::Relaxed));
+            .then(|| messaging.next_call.fetch_add(1, Ordering::Relaxed));
         let frame = match call_id {
             Some(call_id) => Frame::Call {
                 call_id,
@@ -231,21 +227,21 @@ impl<C: Context> RemoteAddress<C> {
             let timeout = options
                 .timeout
                 .or(self.timeout)
-                .unwrap_or(shared.call_timeout);
+                .unwrap_or(messaging.call_timeout);
             running.pending.expect(
                 call_id,
-                member.node.clone(),
+                member.name.clone(),
                 timeout,
                 <M::Output as Decode>::decode,
             )
         });
 
         let lane = running.links.sender(
-            &member.node,
+            &member.name,
             &member.addr,
             Protocol::ACTORS,
             Delivery::Ordered,
-            shard_of(self.target.name(), shared.shards),
+            shard_of(self.target.name(), messaging.shards),
         );
         Ok((
             Prepared {

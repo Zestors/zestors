@@ -9,15 +9,15 @@
 
 mod event;
 mod generation;
-mod handle;
 mod member;
 mod membership;
 mod node;
+mod state;
 
 #[cfg(feature = "sim")]
 pub mod sim;
 
 pub use event::{ClusterEvent, ClusterSnapshot, NodeStatus};
-pub use handle::Cluster;
 pub use member::Member;
 pub use node::{ClusterConfig, ClusterNode, ClusterNodeError, ClusterTimings, Seed};
+pub use state::Cluster;

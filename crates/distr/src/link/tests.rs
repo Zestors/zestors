@@ -32,7 +32,7 @@ async fn bind_at(name: &str, addr: std::net::SocketAddr, timings: LinkTimings) -
         inbox,
         peers,
         member: Member {
-            node: NodeName::new(name),
+            name: NodeName::new(name),
             addr,
             generation: 1,
         },
@@ -52,7 +52,7 @@ async fn datagrams_arrive_small_or_big() {
     let mut b = bind("node-b").await;
     let sender = a
         .links
-        .sender(&b.member.node, &b.member.addr, TEST, Delivery::Datagram, 0);
+        .sender(&b.member.name, &b.member.addr, TEST, Delivery::Datagram, 0);
 
     let small = Bytes::from(vec![7u8; 100]);
     sender.send(small.clone()).await.unwrap();
@@ -74,7 +74,7 @@ async fn ordered_messages_arrive_in_order() {
 
     let sender = a
         .links
-        .sender(&b.member.node, &b.member.addr, TEST, Delivery::Ordered, 0);
+        .sender(&b.member.name, &b.member.addr, TEST, Delivery::Ordered, 0);
     // Enough that they queue up, and of mixed sizes. Sent alongside reading:
     // sending waits for room, which the reader makes.
     tokio::spawn(async move {
@@ -100,7 +100,7 @@ async fn large_messages_get_through_and_oversized_ones_are_dropped() {
     let mut b = bind("node-b").await;
     let sender = a
         .links
-        .sender(&b.member.node, &b.member.addr, TEST, Delivery::Ordered, 0);
+        .sender(&b.member.name, &b.member.addr, TEST, Delivery::Ordered, 0);
 
     let large = Bytes::from(vec![3u8; MAX_MESSAGE_SIZE]);
     sender.send(large.clone()).await.unwrap();
@@ -123,7 +123,7 @@ async fn protocols_do_not_mix() {
 
     for (protocol, payload) in [(TEST, "one"), (Protocol(21), "two"), (TEST, "three")] {
         let sender = a.links.sender(
-            &b.member.node,
+            &b.member.name,
             &b.member.addr,
             protocol,
             Delivery::Ordered,
@@ -145,9 +145,9 @@ async fn nodes_dialing_each_other_at_once_settle_on_one_connection() {
 
     let (to_b, to_a) = (
         a.links
-            .sender(&b.member.node, &b.member.addr, TEST, Delivery::Ordered, 0),
+            .sender(&b.member.name, &b.member.addr, TEST, Delivery::Ordered, 0),
         b.links
-            .sender(&a.member.node, &a.member.addr, TEST, Delivery::Ordered, 0),
+            .sender(&a.member.name, &a.member.addr, TEST, Delivery::Ordered, 0),
     );
     to_b.send(Bytes::from_static(b"first")).await.unwrap();
     to_a.send(Bytes::from_static(b"first")).await.unwrap();
@@ -177,7 +177,7 @@ async fn losing_a_connection_is_reported() {
     let mut b = bind("node-b").await;
     let sender = a
         .links
-        .sender(&b.member.node, &b.member.addr, TEST, Delivery::Ordered, 0);
+        .sender(&b.member.name, &b.member.addr, TEST, Delivery::Ordered, 0);
     sender.send(Bytes::from_static(b"hi")).await.unwrap();
     next(&mut b.inbox).await;
 
@@ -211,7 +211,7 @@ async fn unreachable_peer_is_reported_and_reported_reachable_when_it_answers() {
         .local_addr()
         .unwrap();
     let b_member = Member {
-        node: NodeName::new("node-b"),
+        name: NodeName::new("node-b"),
         addr: addr.into(),
         generation: 1,
     };
@@ -223,7 +223,7 @@ async fn unreachable_peer_is_reported_and_reported_reachable_when_it_answers() {
             loop {
                 tokio::select! {
                     _ = tick.tick() => {
-                        let _ = a.links.sender(&to.node, &to.addr, TEST, Delivery::Datagram, 0).try_send(Bytes::from_static(b"hi"));
+                        let _ = a.links.sender(&to.name, &to.addr, TEST, Delivery::Datagram, 0).try_send(Bytes::from_static(b"hi"));
                     }
                     Ok(event) = a.peers.recv() => if wanted(&event) { return },
                 }

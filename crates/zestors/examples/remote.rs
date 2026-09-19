@@ -52,7 +52,7 @@ async fn main() {
     let caller = node("caller", b_addr, Some(("host", a_addr)));
 
     // The host accepts these messages from other nodes, and runs an actor that handles it.
-    host.remote().register::<Greet>().register::<CountLetters>();
+    host.cluster().register::<Greet>().register::<CountLetters>();
     let _greeter = spawn(
         Name::new_static("greeter"),
         |mut inbox: Inbox<GreeterInterface>| async move {
@@ -73,14 +73,14 @@ async fn main() {
     )
     .unwrap();
 
-    let host_remote = host.remote();
+    let host_remote = host.cluster();
     let (caller_cluster, host_shutdown, caller_shutdown) = (
         caller.cluster(),
         host.shutdown_handle(),
         caller.shutdown_handle(),
     );
     let greeter = caller
-        .remote()
+        .cluster()
         .address::<GreeterInterface>(GlobalName::new("greeter", "host"))
         .unwrap();
     // An address that works the same for an actor on this node: the host's own

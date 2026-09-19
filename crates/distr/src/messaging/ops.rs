@@ -18,7 +18,7 @@ use std::{marker::PhantomData, sync::Arc};
 use zestors_interface::Message;
 use zestors_runtime::{Address, ChannelSnapshot, Signal, prelude::*};
 
-use super::SharedNode;
+use super::Cluster;
 
 /// Sends a [`Signal`] to the actor. Answered with whether it was accepted:
 /// `false` if the actor was already exiting or dead.
@@ -48,7 +48,7 @@ pub struct RemoteInfo {
     /// Whether the actor's mailbox is full, so that sending to it waits.
     pub reached_backpressure: bool,
     /// The ids of the message types that the actor accepts and that its node
-    /// has registered with [`Remote::register`](super::Remote::register). `None`
+    /// has registered with [`Cluster::register`](crate::Cluster::register). `None`
     /// for an actor on this node, which can't tell.
     pub accepts: Option<Vec<Id>>,
 }
@@ -57,7 +57,7 @@ impl Operation for SignalOp {
     fn run(
         self,
         address: Address,
-        _: Arc<SharedNode>,
+        _: Cluster,
     ) -> super::handler::BoxFuture<Result<bool, RemoteError>> {
         Box::pin(async move { Ok(address.signal(self.0)) })
     }
@@ -67,7 +67,7 @@ impl Operation for PingOp {
     fn run(
         self,
         address: Address,
-        _: Arc<SharedNode>,
+        _: Cluster,
     ) -> super::handler::BoxFuture<Result<(), RemoteError>> {
         Box::pin(async move { address.ping().await.map_err(|_| RemoteError::NoReply) })
     }
@@ -77,10 +77,11 @@ impl Operation for InfoOp {
     fn run(
         self,
         address: Address,
-        shared: Arc<SharedNode>,
+        cluster: Cluster,
     ) -> super::handler::BoxFuture<Result<RemoteInfo, RemoteError>> {
         Box::pin(async move {
-            let mut accepts: Vec<Id> = shared
+            let mut accepts: Vec<Id> = cluster
+                .messaging()
                 .handlers
                 .iter()
                 .filter(|handler| handler.accepts(&address))

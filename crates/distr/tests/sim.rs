@@ -53,7 +53,7 @@ async fn departure_of(rx: &mut broadcast::Receiver<ClusterEvent>, node: &str) ->
             match rx.recv().await {
                 Ok(event)
                     if matches!(event, ClusterEvent::Left(_) | ClusterEvent::Failed(_))
-                        && event.member().node.as_str() == node =>
+                        && event.member().name.as_str() == node =>
                 {
                     return event;
                 }
@@ -88,7 +88,7 @@ async fn nodes_discover_each_other_and_notice_departures() {
 
     // A node is identified by its name, not its address: restarted somewhere
     // else, it replaces its previous incarnation.
-    let old_generation = c.cluster.local().generation;
+    let old_generation = c.cluster.local_member().generation;
     let c2 = sim.start("node-c", addr(4), &[("node-a", addr(1))]).await;
     members_of(&a, 2).await;
     members_of(&c2, 2).await;
@@ -96,7 +96,7 @@ async fn nodes_discover_each_other_and_notice_departures() {
         a.cluster.member(&NodeName::new("node-c")).map(|m| m.addr),
         Some(addr(4).into())
     );
-    assert!(c2.cluster.local().generation > old_generation);
+    assert!(c2.cluster.local_member().generation > old_generation);
 
     // A node that vanishes without saying goodbye is reported as failed.
     b.crash().await;
@@ -128,13 +128,13 @@ async fn crashed_node_is_unreachable_before_it_is_failed() {
     loop {
         match within(events.recv()).await.expect("Event stream open") {
             ClusterEvent::Unreachable(m) => {
-                assert_eq!(m.node, b_id);
+                assert_eq!(m.name, b_id);
                 assert!(a.cluster.member(&b_id).is_some(), "still a member");
                 assert!(!a.cluster.is_reachable(&b_id));
                 saw_unreachable = true;
             }
             ClusterEvent::Failed(m) => {
-                assert_eq!(m.node, b_id);
+                assert_eq!(m.name, b_id);
                 break;
             }
             _ => {}
@@ -165,7 +165,7 @@ async fn snapshot_and_events_line_up() {
         }
     })
     .await;
-    assert_eq!(up.member().node, b_id);
+    assert_eq!(up.member().name, b_id);
 
     // ...and a later snapshot contains it, with no second event for it.
     let (snapshot, mut events) = a.cluster.subscribe_with_snapshot();
@@ -178,7 +178,7 @@ async fn snapshot_and_events_line_up() {
     ));
 
     // wait_until sees the state at once when it already holds.
-    let members = within(a.cluster.wait_until(|m| m.iter().any(|m| m.node == b_id))).await;
+    let members = within(a.cluster.wait_until(|m| m.iter().any(|m| m.name == b_id))).await;
     assert_eq!(members.len(), 1);
 }
 

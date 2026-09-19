@@ -2,8 +2,7 @@
 //! local actors, and answered.
 
 use super::{
-    RemoteError, SharedNode, Started, context::Wire, handler::ReplyFuture, reply::Pending,
-    wire::Frame,
+    Cluster, RemoteError, Started, context::Wire, handler::ReplyFuture, reply::Pending, wire::Frame,
 };
 use crate::{
     ClusterEvent, Id, NodeName,
@@ -80,14 +79,14 @@ struct Work {
 /// Runs while the node does: takes in what other nodes send, and notices when
 /// they are lost.
 pub(super) async fn serve(
-    shared: Arc<SharedNode>,
+    cluster: Cluster,
     running: Started,
     mut inbox: mpsc::Receiver<Incoming>,
     mut peers: broadcast::Receiver<PeerEvent>,
     mut members: broadcast::Receiver<ClusterEvent>,
 ) {
     let mut router = Router {
-        shared,
+        cluster,
         started: running.clone(),
         routes: HashMap::new(),
     };
@@ -110,7 +109,7 @@ pub(super) async fn serve(
             },
             event = members.recv() => match event {
                 Ok(ClusterEvent::Left(member) | ClusterEvent::Failed(member)) => {
-                    pending.fail_node(&member.node);
+                    pending.fail_node(&member.name);
                 }
                 Ok(_) => {}
                 Err(broadcast::error::RecvError::Lagged(_)) => {
@@ -126,7 +125,7 @@ pub(super) async fn serve(
 /// actor doesn't hold up the others, and the messages for one are put in its
 /// mailbox in the order they arrived.
 struct Router {
-    shared: Arc<SharedNode>,
+    cluster: Cluster,
     started: Started,
     routes: HashMap<Name, Route>,
 }
@@ -177,13 +176,14 @@ impl Router {
         // Operations on the actor itself, such as signals, don't wait behind
         // its messages, as they don't locally.
         let bypasses_queue = self
-            .shared
+            .cluster
+            .messaging()
             .handlers
             .get(&work.msg)
             .is_some_and(|handler| handler.bypasses_queue());
         if bypasses_queue {
-            let (shared, started) = (self.shared.clone(), self.started.clone());
-            tokio::spawn(async move { process(&shared, &started, &target, work).await });
+            let (cluster, started) = (self.cluster.clone(), self.started.clone());
+            tokio::spawn(async move { process(&cluster, &started, &target, work).await });
             return;
         }
 
@@ -222,7 +222,7 @@ impl Router {
             },
         );
         tokio::spawn(actor_task(
-            self.shared.clone(),
+            self.cluster.clone(),
             self.started.clone(),
             target,
             tasks_queue,
@@ -237,7 +237,7 @@ impl Router {
             tracing::warn!("Dropping a message for an actor with too much waiting: {error}");
         }
         for call_id in answers {
-            let Some(lane) = reply_lane(&self.shared, &self.started.links, &work.from, call_id)
+            let Some(lane) = reply_lane(&self.cluster, &self.started.links, &work.from, call_id)
             else {
                 return;
             };
@@ -254,33 +254,33 @@ impl Router {
 
 /// The lane replies to `node` go through, if it is a member of the cluster.
 fn reply_lane(
-    shared: &SharedNode,
+    cluster: &Cluster,
     links: &Links,
     node: &NodeName,
     call_id: u64,
 ) -> Option<mpsc::Sender<Bytes>> {
-    let Some(member) = shared.cluster.member(node) else {
+    let Some(member) = cluster.member(node) else {
         tracing::debug!(%node, "Not replying to a node that is not a member");
         return None;
     };
     Some(links.sender(
-        &member.node,
+        &member.name,
         &member.addr,
         Protocol::ACTORS,
         Delivery::Ordered,
-        (call_id % shared.shards as u64) as u8,
+        (call_id % cluster.messaging().shards as u64) as u8,
     ))
 }
 
 /// Sends the reply to a call.
 pub(super) async fn reply(
-    shared: &SharedNode,
+    cluster: &Cluster,
     links: &Links,
     node: &NodeName,
     call_id: u64,
     result: Result<Bytes, RemoteError>,
 ) {
-    let Some(lane) = reply_lane(shared, links, node, call_id) else {
+    let Some(lane) = reply_lane(cluster, links, node, call_id) else {
         return;
     };
     let mut frame = Frame::Reply { call_id, result }.encode();
@@ -296,7 +296,7 @@ pub(super) async fn reply(
 
 /// Delivers the messages for one actor, one after the other.
 async fn actor_task(
-    shared: Arc<SharedNode>,
+    cluster: Cluster,
     started: Started,
     name: Name,
     mut queue: mpsc::UnboundedReceiver<Work>,
@@ -314,12 +314,12 @@ async fn actor_task(
         };
 
         queued.release(work.payload.len());
-        process(&shared, &started, &name, work).await;
+        process(&cluster, &started, &name, work).await;
     }
 }
 
 /// Delivers one message to the actor `name`, and sends its reply when it comes.
-async fn process(shared: &Arc<SharedNode>, started: &Started, name: &Name, work: Work) {
+async fn process(cluster: &Cluster, started: &Started, name: &Name, work: Work) {
     let Work {
         from,
         msg,
@@ -327,15 +327,15 @@ async fn process(shared: &Arc<SharedNode>, started: &Started, name: &Name, work:
         payload,
         call_id,
     } = work;
-    let wire = Wire::new(shared.clone(), started.clone(), from.clone());
-    match deliver(shared, wire, name, msg, payload, call_id.is_some()).await {
+    let wire = Wire::new(cluster.clone(), started.clone(), from.clone());
+    match deliver(cluster, wire, name, msg, payload, call_id.is_some()).await {
         Ok(Some(waiting)) => {
             // Waiting for the actor to answer mustn't hold up the next message.
-            let (shared, links) = (shared.clone(), started.links.clone());
+            let (cluster, links) = (cluster.clone(), started.links.clone());
             tokio::spawn(async move {
                 let result = waiting.await;
                 if let Some(call_id) = call_id {
-                    reply(&shared, &links, &from, call_id, result).await;
+                    reply(&cluster, &links, &from, call_id, result).await;
                 }
             });
         }
@@ -346,21 +346,22 @@ async fn process(shared: &Arc<SharedNode>, started: &Started, name: &Name, work:
             }
             // Whoever waits for an answer to this message learns it isn't coming.
             for id in call_id.into_iter().chain(requests) {
-                reply(shared, &started.links, &from, id, Err(error.clone())).await;
+                reply(cluster, &started.links, &from, id, Err(error.clone())).await;
             }
         }
     }
 }
 
 async fn deliver(
-    shared: &SharedNode,
+    cluster: &Cluster,
     wire: Wire,
     name: &Name,
     msg: Id,
     payload: Bytes,
     reply: bool,
 ) -> Result<Option<ReplyFuture>, RemoteError> {
-    let handler = shared
+    let handler = cluster
+        .messaging()
         .handlers
         .get(&msg)
         .map(|handler| handler.clone())

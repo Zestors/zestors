@@ -127,14 +127,14 @@ impl SimNetwork {
     ) -> SimNode {
         self.generation += 1;
         let local = Member {
-            node: NodeName::new(name),
+            name: NodeName::new(name),
             addr: addr.into(),
             generation: self.generation,
         };
-        let cluster = Cluster::new(local.clone());
+        let cluster = Cluster::membership_only(local.clone());
         let (links, _) = Starter::new(self.backend(addr))
             .start(
-                NodeIncarnation::new(local.node.clone(), self.generation),
+                NodeIncarnation::new(local.name.clone(), self.generation),
                 self.link_timings.clone(),
             )
             .await

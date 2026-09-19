@@ -1,5 +1,4 @@
 use crate::{NodeAddr, NodeName};
-use foca::Identity;
 use serde::{Deserialize, Serialize};
 
 /// A node in the cluster, as known to the membership protocol.
@@ -12,14 +11,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Member {
     /// The node's name; must be a DNS name matching its TLS certificate.
-    pub node: NodeName,
+    pub name: NodeName,
     /// The address peers currently reach the node on.
     pub addr: NodeAddr,
     /// Increases every time the node restarts.
     pub generation: u64,
 }
 
-impl Identity for Member {
+impl foca::Identity for Member {
     type Addr = NodeName;
 
     fn renew(&self) -> Option<Self> {
@@ -30,7 +29,7 @@ impl Identity for Member {
     }
 
     fn addr(&self) -> NodeName {
-        self.node.clone()
+        self.name.clone()
     }
 
     fn win_addr_conflict(&self, adversary: &Self) -> bool {

@@ -1,9 +1,9 @@
 //! Delivers a message to a local actor, knowing its type.
 
-use super::SharedNode;
+use super::Cluster;
 use super::{Encode, RemoteError, RemoteMessage, context::Wire};
 use bytes::Bytes;
-use std::{future::Future, marker::PhantomData, pin::Pin, sync::Arc};
+use std::{future::Future, marker::PhantomData, pin::Pin};
 use zestors_interface::Receipt;
 use zestors_runtime::{Address, errors::CastDynError, prelude::*};
 
@@ -47,7 +47,7 @@ pub(super) trait Operation: RemoteMessage + Send + 'static {
     fn run(
         self,
         address: Address,
-        shared: Arc<SharedNode>,
+        cluster: Cluster,
     ) -> BoxFuture<Result<Self::Output, RemoteError>>;
 }
 
@@ -66,7 +66,7 @@ impl<M: Operation> Handler for Builtin<M> {
             let msg = wire
                 .scope(|| M::decode(payload))
                 .map_err(|error| RemoteError::Decode(error.to_string()))?;
-            let running = msg.run(address, wire.shared().clone());
+            let running = msg.run(address, wire.cluster().clone());
             if !reply {
                 tokio::spawn(async move {
                     let _ = running.await;

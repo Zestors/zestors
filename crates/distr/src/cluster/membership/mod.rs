@@ -57,7 +57,7 @@ impl Membership {
             .seeds
             .iter()
             .map(|seed| Member {
-                node: seed.node.clone(),
+                name: seed.node.clone(),
                 addr: seed.addr.clone(),
                 generation: 0,
             })

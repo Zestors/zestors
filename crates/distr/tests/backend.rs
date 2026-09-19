@@ -216,7 +216,7 @@ async fn nodes_join_over_a_custom_backend() {
     };
     let mut a_events = a_cluster.subscribe();
     let members = wait(a_cluster.clone()).await;
-    assert_eq!(members[0].node.as_str(), "node-b");
+    assert_eq!(members[0].name.as_str(), "node-b");
     assert_eq!(members[0].addr, addr(2));
     wait(b_cluster).await;
 
@@ -226,7 +226,7 @@ async fn nodes_join_over_a_custom_backend() {
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(ClusterEvent::Left(member)) = a_events.recv().await
-                && member.node.as_str() == "node-b"
+                && member.name.as_str() == "node-b"
             {
                 break;
             }

@@ -1,63 +1,82 @@
 use super::{ClusterEvent, ClusterSnapshot, Member, NodeStatus};
-use crate::NodeName;
+use crate::{NodeName, messaging::MessageHandler};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
+    time::Duration,
 };
 use tokio::sync::{broadcast, watch};
 
 /// What this node knows about the cluster. Kept under one lock so that readers
 /// never see the parts disagree, and so that events can be published with a
 /// change made under it (see the mutators below).
-struct State {
+struct Roster {
     local: Member,
     members: HashMap<NodeName, Member>,
     /// Members in `members` that can't currently be connected to.
     unreachable: HashSet<NodeName>,
 }
 
-struct Shared {
-    status: watch::Sender<NodeStatus>,
-    state: RwLock<State>,
-    events: broadcast::Sender<ClusterEvent>,
+struct ClusterView {
+    roster: RwLock<Roster>,
+    status_sender: watch::Sender<NodeStatus>,
+    event_sender: broadcast::Sender<ClusterEvent>,
 }
 
-/// A cheaply cloneable handle to a running cluster, obtained from
-/// [`ClusterNode::cluster`](crate::ClusterNode::cluster).
+struct ClusterInner {
+    view: ClusterView,
+    messaging: MessageHandler,
+}
+
+/// A cheaply cloneable handle to this node's place in the cluster, obtained
+/// from [`ClusterNode::cluster`](crate::ClusterNode::cluster): it shows who is
+/// in the cluster, and messages the actors on other nodes.
 ///
 /// It is usable before the node has started, in which case it reports no
-/// members.
+/// members and sending fails.
 #[derive(Clone)]
 pub struct Cluster {
-    shared: Arc<Shared>,
+    inner: Arc<ClusterInner>,
 }
 
 impl Cluster {
-    pub(super) fn new(local: Member) -> Self {
+    pub(crate) fn new(local: Member, call_timeout: Duration, shards: u8) -> Self {
         Self {
-            shared: Arc::new(Shared {
-                status: watch::channel(NodeStatus::Starting).0,
-                state: RwLock::new(State {
-                    local,
-                    members: HashMap::new(),
-                    unreachable: HashSet::new(),
-                }),
-                events: broadcast::channel(256).0,
+            inner: Arc::new(ClusterInner {
+                view: ClusterView {
+                    status_sender: watch::channel(NodeStatus::Starting).0,
+                    roster: RwLock::new(Roster {
+                        local,
+                        members: HashMap::new(),
+                        unreachable: HashSet::new(),
+                    }),
+                    event_sender: broadcast::channel(256).0,
+                },
+                messaging: MessageHandler::new(call_timeout, shards),
             }),
         }
     }
 
+    /// For nodes that only take part in membership, such as the simulated ones.
+    pub(crate) fn membership_only(local: Member) -> Self {
+        Self::new(local, Duration::from_secs(30), 4)
+    }
+
+    pub(crate) fn messaging(&self) -> &MessageHandler {
+        &self.inner.messaging
+    }
+
     /// This node, as the rest of the cluster knows it.
-    pub fn local(&self) -> Member {
+    pub fn local_member(&self) -> Member {
         self.state().local.clone()
     }
 
-    fn state(&self) -> std::sync::RwLockReadGuard<'_, State> {
-        self.shared.state.read().expect("Not poisoned")
+    fn state(&self) -> std::sync::RwLockReadGuard<'_, Roster> {
+        self.inner.view.roster.read().expect("Not poisoned")
     }
 
     pub(super) fn set_local(&self, local: Member) {
-        self.shared.state.write().expect("Not poisoned").local = local;
+        self.inner.view.roster.write().expect("Not poisoned").local = local;
     }
 
     /// The other nodes currently considered up, in no particular order.
@@ -86,7 +105,7 @@ impl Cluster {
     /// `members()` and `subscribe()` separately can miss or double count a change
     /// in between.
     pub fn subscribe(&self) -> broadcast::Receiver<ClusterEvent> {
-        self.shared.events.subscribe()
+        self.inner.view.event_sender.subscribe()
     }
 
     /// The current members together with a subscription to every change after
@@ -95,7 +114,7 @@ impl Cluster {
     pub fn subscribe_with_snapshot(&self) -> (ClusterSnapshot, broadcast::Receiver<ClusterEvent>) {
         // Changes are published under the state lock (see the mutators below).
         let state = self.state();
-        let events = self.shared.events.subscribe();
+        let events = self.inner.view.event_sender.subscribe();
         let snapshot = ClusterSnapshot {
             members: state.members.values().cloned().collect(),
             unreachable: state.unreachable.clone(),
@@ -135,17 +154,17 @@ impl Cluster {
 
     /// What this node is currently doing.
     pub fn status(&self) -> NodeStatus {
-        *self.shared.status.borrow()
+        *self.inner.view.status_sender.borrow()
     }
 
     /// Waits until [`Cluster::status`] is `status`.
     pub async fn wait_for_status(&self, status: NodeStatus) {
-        let mut rx = self.shared.status.subscribe();
+        let mut rx = self.inner.view.status_sender.subscribe();
         let _ = rx.wait_for(|current| *current == status).await;
     }
 
     pub(super) fn set_status(&self, status: NodeStatus) {
-        self.shared.status.send_if_modified(|current| {
+        self.inner.view.status_sender.send_if_modified(|current| {
             // Nothing follows Defunct or Leaving except leaving the cluster.
             let allowed = match (*current, status) {
                 (NodeStatus::Defunct, _) => false,
@@ -164,7 +183,7 @@ impl Cluster {
 impl std::fmt::Debug for Cluster {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Cluster")
-            .field("local", &self.local())
+            .field("local", &self.local_member())
             .field("members", &self.members())
             .finish()
     }
@@ -176,35 +195,36 @@ impl std::fmt::Debug for Cluster {
 // sees each change either in its snapshot or as an event, never both or neither.
 impl Cluster {
     pub(super) fn contains(&self, member: &Member) -> bool {
-        self.shared
-            .state
+        self.inner
+            .view
+            .roster
             .read()
             .expect("Not poisoned")
             .members
-            .get(&member.node)
+            .get(&member.name)
             == Some(member)
     }
 
-    fn write(&self) -> std::sync::RwLockWriteGuard<'_, State> {
-        self.shared.state.write().expect("Not poisoned")
+    fn write_members(&self) -> std::sync::RwLockWriteGuard<'_, Roster> {
+        self.inner.view.roster.write().expect("Not poisoned")
     }
 
     fn publish(&self, event: ClusterEvent) {
-        let _ = self.shared.events.send(event);
+        let _ = self.inner.view.event_sender.send(event);
     }
 
     pub(super) fn member_up(&self, member: Member) {
-        let mut state = self.write();
-        let previous = state.members.insert(member.node.clone(), member.clone());
+        let mut state = self.write_members();
+        let previous = state.members.insert(member.name.clone(), member.clone());
         if previous.as_ref() != Some(&member) {
-            state.unreachable.remove(&member.node);
+            state.unreachable.remove(&member.name);
             self.publish(ClusterEvent::Up(member));
         }
     }
 
     /// This node can't connect to `node`. Returns the member if that is news.
     pub(super) fn member_unreachable(&self, node: &NodeName) -> Option<Member> {
-        let mut state = self.write();
+        let mut state = self.write_members();
         let member = state.members.get(node)?.clone();
         state.unreachable.insert(node.clone()).then(|| {
             self.publish(ClusterEvent::Unreachable(member.clone()));
@@ -215,7 +235,7 @@ impl Cluster {
     /// This node can connect to `node` again. Returns the member if it had been
     /// reported unreachable.
     pub(super) fn member_reachable(&self, node: &NodeName) -> Option<Member> {
-        let mut state = self.write();
+        let mut state = self.write_members();
         let member = state.members.get(node)?.clone();
         state.unreachable.remove(node).then(|| {
             self.publish(ClusterEvent::Reachable(member.clone()));
@@ -225,7 +245,7 @@ impl Cluster {
 
     /// The node said goodbye. Returns it if it was known in that generation.
     pub(super) fn member_left(&self, node: &NodeName, generation: u64) -> Option<Member> {
-        let mut state = self.write();
+        let mut state = self.write_members();
         if state.members.get(node)?.generation != generation {
             return None;
         }
@@ -237,20 +257,20 @@ impl Cluster {
 
     /// The node was declared down without saying goodbye.
     pub(super) fn member_failed(&self, member: &Member) {
-        let mut state = self.write();
-        if state.members.get(&member.node) == Some(member) {
-            state.members.remove(&member.node);
-            state.unreachable.remove(&member.node);
+        let mut state = self.write_members();
+        if state.members.get(&member.name) == Some(member) {
+            state.members.remove(&member.name);
+            state.unreachable.remove(&member.name);
             self.publish(ClusterEvent::Failed(member.clone()));
         }
     }
 
     /// A restarted node replaced its previous incarnation.
     pub(super) fn member_renamed(&self, before: &Member, after: Member) {
-        let mut state = self.write();
-        if state.members.get(&before.node) == Some(before) {
-            state.members.insert(after.node.clone(), after.clone());
-            state.unreachable.remove(&after.node);
+        let mut state = self.write_members();
+        if state.members.get(&before.name) == Some(before) {
+            state.members.insert(after.name.clone(), after.clone());
+            state.unreachable.remove(&after.name);
             self.publish(ClusterEvent::Failed(before.clone()));
             self.publish(ClusterEvent::Up(after));
         }
