@@ -1,5 +1,6 @@
 use crate::_prelude::*;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
+use tokio::sync::watch;
 use zestors_runtime::errors::{JoinError, ShutdownAbortError};
 use zestors_supervision::{RestartIntensity, StartOnError};
 
@@ -45,12 +46,36 @@ impl NodeError {
 pub struct Node {
     restart_intensity: RestartIntensity,
     supervisor_spec: ChildSpec<SupervisorBlueprint>,
+    exit_delay: Duration,
+    shutdown: Arc<watch::Sender<bool>>,
+}
+
+/// Asks a [`Node`] to shut down gracefully, exactly as if it had received
+/// Ctrl+C. Obtained from [`Node::shutdown_handle`].
+///
+/// Unlike signalling the root supervisor's address, this works at any point,
+/// also before [`Node::run`] has started the supervisor: the request is
+/// remembered, and the node shuts down as soon as it is running. (An actor that
+/// hasn't been started yet rejects signals, so a signal sent to the root
+/// supervisor too early is dropped.)
+#[derive(Clone, Debug)]
+pub struct NodeShutdown {
+    shutdown: Arc<watch::Sender<bool>>,
+}
+
+impl NodeShutdown {
+    /// Requests a graceful shutdown. Does nothing if one was already requested.
+    pub fn shutdown(&self) {
+        self.shutdown.send_replace(true);
+    }
 }
 
 struct NodeActor {
+    shutdown: watch::Receiver<bool>,
     supervisor_child: Child<(), SupervisorInterface>,
     restart_limiter: RestartLimiter,
     supervisor_spec: ChildSpec<SupervisorBlueprint>,
+    exit_delay: Duration,
 }
 
 impl Node {
@@ -61,6 +86,16 @@ impl Node {
         Self {
             restart_intensity: RestartIntensity::restarts(0),
             supervisor_spec: spec,
+            exit_delay: Duration::from_secs(1),
+            shutdown: Arc::new(watch::channel(false).0),
+        }
+    }
+
+    /// Returns a handle that shuts this node down gracefully, usable before
+    /// and after [`Node::run`] (which consumes the node, so take it first).
+    pub fn shutdown_handle(&self) -> NodeShutdown {
+        NodeShutdown {
+            shutdown: self.shutdown.clone(),
         }
     }
 
@@ -72,6 +107,14 @@ impl Node {
         self
     }
 
+    /// Sets how long [`Node::run`] lingers after the root supervisor has
+    /// exited, giving log output a chance to be flushed before the process ends.
+    /// Defaults to one second.
+    pub fn with_exit_delay(mut self, delay: Duration) -> Self {
+        self.exit_delay = delay;
+        self
+    }
+
     /// Starts the root supervisor and runs until the node exits — either
     /// because the supervisor exited normally, a shutdown signal was
     /// handled, or an unrecoverable error occurred (see [`NodeError`]).
@@ -79,6 +122,8 @@ impl Node {
         let Self {
             restart_intensity,
             supervisor_spec,
+            exit_delay,
+            shutdown,
         } = self;
 
         let supervisor_child = supervisor_spec.start().await.map_err(|err| {
@@ -87,8 +132,10 @@ impl Node {
         })?;
 
         NodeActor {
+            shutdown: shutdown.subscribe(),
             supervisor_child,
             supervisor_spec,
+            exit_delay,
             restart_limiter: RestartLimiter::new(restart_intensity),
         }
         .run()
@@ -96,6 +143,10 @@ impl Node {
     }
 
     /// Returns the root supervisor's [`ChildSpec`].
+    ///
+    /// Signals sent to its address are only accepted once the supervisor is
+    /// running (see [`Address::watch_running`](zestors_runtime::prelude::Address));
+    /// use [`Node::shutdown_handle`] to request a shutdown that can't be missed.
     pub fn root_supervisor(&self) -> &ChildSpec<SupervisorBlueprint> {
         &self.supervisor_spec
     }
@@ -105,23 +156,32 @@ impl NodeActor {
     async fn run(mut self) -> Result<(), NodeError> {
         loop {
             let supervisor_exit = tokio::select! {
-                res = &mut self.supervisor_child => res,
+                res = &mut self.supervisor_child => Some(res),
                 _ = wait_for_shutdown_signal() => {
                     tracing::info!("Received Ctrl+C signal. Shutting down node.");
-                    return self.exit_gracefully().await;
+                    None
                 }
+                Ok(_) = self.shutdown.wait_for(|requested| *requested) => {
+                    tracing::info!("Shutdown requested. Shutting down node.");
+                    None
+                }
+            };
+
+            // Shutdown was requested: stop the supervisor gracefully.
+            let Some(supervisor_exit) = supervisor_exit else {
+                return self.exit_gracefully().await;
             };
 
             match supervisor_exit {
                 Ok(()) => {
                     tracing::info!("Root-Supervisor exited gracefully. Shutting down node.");
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    tokio::time::sleep(self.exit_delay).await;
                     return Ok(());
                 }
                 Err(err) => {
                     if !self.restart_limiter.acquire_permit() {
                         tracing::error!("Root-Supervisor exited with error: {:?}", err);
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        tokio::time::sleep(self.exit_delay).await;
                         return Err(NodeError::SupervisorExited(err));
                     } else {
                         tracing::warn!(

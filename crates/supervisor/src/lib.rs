@@ -160,7 +160,9 @@
 //! assert_eq!(children.len(), 1);
 //!
 //! // The root supervisor exiting on its own - here, because we asked it
-//! // to - is a normal, successful stop for the whole node.
+//! // to - is a normal, successful stop for the whole node. (Once the
+//! // supervisor is running, as it is here, signalling its address works.
+//! // Before that, use `Node::shutdown_handle`, which can't be missed.)
 //! root.signal_shutdown();
 //! assert!(node_task.await.unwrap().is_ok());
 //! # }

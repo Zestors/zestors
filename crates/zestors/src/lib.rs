@@ -347,7 +347,6 @@ pub mod prelude {
     #[expect(unused_imports)]
     pub use zestors_api_server::prelude::*;
     pub use zestors_codegen::{HandlerInterface, Interface, Message, StableId};
-    #[expect(unused_imports)]
     pub use zestors_distr::prelude::*;
     pub use zestors_interface::prelude::*;
     pub use zestors_runtime::prelude::*;
