@@ -29,10 +29,10 @@
 //!   [`DatagramError::Unsupported`], and the cluster uses streams instead.
 
 mod node_addr;
-mod node_id;
+mod node_name;
 
 pub use node_addr::NodeAddr;
-pub use node_id::NodeId;
+pub use node_name::NodeName;
 
 use bytes::Bytes;
 use std::{future::Future, io, time::Duration};
@@ -51,24 +51,27 @@ pub trait Backend: Send + 'static {
     type Endpoint: Endpoint;
 
     /// Brings up the network for the node described by `local`.
-    fn start(self, local: LocalNode) -> impl Future<Output = io::Result<Self::Endpoint>> + Send;
+    fn start(
+        self,
+        local: NodeIncarnation,
+    ) -> impl Future<Output = io::Result<Self::Endpoint>> + Send;
 }
 
 /// The node a [`Backend`] is started for.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct LocalNode {
+pub struct NodeIncarnation {
     /// The node's name.
-    pub id: NodeId,
+    pub name: NodeName,
     /// Which incarnation of the node this is: higher than that of any earlier
     /// run of the same node.
     pub generation: u64,
 }
 
-impl LocalNode {
+impl NodeIncarnation {
     /// Describes the node `id` in its incarnation `generation`.
-    pub fn new(id: NodeId, generation: u64) -> Self {
-        Self { id, generation }
+    pub fn new(name: NodeName, generation: u64) -> Self {
+        Self { name, generation }
     }
 }
 
@@ -85,7 +88,7 @@ pub trait Endpoint: Send + Sync + 'static {
     fn connect(
         &self,
         addr: &NodeAddr,
-        node: &NodeId,
+        node: &NodeName,
     ) -> impl Future<Output = io::Result<Self::Connection>> + Send;
 
     /// The next connection a peer has opened to this node, once it is ready to
@@ -116,7 +119,7 @@ pub trait Connection: Send + Sync + 'static {
     fn recv_datagram(&self) -> impl Future<Output = io::Result<Bytes>> + Send;
 
     /// The node on the other end, as verified by the backend.
-    fn peer(&self) -> &NodeId;
+    fn peer(&self) -> &NodeName;
 
     /// Whether the connection is closed, by either side or by an error.
     fn is_closed(&self) -> bool;

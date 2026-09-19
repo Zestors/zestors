@@ -2,7 +2,7 @@ mod config;
 mod error;
 
 use super::{Cluster, Member, generation, membership::Membership};
-use crate::{NodeAddr, backend::LocalNode, messaging::NodeRef};
+use crate::{NodeAddr, backend::NodeIncarnation, messaging::NodeRef};
 pub use config::{ClusterConfig, ClusterTimings, Seed};
 pub use error::ClusterNodeError;
 use std::{net::SocketAddr, time::Duration};
@@ -102,7 +102,7 @@ impl ClusterNode {
         let (links, addr) = config
             .backend
             .start(
-                LocalNode::new(config.node_id.clone(), generation),
+                NodeIncarnation::new(config.node_id.clone(), generation),
                 config.link_timings.clone(),
             )
             .await

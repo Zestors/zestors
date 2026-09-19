@@ -7,14 +7,14 @@ mod tls;
 use tls::peer_of;
 pub use tls::{Tls, TlsError};
 
-use zestors_distr_backend::{
-    Backend, Connection, DatagramError, Endpoint, LocalNode, NodeAddr, NodeId, RecvStream,
-    SendStream,
-};
 use bytes::Bytes;
 use std::{io, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{sync::mpsc, time::timeout};
 use tokio_util::sync::{CancellationToken, DropGuard};
+use zestors_distr_backend::{
+    Backend, Connection, DatagramError, Endpoint, NodeAddr, NodeIncarnation, NodeName, RecvStream,
+    SendStream,
+};
 
 /// The timeouts of the [`Quic`] backend. The defaults suit real networks;
 /// shorten them for local tests.
@@ -66,12 +66,15 @@ impl Quic {
 impl Backend for Quic {
     type Endpoint = QuicEndpoint;
 
-    async fn start(self, local: LocalNode) -> io::Result<QuicEndpoint> {
+    async fn start(self, local: NodeIncarnation) -> io::Result<QuicEndpoint> {
         // The node name doubles as the TLS server name when peers dial it.
-        if quinn::rustls::pki_types::ServerName::try_from(local.id.as_str()).is_err() {
+        if quinn::rustls::pki_types::ServerName::try_from(local.name.as_str()).is_err() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("Invalid node name {:?}: must be a valid DNS name", local.id),
+                format!(
+                    "Invalid node name {:?}: must be a valid DNS name",
+                    local.name
+                ),
             ));
         }
 
@@ -81,7 +84,7 @@ impl Backend for Quic {
             quinn::IdleTimeout::try_from(self.timings.idle_timeout)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?,
         ));
-        let (server, client) = self.tls.quic_configs(&local.id, Arc::new(transport))?;
+        let (server, client) = self.tls.quic_configs(&local.name, Arc::new(transport))?;
         let mut endpoint = quinn::Endpoint::server(server, self.bind)?;
         endpoint.set_default_client_config(client);
 
@@ -136,7 +139,7 @@ impl Endpoint for QuicEndpoint {
         self.endpoint.local_addr().map(NodeAddr::from)
     }
 
-    async fn connect(&self, addr: &NodeAddr, node: &NodeId) -> io::Result<QuicConnection> {
+    async fn connect(&self, addr: &NodeAddr, node: &NodeName) -> io::Result<QuicConnection> {
         let socket = resolve(addr).await?;
         let conn = self
             .endpoint
@@ -169,7 +172,7 @@ pub struct QuicConnection {
     conn: quinn::Connection,
     /// From its certificate, or the node that was dialed, which the TLS
     /// handshake has verified the certificate to be for.
-    peer: NodeId,
+    peer: NodeName,
 }
 
 impl Connection for QuicConnection {
@@ -197,7 +200,7 @@ impl Connection for QuicConnection {
         Ok(self.conn.read_datagram().await?)
     }
 
-    fn peer(&self) -> &NodeId {
+    fn peer(&self) -> &NodeName {
         &self.peer
     }
 

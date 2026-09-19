@@ -143,7 +143,7 @@ impl<C: Context> RemoteAddress<C> {
     }
 
     /// The actor this address is for.
-    pub fn target(&self) -> &GlobalName {
+    pub fn name(&self) -> &GlobalName {
         &self.target
     }
 

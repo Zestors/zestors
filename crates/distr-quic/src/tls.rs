@@ -1,4 +1,4 @@
-use zestors_distr_backend::NodeId;
+use zestors_distr_backend::NodeName;
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::rustls::{
     self, ClientConfig, DigitallySignedStruct, DistinguishedName, RootCertStore, ServerConfig,
@@ -60,7 +60,7 @@ enum Mode {
     Ca {
         server: Arc<ServerConfig>,
         client: Arc<ClientConfig>,
-        node: NodeId,
+        node: NodeName,
     },
     /// Nothing is verified. Each node makes a self-signed certificate for its
     /// own name when it starts.
@@ -132,7 +132,7 @@ impl Tls {
     /// present this identity. Fails if the certificate is for another node.
     pub(super) fn quic_configs(
         &self,
-        local: &NodeId,
+        local: &NodeName,
         transport: Arc<quinn::TransportConfig>,
     ) -> io::Result<(quinn::ServerConfig, quinn::ClientConfig)> {
         let (server, client) = match &self.mode {
@@ -169,7 +169,7 @@ fn invalid(error: impl Into<BoxError>) -> io::Error {
 
 /// The TLS configurations of an insecure node: a self-signed certificate for
 /// `local`, and no verification of anyone else's.
-fn insecure_configs(local: &NodeId) -> Result<(Arc<ServerConfig>, Arc<ClientConfig>), TlsError> {
+fn insecure_configs(local: &NodeName) -> Result<(Arc<ServerConfig>, Arc<ClientConfig>), TlsError> {
     let provider = provider();
 
     let rcgen::CertifiedKey { cert, signing_key } =
@@ -195,14 +195,14 @@ fn insecure_configs(local: &NodeId) -> Result<(Arc<ServerConfig>, Arc<ClientConf
 }
 
 /// The node a certificate belongs to: its one DNS name.
-fn node_of(cert: &CertificateDer<'_>) -> Result<NodeId, TlsError> {
+fn node_of(cert: &CertificateDer<'_>) -> Result<NodeName, TlsError> {
     let cert = webpki::EndEntityCert::try_from(cert)
         .map_err(|err| TlsError::Certificate(err.to_string()))?;
     // Only for reading the name: whether the certificate is valid for it has
     // been decided by the TLS handshake.
     let mut names = cert.valid_dns_names();
     match (names.next(), names.next()) {
-        (Some(name), None) => Ok(NodeId::new(name)),
+        (Some(name), None) => Ok(NodeName::new(name)),
         (None, _) => Err(TlsError::CertificateNames(0)),
         (Some(_), Some(_)) => Err(TlsError::CertificateNames(2 + names.count())),
     }
@@ -210,7 +210,7 @@ fn node_of(cert: &CertificateDer<'_>) -> Result<NodeId, TlsError> {
 
 /// The node on the other end of `conn`, from the certificate it presented in
 /// the TLS handshake, which has verified it.
-pub(super) fn peer_of(conn: &quinn::Connection) -> Result<NodeId, BoxError> {
+pub(super) fn peer_of(conn: &quinn::Connection) -> Result<NodeName, BoxError> {
     let identity = conn
         .peer_identity()
         .ok_or("peer presented no certificate")?;
@@ -389,10 +389,10 @@ mod tests {
         let tls = Ca::new().tls(&["node-a"]).unwrap();
         let transport = || Arc::new(quinn::TransportConfig::default());
         assert!(
-            tls.quic_configs(&NodeId::new("node-a"), transport())
+            tls.quic_configs(&NodeName::new("node-a"), transport())
                 .is_ok()
         );
-        let Err(err) = tls.quic_configs(&NodeId::new("node-b"), transport()) else {
+        let Err(err) = tls.quic_configs(&NodeName::new("node-b"), transport()) else {
             panic!("A mismatch is refused")
         };
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
@@ -400,12 +400,12 @@ mod tests {
 
     #[test]
     fn insecure_nodes_get_a_certificate_for_their_own_name() {
-        let (server, _) = insecure_configs(&NodeId::new("node-a")).unwrap();
+        let (server, _) = insecure_configs(&NodeName::new("node-a")).unwrap();
         drop(server);
         let tls = Tls::insecure_dev().unwrap();
         assert!(
             tls.quic_configs(
-                &NodeId::new("node-a"),
+                &NodeName::new("node-a"),
                 Arc::new(quinn::TransportConfig::default())
             )
             .is_ok()

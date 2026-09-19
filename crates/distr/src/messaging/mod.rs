@@ -76,7 +76,7 @@ pub use request::RemoteRequest;
 pub use send::RemoteAddress;
 
 use crate::{
-    Cluster, GlobalName, Id, NodeId,
+    Cluster, GlobalName, Id, NodeName,
     link::{Links, Protocol},
 };
 use dashmap::DashMap;
@@ -109,10 +109,10 @@ fn check<T>(found: Result<T, TypedRegistryError>) -> Result<(), AddressError> {
 /// it has.
 #[derive(Clone)]
 pub struct NodeRef {
-    shared: Arc<Shared>,
+    shared: Arc<SharedNode>,
 }
 
-struct Shared {
+struct SharedNode {
     cluster: Cluster,
     call_timeout: Duration,
     /// How many lanes to a peer messages between actors are spread over.
@@ -130,7 +130,7 @@ struct Started {
     pending: Arc<Pending>,
 }
 
-impl Shared {
+impl SharedNode {
     fn running(&self) -> Option<Started> {
         self.running.read().expect("Not poisoned").clone()
     }
@@ -141,7 +141,7 @@ impl NodeRef {
         let handlers = DashMap::new();
         ops::register(&handlers);
         Self {
-            shared: Arc::new(Shared {
+            shared: Arc::new(SharedNode {
                 cluster,
                 call_timeout,
                 shards,
@@ -165,7 +165,7 @@ impl NodeRef {
     }
 
     /// This node.
-    pub fn node(&self) -> NodeId {
+    pub fn node(&self) -> NodeName {
         self.shared.cluster.local().node
     }
 
@@ -261,7 +261,7 @@ impl NodeRef {
 
 /// [`Remote`] while the node runs. Stops when stopped or dropped.
 pub(super) struct Serving {
-    shared: Arc<Shared>,
+    shared: Arc<SharedNode>,
     _stop: DropGuard,
 }
 

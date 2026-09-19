@@ -3,8 +3,8 @@
 //! allocation per opened stream, accepted stream and received datagram.
 
 use crate::{
-    NodeAddr, NodeId,
-    backend::{Backend, Connection, DatagramError, Endpoint, LocalNode, RecvStream, SendStream},
+    NodeAddr, NodeName,
+    backend::{Backend, Connection, DatagramError, Endpoint, NodeIncarnation, RecvStream, SendStream},
 };
 use bytes::Bytes;
 use std::{future::Future, io, pin::Pin, sync::Arc, time::Duration};
@@ -16,7 +16,7 @@ pub(super) trait DynConnection: Send + Sync {
     fn accept_stream(&self) -> BoxFuture<'_, io::Result<(SendStream, RecvStream)>>;
     fn send_datagram(&self, data: Bytes) -> Result<(), DatagramError>;
     fn recv_datagram(&self) -> BoxFuture<'_, io::Result<Bytes>>;
-    fn peer(&self) -> &NodeId;
+    fn peer(&self) -> &NodeName;
     fn is_closed(&self) -> bool;
     fn close(&self);
 }
@@ -38,7 +38,7 @@ impl<C: Connection> DynConnection for C {
         Box::pin(Connection::recv_datagram(self))
     }
 
-    fn peer(&self) -> &NodeId {
+    fn peer(&self) -> &NodeName {
         Connection::peer(self)
     }
 
@@ -56,7 +56,7 @@ pub(super) trait DynEndpoint: Send + Sync {
     fn connect<'a>(
         &'a self,
         addr: &'a NodeAddr,
-        node: &'a NodeId,
+        node: &'a NodeName,
     ) -> BoxFuture<'a, io::Result<Arc<dyn DynConnection>>>;
     fn accept(&self) -> BoxFuture<'_, io::Result<Arc<dyn DynConnection>>>;
     fn close(&self, grace: Duration) -> BoxFuture<'_, ()>;
@@ -70,7 +70,7 @@ impl<E: Endpoint> DynEndpoint for E {
     fn connect<'a>(
         &'a self,
         addr: &'a NodeAddr,
-        node: &'a NodeId,
+        node: &'a NodeName,
     ) -> BoxFuture<'a, io::Result<Arc<dyn DynConnection>>> {
         Box::pin(async move {
             let conn = Endpoint::connect(self, addr, node).await?;
@@ -95,14 +95,14 @@ impl<E: Endpoint> DynEndpoint for E {
 pub(super) trait ErasedBackend: Send {
     fn start(
         self: Box<Self>,
-        local: LocalNode,
+        local: NodeIncarnation,
     ) -> BoxFuture<'static, io::Result<Box<dyn DynEndpoint>>>;
 }
 
 impl<B: Backend> ErasedBackend for B {
     fn start(
         self: Box<Self>,
-        local: LocalNode,
+        local: NodeIncarnation,
     ) -> BoxFuture<'static, io::Result<Box<dyn DynEndpoint>>> {
         Box::pin(async move {
             let endpoint = Backend::start(*self, local).await?;

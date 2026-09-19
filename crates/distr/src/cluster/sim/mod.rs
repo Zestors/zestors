@@ -34,8 +34,8 @@ use super::{
     membership::{Membership, Options},
 };
 use crate::{
-    LinkTimings, NodeAddr, NodeId,
-    backend::{Backend, LocalNode},
+    LinkTimings, NodeAddr, NodeName,
+    backend::{Backend, NodeIncarnation},
     link::{Links, Starter},
 };
 use fabric::{Fabric, SimEndpoint};
@@ -127,14 +127,14 @@ impl SimNetwork {
     ) -> SimNode {
         self.generation += 1;
         let local = Member {
-            node: NodeId::new(name),
+            node: NodeName::new(name),
             addr: addr.into(),
             generation: self.generation,
         };
         let cluster = Cluster::new(local.clone());
         let (links, _) = Starter::new(self.backend(addr))
             .start(
-                LocalNode::new(local.node.clone(), self.generation),
+                NodeIncarnation::new(local.node.clone(), self.generation),
                 self.link_timings.clone(),
             )
             .await
@@ -166,8 +166,8 @@ pub struct SimBackend {
 impl Backend for SimBackend {
     type Endpoint = SimEndpoint;
 
-    async fn start(self, local: LocalNode) -> std::io::Result<SimEndpoint> {
-        Ok(self.fabric.bind(local.id.as_str(), self.addr))
+    async fn start(self, local: NodeIncarnation) -> std::io::Result<SimEndpoint> {
+        Ok(self.fabric.bind(local.name.as_str(), self.addr))
     }
 }
 

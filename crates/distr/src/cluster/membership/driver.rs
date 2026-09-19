@@ -3,7 +3,7 @@ use super::{
     message::{Message, sender_of},
 };
 use crate::{
-    ClusterTimings, Member, NodeId, NodeStatus,
+    ClusterTimings, Member, NodeName, NodeStatus,
     cluster::Cluster,
     link::{Incoming, Links, PeerEvent, Protocol},
 };
@@ -32,7 +32,7 @@ pub(super) struct Driver {
     /// Nodes foca declared down, waiting out [`ClusterTimings::departure_grace`] before being
     /// reported as failed.
     pending_down: DelayQueue<Member>,
-    pending_keys: HashMap<NodeId, delay_queue::Key>,
+    pending_keys: HashMap<NodeName, delay_queue::Key>,
 }
 
 impl Driver {
@@ -173,7 +173,7 @@ impl Driver {
     }
 
     /// Forgets a node's pending failure report.
-    fn cancel_pending(&mut self, node: &NodeId) {
+    fn cancel_pending(&mut self, node: &NodeName) {
         if let Some(key) = self.pending_keys.remove(node) {
             self.pending_down.try_remove(&key);
         }
@@ -258,14 +258,15 @@ impl Driver {
 mod tests {
     use super::*;
     use crate::{
-        Cluster, LinkTimings, NodeAddr, backend::LocalNode, cluster::sim::SimNetwork, link::Starter,
+        Cluster, LinkTimings, NodeAddr, backend::NodeIncarnation, cluster::sim::SimNetwork,
+        link::Starter,
     };
     use foca::Foca;
     use rand::SeedableRng;
 
     fn member(name: &str) -> Member {
         Member {
-            node: NodeId::new(name),
+            node: NodeName::new(name),
             addr: NodeAddr::new(format!("{name}:7000")),
             generation: 1,
         }
@@ -276,7 +277,7 @@ mod tests {
         let network = SimNetwork::new(1);
         let (links, _) = Starter::new(network.backend("node-a:7000"))
             .start(
-                LocalNode::new(NodeId::new("node-a"), 1),
+                NodeIncarnation::new(NodeName::new("node-a"), 1),
                 LinkTimings::default(),
             )
             .await
@@ -306,7 +307,7 @@ mod tests {
 
     fn arrives_from(sender: &str) -> Incoming {
         Incoming {
-            from: NodeId::new(sender),
+            from: NodeName::new(sender),
             generation: 1,
             payload: announcement_from_node_b().encode(),
         }

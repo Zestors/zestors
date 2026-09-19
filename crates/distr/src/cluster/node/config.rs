@@ -1,5 +1,5 @@
 use crate::{
-    LinkTimings, NodeAddr, NodeId, backend::Backend, cluster::membership::Options, link::Starter,
+    LinkTimings, NodeAddr, NodeName, backend::Backend, cluster::membership::Options, link::Starter,
 };
 use rand::{SeedableRng, rngs::StdRng};
 use std::{
@@ -10,7 +10,7 @@ use std::{
 
 /// How a [`ClusterNode`](crate::ClusterNode) joins and behaves in a cluster.
 pub struct ClusterConfig {
-    pub(super) node_id: NodeId,
+    pub(super) node_id: NodeName,
     pub(super) backend: Starter,
     pub(super) advertise: Option<NodeAddr>,
     pub(super) seeds: Vec<Seed>,
@@ -27,7 +27,7 @@ pub struct ClusterConfig {
 impl ClusterConfig {
     /// Configures a node named `node_id` that talks to the others over
     /// `backend`, for example the QUIC backend of `zestors-distr-quic`.
-    pub fn new(node_id: impl Into<NodeId>, backend: impl Backend) -> Self {
+    pub fn new(node_id: impl Into<NodeName>, backend: impl Backend) -> Self {
         Self {
             node_id: node_id.into(),
             backend: Starter::new(backend),
@@ -162,12 +162,12 @@ impl std::fmt::Debug for ClusterConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seed {
     /// The seed's node name, which its certificate must carry.
-    pub node: NodeId,
+    pub node: NodeName,
     pub addr: NodeAddr,
 }
 
 impl Seed {
-    pub fn new(node: impl Into<NodeId>, addr: impl Into<NodeAddr>) -> Self {
+    pub fn new(node: impl Into<NodeName>, addr: impl Into<NodeAddr>) -> Self {
         Self {
             node: node.into(),
             addr: addr.into(),

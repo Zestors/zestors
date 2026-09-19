@@ -5,7 +5,7 @@ use super::{
     Conn, Delivery, Inner, LinkTimings, MAX_MESSAGE_SIZE, PeerEvent, Protocol, wire::write_frame,
 };
 use crate::{
-    NodeAddr, NodeId,
+    NodeAddr, NodeName,
     backend::{DatagramError, RecvStream, SendStream},
 };
 use bytes::{BufMut, Bytes, BytesMut};
@@ -69,7 +69,7 @@ struct Ordered {
 
 pub(super) async fn lane(
     inner: Arc<Inner>,
-    node: NodeId,
+    node: NodeName,
     addr: NodeAddr,
     protocol: Protocol,
     delivery: Delivery,

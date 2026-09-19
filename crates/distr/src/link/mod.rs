@@ -19,7 +19,7 @@ mod wire;
 #[cfg(test)]
 mod tests;
 
-use crate::{NodeAddr, NodeId, backend::LocalNode};
+use crate::{NodeAddr, NodeName, backend::NodeIncarnation};
 use bytes::Bytes;
 use dashmap::{DashMap, mapref::entry::Entry};
 use dynamic::{DynConnection, DynEndpoint, ErasedBackend};
@@ -115,7 +115,7 @@ pub(super) enum Delivery {
 /// was set up.
 #[derive(Debug)]
 pub(super) struct Incoming {
-    pub(super) from: NodeId,
+    pub(super) from: NodeName,
     pub(super) generation: u64,
     pub(super) payload: Bytes,
 }
@@ -125,12 +125,12 @@ pub(super) struct Incoming {
 pub(super) enum PeerEvent {
     /// Repeated attempts to reach the peer have failed. It is retried with
     /// growing pauses in between until it answers.
-    Unreachable(NodeId),
+    Unreachable(NodeName),
     /// The peer can be reached again, after having been reported unreachable.
-    Reachable(NodeId),
+    Reachable(NodeName),
     /// An established connection to the peer was lost or replaced. Messages
     /// sent on it may not have arrived.
-    Disconnected { node: NodeId, generation: u64 },
+    Disconnected { node: NodeName, generation: u64 },
 }
 
 /// A connection, told apart from the ones before and after it.
@@ -154,7 +154,7 @@ struct Registered {
     /// The peer's generation, from its [`Hello`].
     generation: u64,
     /// Which side opened the connection.
-    dialer: NodeId,
+    dialer: NodeName,
 }
 
 /// A lane to a peer for one protocol and delivery.
@@ -165,21 +165,21 @@ struct Lane {
 
 /// The peer, protocol and delivery of a lane, and which of the several
 /// lanes for them it is: see [`Links::sender`].
-type LaneKey = (NodeId, Protocol, Delivery, u8);
+type LaneKey = (NodeName, Protocol, Delivery, u8);
 
 struct Inner {
     endpoint: Box<dyn DynEndpoint>,
-    local: NodeId,
+    local: NodeName,
     generation: u64,
     timings: LinkTimings,
     next_conn: AtomicU64,
-    conns: DashMap<NodeId, Registered>,
+    conns: DashMap<NodeName, Registered>,
     /// Held while dialing a peer, so that its lanes share one connection
     /// instead of dialing at once and closing each other's.
-    dialing: Mutex<HashMap<NodeId, Arc<tokio::sync::Mutex<()>>>>,
+    dialing: Mutex<HashMap<NodeName, Arc<tokio::sync::Mutex<()>>>>,
     lanes: DashMap<LaneKey, Lane>,
     /// How reaching each peer is going, shared by all lanes to it.
-    health: Mutex<HashMap<NodeId, Arc<Mutex<Health>>>>,
+    health: Mutex<HashMap<NodeName, Arc<Mutex<Health>>>>,
     inboxes: DashMap<Protocol, mpsc::Sender<Incoming>>,
     lane_tasks: Mutex<JoinSet<()>>,
     peer_events: broadcast::Sender<PeerEvent>,
@@ -198,10 +198,10 @@ impl Starter {
     /// reach the node on.
     pub(super) async fn start(
         self,
-        local: LocalNode,
+        local: NodeIncarnation,
         timings: LinkTimings,
     ) -> io::Result<(Links, NodeAddr)> {
-        let (id, generation) = (local.id.clone(), local.generation);
+        let (id, generation) = (local.name.clone(), local.generation);
         let endpoint = self.0.start(local).await?;
         let addr = endpoint.local_addr()?;
 
@@ -260,7 +260,7 @@ impl Links {
     /// what must stay in order on one, doesn't let one large message stall it all.
     pub(super) fn sender(
         &self,
-        node: &NodeId,
+        node: &NodeName,
         addr: &NodeAddr,
         protocol: Protocol,
         delivery: Delivery,
@@ -287,7 +287,7 @@ impl Links {
     /// Closes the connection to `node` if it belongs to that generation or an
     /// older one, so the next message dials afresh, and stops sending to it.
     /// Called when the node has been declared down or has moved.
-    pub(super) fn forget(&self, node: &NodeId, generation: u64) {
+    pub(super) fn forget(&self, node: &NodeName, generation: u64) {
         // Ends the peer's lanes once they have sent what is queued, including
         // ones that are backing off from an unreachable peer.
         self.inner
@@ -332,7 +332,7 @@ impl Inner {
     /// The lane to `node` for `protocol` and `delivery`, started if there is none.
     fn sender(
         self: &Arc<Self>,
-        node: &NodeId,
+        node: &NodeName,
         addr: &NodeAddr,
         protocol: Protocol,
         delivery: Delivery,
@@ -354,7 +354,7 @@ impl Inner {
     /// Starts the task for a new lane to `node`.
     fn start_lane(
         self: &Arc<Self>,
-        node: &NodeId,
+        node: &NodeName,
         addr: &NodeAddr,
         protocol: Protocol,
         delivery: Delivery,
@@ -391,7 +391,7 @@ impl Inner {
     }
 
     /// The live connection to `node`, if there is one.
-    fn live(&self, node: &NodeId) -> Option<Conn> {
+    fn live(&self, node: &NodeName) -> Option<Conn> {
         self.conns
             .get(node)
             .filter(|registered| !registered.conn.is_closed())
@@ -400,7 +400,7 @@ impl Inner {
 
     /// Makes `conn` the connection to `peer`, unless the one already there is
     /// preferred. Returns whether `conn` was kept.
-    fn register(&self, peer: &NodeId, generation: u64, conn: &Conn, dialer: &NodeId) -> bool {
+    fn register(&self, peer: &NodeName, generation: u64, conn: &Conn, dialer: &NodeName) -> bool {
         let registered = Registered {
             conn: conn.clone(),
             generation,
@@ -447,7 +447,7 @@ impl Inner {
 
     /// Forgets the connection `id` if it is still the connection to `peer`, and
     /// says so. One that was replaced or forgotten on purpose is not reported.
-    fn unregister(&self, peer: &NodeId, id: u64) {
+    fn unregister(&self, peer: &NodeName, id: u64) {
         if let Some((_, registered)) = self
             .conns
             .remove_if(peer, |_, registered| registered.conn.id == id)
@@ -463,7 +463,7 @@ impl Inner {
     /// Waits for room in their queue if `wait`, and drops the message otherwise.
     async fn deliver(
         &self,
-        peer: &NodeId,
+        peer: &NodeName,
         generation: u64,
         protocol: Protocol,
         payload: Bytes,
@@ -487,7 +487,7 @@ impl Inner {
     }
 
     /// Delivers everything the peer sends on `conn` until it closes.
-    fn spawn_receive(self: &Arc<Self>, conn: Conn, peer: NodeId, generation: u64) {
+    fn spawn_receive(self: &Arc<Self>, conn: Conn, peer: NodeName, generation: u64) {
         // Datagrams: `[protocol][message]`. They are loss-tolerant, so a full
         // inbox simply drops them rather than holding anything up.
         let inner = self.clone();
@@ -527,7 +527,7 @@ impl Inner {
         // it wrote has been read.
         _send: crate::backend::SendStream,
         mut recv: crate::backend::RecvStream,
-        peer: &NodeId,
+        peer: &NodeName,
         generation: u64,
     ) -> io::Result<()> {
         let mut protocol = [0u8; 1];
@@ -548,7 +548,7 @@ impl Inner {
     /// The connection to `node`, dialing `addr` if there is none yet.
     async fn connection(
         self: &Arc<Self>,
-        node: &NodeId,
+        node: &NodeName,
         addr: &NodeAddr,
     ) -> Result<Conn, BoxError> {
         if let Some(conn) = self.live(node) {

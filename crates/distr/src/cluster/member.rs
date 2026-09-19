@@ -1,4 +1,4 @@
-use crate::{NodeAddr, NodeId};
+use crate::{NodeAddr, NodeName};
 use foca::Identity;
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Member {
     /// The node's name; must be a DNS name matching its TLS certificate.
-    pub node: NodeId,
+    pub node: NodeName,
     /// The address peers currently reach the node on.
     pub addr: NodeAddr,
     /// Increases every time the node restarts.
@@ -20,7 +20,7 @@ pub struct Member {
 }
 
 impl Identity for Member {
-    type Addr = NodeId;
+    type Addr = NodeName;
 
     fn renew(&self) -> Option<Self> {
         Some(Member {
@@ -29,7 +29,7 @@ impl Identity for Member {
         })
     }
 
-    fn addr(&self) -> NodeId {
+    fn addr(&self) -> NodeName {
         self.node.clone()
     }
 

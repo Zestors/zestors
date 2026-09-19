@@ -6,7 +6,7 @@
 use std::{future::Future, net::SocketAddr, num::NonZeroU32, time::Duration};
 use tokio::sync::broadcast;
 use zestors_distr::{
-    ClusterEvent, NodeId,
+    ClusterEvent, NodeName,
     sim::{SimNetwork, SimNode},
 };
 
@@ -93,7 +93,7 @@ async fn nodes_discover_each_other_and_notice_departures() {
     members_of(&a, 2).await;
     members_of(&c2, 2).await;
     assert_eq!(
-        a.cluster.member(&NodeId::new("node-c")).map(|m| m.addr),
+        a.cluster.member(&NodeName::new("node-c")).map(|m| m.addr),
         Some(addr(4).into())
     );
     assert!(c2.cluster.local().generation > old_generation);
@@ -118,7 +118,7 @@ async fn crashed_node_is_unreachable_before_it_is_failed() {
     sim.foca_config_mut().suspect_to_down_after = Duration::from_secs(4);
     let a = sim.start("node-a", addr(1), &[]).await;
     let mut b = sim.start("node-b", addr(2), &[("node-a", addr(1))]).await;
-    let b_id = NodeId::new("node-b");
+    let b_id = NodeName::new("node-b");
     members_of(&a, 1).await;
 
     let mut events = a.cluster.subscribe();
@@ -154,7 +154,7 @@ async fn snapshot_and_events_line_up() {
     assert!(snapshot.members.is_empty());
 
     let _b = sim.start("node-b", addr(2), &[("node-a", addr(1))]).await;
-    let b_id = NodeId::new("node-b");
+    let b_id = NodeName::new("node-b");
 
     // The change made after the snapshot arrives as an event...
     let up = within(async {

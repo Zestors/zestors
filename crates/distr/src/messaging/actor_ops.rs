@@ -213,7 +213,7 @@ pub trait RemoteActorOps: RemoteActorRef + sealed::Sealed {
     fn name(&self) -> &Name {
         match self.route() {
             Route::Local(address) => address.name(),
-            Route::Remote(address) => address.target().name(),
+            Route::Remote(address) => address.name().name(),
         }
     }
 }

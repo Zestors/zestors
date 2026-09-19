@@ -1,5 +1,5 @@
 use super::{ClusterEvent, ClusterSnapshot, Member, NodeStatus};
-use crate::NodeId;
+use crate::NodeName;
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
@@ -11,9 +11,9 @@ use tokio::sync::{broadcast, watch};
 /// change made under it (see the mutators below).
 struct State {
     local: Member,
-    members: HashMap<NodeId, Member>,
+    members: HashMap<NodeName, Member>,
     /// Members in `members` that can't currently be connected to.
-    unreachable: HashSet<NodeId>,
+    unreachable: HashSet<NodeName>,
 }
 
 struct Shared {
@@ -66,14 +66,14 @@ impl Cluster {
     }
 
     /// The other node named `node`, if it is currently up.
-    pub fn member(&self, node: &NodeId) -> Option<Member> {
+    pub fn member(&self, node: &NodeName) -> Option<Member> {
         self.state().members.get(node).cloned()
     }
 
     /// Whether `node` is a member that this node can currently connect to.
     /// False for nodes that aren't members, and for those reported as
     /// [`ClusterEvent::Unreachable`].
-    pub fn is_reachable(&self, node: &NodeId) -> bool {
+    pub fn is_reachable(&self, node: &NodeName) -> bool {
         let state = self.state();
         state.members.contains_key(node) && !state.unreachable.contains(node)
     }
@@ -203,7 +203,7 @@ impl Cluster {
     }
 
     /// This node can't connect to `node`. Returns the member if that is news.
-    pub(super) fn member_unreachable(&self, node: &NodeId) -> Option<Member> {
+    pub(super) fn member_unreachable(&self, node: &NodeName) -> Option<Member> {
         let mut state = self.write();
         let member = state.members.get(node)?.clone();
         state.unreachable.insert(node.clone()).then(|| {
@@ -214,7 +214,7 @@ impl Cluster {
 
     /// This node can connect to `node` again. Returns the member if it had been
     /// reported unreachable.
-    pub(super) fn member_reachable(&self, node: &NodeId) -> Option<Member> {
+    pub(super) fn member_reachable(&self, node: &NodeName) -> Option<Member> {
         let mut state = self.write();
         let member = state.members.get(node)?.clone();
         state.unreachable.remove(node).then(|| {
@@ -224,7 +224,7 @@ impl Cluster {
     }
 
     /// The node said goodbye. Returns it if it was known in that generation.
-    pub(super) fn member_left(&self, node: &NodeId, generation: u64) -> Option<Member> {
+    pub(super) fn member_left(&self, node: &NodeName, generation: u64) -> Option<Member> {
         let mut state = self.write();
         if state.members.get(node)?.generation != generation {
             return None;

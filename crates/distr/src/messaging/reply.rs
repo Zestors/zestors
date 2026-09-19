@@ -2,7 +2,7 @@
 //! have been sent and are not yet answered.
 
 use super::{DecodeError, RemoteError, RemoteReplyError};
-use crate::NodeId;
+use crate::NodeName;
 use bytes::Bytes;
 use dashmap::DashMap;
 use std::{future::Future, sync::Arc, time::Duration};
@@ -149,7 +149,7 @@ pub(super) struct Pending {
 
 struct PendingCall {
     /// The node the call went to, and the only one that may answer it.
-    node: NodeId,
+    node: NodeName,
     reply: oneshot::Sender<Result<Bytes, RemoteReplyError>>,
 }
 
@@ -157,7 +157,7 @@ impl Pending {
     pub(super) fn insert(
         &self,
         call_id: u64,
-        node: NodeId,
+        node: NodeName,
         reply: oneshot::Sender<Result<Bytes, RemoteReplyError>>,
     ) {
         self.calls.insert(call_id, PendingCall { node, reply });
@@ -168,7 +168,7 @@ impl Pending {
     pub(super) fn expect<T>(
         self: &Arc<Self>,
         call_id: u64,
-        node: NodeId,
+        node: NodeName,
         timeout: Duration,
         decode: fn(Bytes) -> Result<T, DecodeError>,
     ) -> RemoteReply<T> {
@@ -190,7 +190,7 @@ impl Pending {
     }
 
     /// `node` answered the call `call_id`.
-    pub(super) fn complete(&self, node: &NodeId, call_id: u64, result: Result<Bytes, RemoteError>) {
+    pub(super) fn complete(&self, node: &NodeName, call_id: u64, result: Result<Bytes, RemoteError>) {
         match self.calls.remove_if(&call_id, |_, call| call.node == *node) {
             Some((_, call)) => {
                 let _ = call.reply.send(result.map_err(RemoteReplyError::Remote));
@@ -209,7 +209,7 @@ impl Pending {
     }
 
     /// The node is gone: the calls that went to it will not be answered.
-    pub(super) fn fail_node(&self, node: &NodeId) {
+    pub(super) fn fail_node(&self, node: &NodeName) {
         let failed: Vec<u64> = self
             .calls
             .iter()
@@ -249,7 +249,7 @@ mod tests {
         node: &str,
     ) -> oneshot::Receiver<Result<Bytes, RemoteReplyError>> {
         let (tx, rx) = oneshot::channel();
-        pending.insert(id, NodeId::new(node), tx);
+        pending.insert(id, NodeName::new(node), tx);
         rx
     }
 
@@ -257,7 +257,7 @@ mod tests {
     async fn a_call_is_answered_by_the_node_it_went_to() {
         let pending = Pending::default();
         let rx = call(&pending, 1, "node-a");
-        pending.complete(&NodeId::new("node-a"), 1, Ok(Bytes::from_static(b"yes")));
+        pending.complete(&NodeName::new("node-a"), 1, Ok(Bytes::from_static(b"yes")));
         assert_eq!(rx.await.unwrap().unwrap(), "yes");
         assert_eq!(pending.len(), 0);
     }
@@ -266,7 +266,7 @@ mod tests {
     async fn a_reply_from_another_node_is_ignored() {
         let pending = Pending::default();
         let mut rx = call(&pending, 1, "node-a");
-        pending.complete(&NodeId::new("node-b"), 1, Ok(Bytes::new()));
+        pending.complete(&NodeName::new("node-b"), 1, Ok(Bytes::new()));
         assert!(rx.try_recv().is_err(), "Not answered");
         assert_eq!(pending.len(), 1, "Still waiting for node-a");
     }
@@ -275,7 +275,7 @@ mod tests {
     async fn losing_a_node_fails_only_its_calls() {
         let pending = Pending::default();
         let (lost, kept) = (call(&pending, 1, "node-a"), call(&pending, 2, "node-b"));
-        pending.fail_node(&NodeId::new("node-a"));
+        pending.fail_node(&NodeName::new("node-a"));
         assert!(matches!(
             lost.await.unwrap(),
             Err(RemoteReplyError::Disconnected)

@@ -841,9 +841,9 @@ async fn what_an_actor_accepts_can_be_asked() {
     assert!(remote.signal_is_empty().await.unwrap());
     assert!(!remote.is_exiting().await.unwrap());
     let snapshot = remote.snapshot().await.unwrap();
-    assert_eq!(&snapshot.name, remote.target().name());
+    assert_eq!(&snapshot.name, remote.name().name());
     assert!(remote.last_spawned_at().await.unwrap().is_some());
-    assert_eq!(remote.target().node().to_string(), "node-b");
+    assert_eq!(remote.name().node().to_string(), "node-b");
 }
 
 #[tokio::test(start_paused = true)]

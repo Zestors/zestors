@@ -8,9 +8,9 @@ use std::fmt::Display;
 /// how a name maps to a network address is resolved by the connection layer, so
 /// nodes can move without invalidating any name that refers to them.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct NodeId(SmolStr);
+pub struct NodeName(SmolStr);
 
-impl NodeId {
+impl NodeName {
     /// Creates a `NodeId` from any string-like name.
     pub fn new(name: impl Into<SmolStr>) -> Self {
         Self(name.into())
@@ -22,19 +22,19 @@ impl NodeId {
     }
 }
 
-impl Display for NodeId {
+impl Display for NodeName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl From<&str> for NodeId {
+impl From<&str> for NodeName {
     fn from(name: &str) -> Self {
         Self::new(name)
     }
 }
 
-impl From<String> for NodeId {
+impl From<String> for NodeName {
     fn from(name: String) -> Self {
         Self::new(name)
     }

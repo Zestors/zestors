@@ -24,7 +24,7 @@ mod global_name;
 pub use global_name::*;
 
 pub use zestors_distr_backend as backend;
-pub use zestors_distr_backend::{NodeAddr, NodeId};
+pub use zestors_distr_backend::{NodeAddr, NodeName};
 mod cluster;
 mod link;
 mod messaging;

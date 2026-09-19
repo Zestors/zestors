@@ -1,4 +1,4 @@
-use crate::NodeId;
+use crate::NodeName;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use zestors_runtime::Name;
@@ -11,11 +11,11 @@ use zestors_runtime::Name;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GlobalName {
     name: Name,
-    node: NodeId,
+    node: NodeName,
 }
 
 impl GlobalName {
-    pub fn new(name: impl Into<Name>, node: impl Into<NodeId>) -> Self {
+    pub fn new(name: impl Into<Name>, node: impl Into<NodeName>) -> Self {
         Self {
             name: name.into(),
             node: node.into(),
@@ -23,7 +23,7 @@ impl GlobalName {
     }
 
     /// The node this name lives on.
-    pub fn node(&self) -> &NodeId {
+    pub fn node(&self) -> &NodeName {
         &self.node
     }
 
@@ -32,7 +32,7 @@ impl GlobalName {
         &self.name
     }
 
-    pub fn into_parts(self) -> (Name, NodeId) {
+    pub fn into_parts(self) -> (Name, NodeName) {
         (self.name, self.node)
     }
 }

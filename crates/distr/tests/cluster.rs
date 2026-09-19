@@ -3,7 +3,7 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use zestors::{prelude::*, supervisor::Supervisor};
 use zestors_distr::{
     Cluster, ClusterConfig, ClusterEvent, ClusterNode, ClusterNodeError, ClusterTimings,
-    LinkTimings, NodeId, NodeStatus, Seed,
+    LinkTimings, NodeName, NodeStatus, Seed,
 };
 use zestors_distr_quic::{Quic, QuicTimings, Tls};
 
@@ -150,7 +150,7 @@ async fn nodes_discover_each_other_and_notice_departures() {
     eventually("c is back at its new address", || {
         a.cluster.members().len() == 2
             && c2.cluster.members().len() == 2
-            && a.cluster.member(&NodeId::new("node-c")).map(|m| m.addr) == Some(c2_addr.into())
+            && a.cluster.member(&NodeName::new("node-c")).map(|m| m.addr) == Some(c2_addr.into())
     })
     .await;
     assert!(c2.cluster.local().generation > old_generation);
@@ -241,10 +241,10 @@ async fn node_cannot_use_a_name_its_certificate_lacks() {
     let b =
         start_with(config("node-b2", b_addr, ca.tls("node-b2")).seed(Seed::new("node-a", a_addr)));
     eventually("the honest node joins", || {
-        a.cluster.member(&NodeId::new("node-b2")).is_some()
+        a.cluster.member(&NodeName::new("node-b2")).is_some()
     })
     .await;
-    assert!(a.cluster.member(&NodeId::new("node-b")).is_none());
+    assert!(a.cluster.member(&NodeName::new("node-b")).is_none());
 
     for node in [&a, &b] {
         node.shutdown.signal_shutdown();

@@ -1,6 +1,6 @@
 //! Delivers a message to a local actor, knowing its type.
 
-use super::Shared;
+use super::SharedNode;
 use super::{Encode, RemoteError, RemoteMessage, context::Wire};
 use bytes::Bytes;
 use std::{future::Future, marker::PhantomData, pin::Pin, sync::Arc};
@@ -47,7 +47,7 @@ pub(super) trait Operation: RemoteMessage + Send + 'static {
     fn run(
         self,
         address: Address,
-        shared: Arc<Shared>,
+        shared: Arc<SharedNode>,
     ) -> BoxFuture<Result<Self::Output, RemoteError>>;
 }
 

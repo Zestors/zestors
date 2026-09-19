@@ -1,5 +1,5 @@
 use super::Member;
-use crate::NodeId;
+use crate::NodeName;
 use std::collections::HashSet;
 
 /// A change in which nodes are part of the cluster.
@@ -60,12 +60,12 @@ pub enum NodeStatus {
 pub struct ClusterSnapshot {
     /// The other nodes considered up, in no particular order.
     pub members: Vec<Member>,
-    pub(super) unreachable: HashSet<NodeId>,
+    pub(super) unreachable: HashSet<NodeName>,
 }
 
 impl ClusterSnapshot {
     /// Whether `node` was a member that could be connected to.
-    pub fn is_reachable(&self, node: &NodeId) -> bool {
+    pub fn is_reachable(&self, node: &NodeName) -> bool {
         !self.unreachable.contains(node) && self.members.iter().any(|m| m.node == *node)
     }
 }

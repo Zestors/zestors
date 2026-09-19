@@ -18,7 +18,7 @@ use std::{marker::PhantomData, sync::Arc};
 use zestors_interface::Message;
 use zestors_runtime::{Address, ChannelSnapshot, Signal, prelude::*};
 
-use super::Shared;
+use super::SharedNode;
 
 /// Sends a [`Signal`] to the actor. Answered with whether it was accepted:
 /// `false` if the actor was already exiting or dead.
@@ -57,7 +57,7 @@ impl Operation for SignalOp {
     fn run(
         self,
         address: Address,
-        _: Arc<Shared>,
+        _: Arc<SharedNode>,
     ) -> super::handler::BoxFuture<Result<bool, RemoteError>> {
         Box::pin(async move { Ok(address.signal(self.0)) })
     }
@@ -67,7 +67,7 @@ impl Operation for PingOp {
     fn run(
         self,
         address: Address,
-        _: Arc<Shared>,
+        _: Arc<SharedNode>,
     ) -> super::handler::BoxFuture<Result<(), RemoteError>> {
         Box::pin(async move { address.ping().await.map_err(|_| RemoteError::NoReply) })
     }
@@ -77,7 +77,7 @@ impl Operation for InfoOp {
     fn run(
         self,
         address: Address,
-        shared: Arc<Shared>,
+        shared: Arc<SharedNode>,
     ) -> super::handler::BoxFuture<Result<RemoteInfo, RemoteError>> {
         Box::pin(async move {
             let mut accepts: Vec<Id> = shared

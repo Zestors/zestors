@@ -13,7 +13,7 @@
 //! latency, and partitions, which cut every connection across them.
 
 use crate::{
-    NodeAddr, NodeId,
+    NodeAddr, NodeName,
     backend::{Connection, DatagramError, Endpoint, RecvStream, SendStream},
 };
 use bytes::{Bytes, BytesMut};
@@ -46,9 +46,9 @@ struct State {
     /// The nodes currently listening, by the address they listen on.
     listeners: HashMap<NodeAddr, Listener>,
     /// Pairs of nodes that can't reach each other, in both directions.
-    partitions: HashSet<(NodeId, NodeId)>,
+    partitions: HashSet<(NodeName, NodeName)>,
     /// Every connection made, to cut the ones a partition falls across.
-    pairs: Vec<(NodeId, NodeId, Weak<Pair>)>,
+    pairs: Vec<(NodeName, NodeName, Weak<Pair>)>,
     latency: Duration,
     jitter: Duration,
     rng: StdRng,
@@ -56,7 +56,7 @@ struct State {
 }
 
 struct Listener {
-    node: NodeId,
+    node: NodeName,
     /// Tells a stale registration from the one that replaced it.
     instance: u64,
     incoming: mpsc::Sender<SimConnection>,
@@ -96,8 +96,12 @@ impl Fabric {
         let mut state = self.state();
         for &x in a {
             for &y in b {
-                state.partitions.insert((NodeId::new(x), NodeId::new(y)));
-                state.partitions.insert((NodeId::new(y), NodeId::new(x)));
+                state
+                    .partitions
+                    .insert((NodeName::new(x), NodeName::new(y)));
+                state
+                    .partitions
+                    .insert((NodeName::new(y), NodeName::new(x)));
             }
         }
         let State {
@@ -129,14 +133,14 @@ impl Fabric {
         state.listeners.insert(
             addr.clone(),
             Listener {
-                node: NodeId::new(node),
+                node: NodeName::new(node),
                 instance,
                 incoming: incoming_tx,
             },
         );
         SimEndpoint {
             fabric: self.clone(),
-            node: NodeId::new(node),
+            node: NodeName::new(node),
             addr,
             instance,
             incoming: tokio::sync::Mutex::new(incoming_rx),
@@ -148,7 +152,7 @@ impl Fabric {
         self.state.lock().expect("Not poisoned")
     }
 
-    fn partitioned(&self, from: &NodeId, to: &NodeId) -> bool {
+    fn partitioned(&self, from: &NodeName, to: &NodeName) -> bool {
         self.state()
             .partitions
             .contains(&(from.clone(), to.clone()))
@@ -165,8 +169,8 @@ impl Fabric {
     /// the link. What is written in order comes out in order.
     fn pipe(
         &self,
-        from: &NodeId,
-        to: &NodeId,
+        from: &NodeName,
+        to: &NodeName,
         closed: CancellationToken,
     ) -> (DuplexStream, DuplexStream) {
         let (writer, mut ingress) = tokio::io::duplex(PIPE_BUFFER);
@@ -239,7 +243,7 @@ impl Fabric {
 /// network, like a crash.
 pub struct SimEndpoint {
     fabric: Fabric,
-    node: NodeId,
+    node: NodeName,
     addr: NodeAddr,
     instance: u64,
     incoming: tokio::sync::Mutex<mpsc::Receiver<SimConnection>>,
@@ -271,7 +275,7 @@ impl Endpoint for SimEndpoint {
         Ok(self.addr.clone())
     }
 
-    async fn connect(&self, addr: &NodeAddr, node: &NodeId) -> io::Result<SimConnection> {
+    async fn connect(&self, addr: &NodeAddr, node: &NodeName) -> io::Result<SimConnection> {
         let refused = || io::Error::from(io::ErrorKind::ConnectionRefused);
         // Like dialing an address: whoever answers there must be the node we
         // mean, and reachable from here.
@@ -343,8 +347,8 @@ type StreamPair = (SendStream, RecvStream);
 pub struct SimConnection {
     fabric: Fabric,
     pair: Arc<Pair>,
-    local: NodeId,
-    remote: NodeId,
+    local: NodeName,
+    remote: NodeName,
     /// Streams and datagrams to the other end.
     streams_out: mpsc::UnboundedSender<StreamPair>,
     datagrams_out: mpsc::UnboundedSender<Bytes>,
@@ -355,11 +359,16 @@ pub struct SimConnection {
 
 impl SimConnection {
     /// Both ends of a new connection, as the dialer and the acceptor see it.
-    fn pair(fabric: &Fabric, pair: Arc<Pair>, dialer: &NodeId, acceptor: &NodeId) -> (Self, Self) {
+    fn pair(
+        fabric: &Fabric,
+        pair: Arc<Pair>,
+        dialer: &NodeName,
+        acceptor: &NodeName,
+    ) -> (Self, Self) {
         let (streams_a, streams_b) = (mpsc::unbounded_channel(), mpsc::unbounded_channel());
         let (datagrams_a, datagrams_b) = (mpsc::unbounded_channel(), mpsc::unbounded_channel());
-        let end = |local: &NodeId,
-                   remote: &NodeId,
+        let end = |local: &NodeName,
+                   remote: &NodeName,
                    streams: (
             mpsc::UnboundedSender<StreamPair>,
             mpsc::UnboundedReceiver<StreamPair>,
@@ -457,7 +466,7 @@ impl Connection for SimConnection {
 
     /// The fabric checks that whoever answers is the node dialed, and knows
     /// who is dialing.
-    fn peer(&self) -> &NodeId {
+    fn peer(&self) -> &NodeName {
         &self.remote
     }
 

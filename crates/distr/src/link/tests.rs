@@ -23,7 +23,7 @@ async fn bind(name: &str) -> TestNode {
 
 async fn bind_at(name: &str, addr: std::net::SocketAddr, timings: LinkTimings) -> TestNode {
     let backend = Quic::new(addr, Tls::insecure_dev().unwrap());
-    let local = LocalNode::new(NodeId::new(name), 1);
+    let local = NodeIncarnation::new(NodeName::new(name), 1);
     let (links, addr) = Starter::new(backend).start(local, timings).await.unwrap();
     let peers = links.peer_events();
     let inbox = links.subscribe(TEST);
@@ -32,7 +32,7 @@ async fn bind_at(name: &str, addr: std::net::SocketAddr, timings: LinkTimings) -
         inbox,
         peers,
         member: Member {
-            node: NodeId::new(name),
+            node: NodeName::new(name),
             addr,
             generation: 1,
         },
@@ -192,7 +192,7 @@ async fn losing_a_connection_is_reported() {
     })
     .await
     .expect("disconnect is reported");
-    assert_eq!(event, (NodeId::new("node-b"), 1));
+    assert_eq!(event, (NodeName::new("node-b"), 1));
 }
 
 #[tokio::test]
@@ -211,7 +211,7 @@ async fn unreachable_peer_is_reported_and_reported_reachable_when_it_answers() {
         .local_addr()
         .unwrap();
     let b_member = Member {
-        node: NodeId::new("node-b"),
+        node: NodeName::new("node-b"),
         addr: addr.into(),
         generation: 1,
     };

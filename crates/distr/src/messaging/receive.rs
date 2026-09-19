@@ -2,10 +2,11 @@
 //! local actors, and answered.
 
 use super::{
-    RemoteError, Shared, Started, context::Wire, handler::ReplyFuture, reply::Pending, wire::Frame,
+    RemoteError, SharedNode, Started, context::Wire, handler::ReplyFuture, reply::Pending,
+    wire::Frame,
 };
 use crate::{
-    ClusterEvent, Id, NodeId,
+    ClusterEvent, Id, NodeName,
     link::{Delivery, Incoming, Links, MAX_MESSAGE_SIZE, PeerEvent, Protocol},
 };
 use bytes::Bytes;
@@ -67,7 +68,7 @@ struct Route {
 /// A message for a local actor, and where its reply goes.
 struct Work {
     /// The node that sent it.
-    from: NodeId,
+    from: NodeName,
     msg: Id,
     /// The requests in the message, see [`RemoteRequest`](super::RemoteRequest).
     requests: Vec<u64>,
@@ -79,7 +80,7 @@ struct Work {
 /// Runs while the node does: takes in what other nodes send, and notices when
 /// they are lost.
 pub(super) async fn serve(
-    shared: Arc<Shared>,
+    shared: Arc<SharedNode>,
     running: Started,
     mut inbox: mpsc::Receiver<Incoming>,
     mut peers: broadcast::Receiver<PeerEvent>,
@@ -125,7 +126,7 @@ pub(super) async fn serve(
 /// actor doesn't hold up the others, and the messages for one are put in its
 /// mailbox in the order they arrived.
 struct Router {
-    shared: Arc<Shared>,
+    shared: Arc<SharedNode>,
     started: Started,
     routes: HashMap<Name, Route>,
 }
@@ -253,9 +254,9 @@ impl Router {
 
 /// The lane replies to `node` go through, if it is a member of the cluster.
 fn reply_lane(
-    shared: &Shared,
+    shared: &SharedNode,
     links: &Links,
-    node: &NodeId,
+    node: &NodeName,
     call_id: u64,
 ) -> Option<mpsc::Sender<Bytes>> {
     let Some(member) = shared.cluster.member(node) else {
@@ -273,9 +274,9 @@ fn reply_lane(
 
 /// Sends the reply to a call.
 pub(super) async fn reply(
-    shared: &Shared,
+    shared: &SharedNode,
     links: &Links,
-    node: &NodeId,
+    node: &NodeName,
     call_id: u64,
     result: Result<Bytes, RemoteError>,
 ) {
@@ -295,7 +296,7 @@ pub(super) async fn reply(
 
 /// Delivers the messages for one actor, one after the other.
 async fn actor_task(
-    shared: Arc<Shared>,
+    shared: Arc<SharedNode>,
     started: Started,
     name: Name,
     mut queue: mpsc::UnboundedReceiver<Work>,
@@ -318,7 +319,7 @@ async fn actor_task(
 }
 
 /// Delivers one message to the actor `name`, and sends its reply when it comes.
-async fn process(shared: &Arc<Shared>, started: &Started, name: &Name, work: Work) {
+async fn process(shared: &Arc<SharedNode>, started: &Started, name: &Name, work: Work) {
     let Work {
         from,
         msg,
@@ -352,7 +353,7 @@ async fn process(shared: &Arc<Shared>, started: &Started, name: &Name, work: Wor
 }
 
 async fn deliver(
-    shared: &Shared,
+    shared: &SharedNode,
     wire: Wire,
     name: &Name,
     msg: Id,

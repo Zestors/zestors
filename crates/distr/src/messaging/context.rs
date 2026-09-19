@@ -7,8 +7,8 @@
 //! the duration of the encoding or decoding of one message, in a thread-local.
 //! Both are synchronous, so nothing else can observe it in between.
 
-use super::{Decode, Encode, RemoteError, Shared, Started, receive, reply::Pending};
-use crate::NodeId;
+use super::{Decode, Encode, RemoteError, SharedNode, Started, receive, reply::Pending};
+use crate::NodeName;
 use std::{
     cell::RefCell,
     sync::{Arc, Mutex, atomic::Ordering},
@@ -23,9 +23,9 @@ thread_local! {
 /// The node a message is being encoded for, or was decoded from.
 #[derive(Clone)]
 pub(super) struct Wire {
-    shared: Arc<Shared>,
+    shared: Arc<SharedNode>,
     started: Started,
-    peer: NodeId,
+    peer: NodeName,
     /// The requests handed to the node while encoding: see [`Wire::export`].
     exported: Arc<Mutex<Vec<u64>>>,
 }
@@ -45,7 +45,7 @@ pub(super) fn current() -> Option<Wire> {
 }
 
 impl Wire {
-    pub(super) fn new(shared: Arc<Shared>, started: Started, peer: NodeId) -> Self {
+    pub(super) fn new(shared: Arc<SharedNode>, started: Started, peer: NodeName) -> Self {
         Self {
             shared,
             started,
@@ -55,7 +55,7 @@ impl Wire {
     }
 
     /// Runs `f`, which encodes or decodes one message, with this as its [`current`] wire.
-    pub(super) fn shared(&self) -> &Arc<Shared> {
+    pub(super) fn shared(&self) -> &Arc<SharedNode> {
         &self.shared
     }
 
