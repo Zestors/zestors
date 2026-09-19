@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Gives a message type a stable, globally unique [`Id`].
+///
+/// Derive it with `#[derive(StableId)]` and `#[msg(id = "<uuid>")]`.
+#[allow(non_upper_case_globals)]
+pub trait StableId {
+    /// The stable, globally unique identifier for this message type.
+    const Id: Id;
+}
+
 /// A globally unique identifier for a message type, stable across nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Id(Uuid);
@@ -27,12 +36,28 @@ impl std::fmt::Display for Id {
     }
 }
 
-/// Gives a message type a stable, globally unique [`Id`].
-///
-/// Derive it with `#[derive(StableId)]` and `#[msg(id = "<uuid>")]`.
-#[allow(non_upper_case_globals)]
-pub trait StableId {
-    const Id: Id;
+impl From<Uuid> for Id {
+    fn from(id: Uuid) -> Self {
+        Self(id)
+    }
+}
+
+impl From<u128> for Id {
+    fn from(id: u128) -> Self {
+        Self(Uuid::from_u128(id))
+    }
+}
+
+impl From<Id> for Uuid {
+    fn from(id: Id) -> Self {
+        id.0
+    }
+}
+
+impl From<Id> for u128 {
+    fn from(id: Id) -> Self {
+        id.0.as_u128()
+    }
 }
 
 pub use zestors_codegen::StableId;

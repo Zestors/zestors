@@ -8,5 +8,8 @@ mod _prelude {
 #[doc(hidden)]
 pub mod prelude {}
 
-mod message_id;
-pub use message_id::*;
+mod stable_id;
+pub use stable_id::*;
+
+mod global_pid;
+pub use global_pid::*;

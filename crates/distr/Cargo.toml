@@ -16,6 +16,7 @@ zestors-supervisor.workspace = true
 zestors-codegen.workspace = true
 uuid = { workspace = true, features = ["serde"] }
 serde.workspace = true
+smol_str.workspace = true
 
 [dev-dependencies]
 zestors.workspace = true
