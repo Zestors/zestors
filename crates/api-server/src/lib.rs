@@ -66,7 +66,7 @@ pub struct ApiServer {
 /// The message interface an [`ApiServer`] accepts: the [`GetChildren`] and
 /// [`GetHealth`] queries from `zestors-supervision`.
 #[derive(Interface)]
-#[interface(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 pub enum ApiServerInterface {
     Children(Envelope<GetChildren>),
     Health(Envelope<GetHealth>),

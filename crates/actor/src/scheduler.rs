@@ -78,7 +78,7 @@ impl<H: Handler> BasicScheduler<H> {
 
 /// A type-erased [`Message`], known to be handled by the [`Handler`] `H`.
 #[derive(Message)]
-#[msg(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 pub struct HandlerMessage<H: Handler> {
     msg: Box<dyn DynErasedMessage<H>>,
 }
@@ -155,7 +155,7 @@ impl<M: Message, H: Handle<M>> DynErasedMessage<H> for M {
 ///
 /// This type is also useful for scheduling callbacks in the [`next_event`](Handler::next_event) method of a [`Handler`].
 #[derive(Message)]
-#[msg(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 pub struct HandlerCallback<H: Handler> {
     f: Box<dyn FnOnce(&mut H, HandlerContext<'_, H>) -> Result<(), Report> + Send + 'static>,
 }

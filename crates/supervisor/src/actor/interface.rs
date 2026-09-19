@@ -8,7 +8,7 @@ use zestors_supervision::messages::{GetChildren, GetHealth};
 /// child registration ([`RegisterChild`](crate::messages::RegisterChild)) and
 /// deregistration ([`DeregisterChild`](crate::messages::DeregisterChild)).
 #[derive(Interface, Debug)]
-#[interface(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 #[non_exhaustive]
 pub enum SupervisorInterface {
     Children(Envelope<GetChildren>),

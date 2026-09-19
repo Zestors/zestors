@@ -3,6 +3,7 @@
 extern crate proc_macro;
 use darling::FromAttributes;
 use proc_macro::TokenStream;
+use proc_macro2::Span;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, Fields, Type};
 
@@ -15,32 +16,59 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields, Type};
 /// ```
 /// # use zestors_interface::*;
 /// #[derive(Interface)]
-/// # #[interface(path = "zestors_interface")]
+/// # #[zestors(interface_path = "zestors_interface")]
 /// enum MyInterface {
 ///     MessageA(Envelope<u32>),
 ///     MessageB(Envelope<String>),
 /// }
 /// ```
-#[proc_macro_derive(Interface, attributes(interface))]
+#[proc_macro_derive(Interface, attributes(zestors))]
 pub fn derive_interface_polybox(input: TokenStream) -> TokenStream {
-    derive_interface(input, "::zestors::interface")
+    derive_interface(input)
 }
 
+/// The attributes shared by all derives: `#[zestors(interface_path = "..",
+/// distr_path = "..", actor_path = "..")]` override where the generated code
+/// finds each crate, and `#[msg(reply = .., id = "..")]` configure messages.
 #[derive(darling::FromAttributes)]
-#[darling(attributes(interface))]
-struct InterfaceAttrs {
-    path: Option<syn::Path>,
+#[darling(attributes(zestors, msg))]
+struct Attrs {
+    interface_path: Option<syn::Path>,
+    distr_path: Option<syn::Path>,
+    actor_path: Option<syn::Path>,
+    reply: Option<syn::Type>,
+    id: Option<syn::LitStr>,
 }
 
-fn derive_interface(input: TokenStream, base: &str) -> TokenStream {
+impl Attrs {
+    fn interface_path(&self) -> syn::Path {
+        self.interface_path
+            .clone()
+            .unwrap_or_else(|| syn::parse_str("::zestors::interface").unwrap())
+    }
+
+    fn distr_path(&self) -> syn::Path {
+        self.distr_path
+            .clone()
+            .unwrap_or_else(|| syn::parse_str("::zestors::distr").unwrap())
+    }
+
+    fn actor_path(&self) -> syn::Path {
+        self.actor_path
+            .clone()
+            .unwrap_or_else(|| syn::parse_str("::zestors::actor").unwrap())
+    }
+}
+
+fn derive_interface(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let attrs = match InterfaceAttrs::from_attributes(&input.attrs) {
+    let attrs = match Attrs::from_attributes(&input.attrs) {
         Ok(attrs) => attrs,
         Err(err) => return err.write_errors().into(),
     };
     let enum_name = &input.ident;
 
-    let base_path: syn::Path = attrs.path.unwrap_or_else(|| syn::parse_str(base).unwrap());
+    let base_path: syn::Path = attrs.interface_path();
     let msg_path: syn::Path = base_path.clone();
 
     // Ensure we are working with an enum
@@ -169,11 +197,11 @@ fn derive_interface(input: TokenStream, base: &str) -> TokenStream {
 /// Derives the `HandlerInterface` trait for an enum, allowing it to act as a
 /// handler interface for an actor. Each variant must contain a single unnamed
 /// field of type `Envelope<T>`.
-#[proc_macro_derive(HandlerInterface, attributes(interface))]
+#[proc_macro_derive(HandlerInterface, attributes(zestors))]
 pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let enum_name = &input.ident;
-    let attrs = match InterfaceAttrs::from_attributes(&input.attrs) {
+    let attrs = match Attrs::from_attributes(&input.attrs) {
         Ok(attrs) => attrs,
         Err(err) => return err.write_errors().into(),
     };
@@ -184,9 +212,7 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
         _ => panic!("HandlerInterface derive can only be used on enums"),
     };
 
-    let base_path = attrs
-        .path
-        .unwrap_or_else(|| syn::parse_str("::zestors").unwrap());
+    let actor_path = attrs.actor_path();
 
     let mut handle_matches = Vec::new();
     let mut inner_types = Vec::new();
@@ -203,7 +229,7 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
 
                 handle_matches.push(quote! {
                     Self::#variant_name(envelope) => {
-                        <T as #base_path::actor::Handle<#inner_type>>::handle(actor, state, envelope.msg, envelope.req).await
+                        <T as #actor_path::Handle<#inner_type>>::handle(actor, state, envelope.msg, envelope.req).await
                     }
                 });
                 inner_types.push(inner_type);
@@ -213,11 +239,11 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
     }
 
     let expanded = quote! {
-        impl<T> #base_path::actor::HandlerInterface<T> for #enum_name
+        impl<T> #actor_path::HandlerInterface<T> for #enum_name
         where
-            T: #base_path::actor::Handler + #( #base_path::actor::Handle<#inner_types> + )*
+            T: #actor_path::Handler + #( #actor_path::Handle<#inner_types> + )*
         {
-            async fn handle_with(self, state: #base_path::actor::HandlerContext<'_, T>, actor: &mut T) -> Result<(), ::rootcause::Report> {
+            async fn handle_with(self, state: #actor_path::HandlerContext<'_, T>, actor: &mut T) -> Result<(), ::rootcause::Report> {
                 match self {
                     #(#handle_matches)*
                 }
@@ -238,35 +264,24 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
 /// ```
 /// # use zestors_interface::*;
 /// #[derive(Message)]
-/// # #[msg(path = "zestors_interface")]
+/// # #[zestors(interface_path = "zestors_interface")]
 /// struct SimpleMessage;
 ///
 /// #[derive(Message)]
 /// #[msg(reply = u32)]
-/// # #[msg(path = "zestors_interface")]
+/// # #[zestors(interface_path = "zestors_interface")]
 /// struct MessageWithOutput;
 /// ```
-#[proc_macro_derive(Message, attributes(msg))]
+#[proc_macro_derive(Message, attributes(msg, zestors))]
 pub fn derive_message(input: TokenStream) -> TokenStream {
-    _derive_message(input, "::zestors::interface")
-}
-
-#[derive(darling::FromAttributes)]
-#[darling(attributes(msg))]
-struct MessageAttrs {
-    reply: Option<syn::Type>,
-    path: Option<syn::Path>,
-}
-
-fn _derive_message(input: TokenStream, base: &str) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let attrs = match MessageAttrs::from_attributes(&input.attrs) {
+    let attrs = match Attrs::from_attributes(&input.attrs) {
         Ok(attrs) => attrs,
         Err(err) => return err.write_errors().into(),
     };
     let name = &input.ident;
 
-    let base_path: syn::Path = attrs.path.unwrap_or_else(|| syn::parse_str(base).unwrap());
+    let base_path: syn::Path = attrs.interface_path();
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let expanded = if let Some(reply_type) = attrs.reply {
@@ -290,6 +305,62 @@ fn _derive_message(input: TokenStream, base: &str) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+/// Derives the `StableId` trait, giving the message a stable, globally unique
+/// [`Id`](https://docs.rs/zestors-distr) that identifies it across nodes.
+///
+/// The id is set with `#[msg(id = "<uuid>")]`. If it is missing, compilation
+/// fails with a freshly generated random id that can be pasted in.
+///
+/// # Example
+/// ```
+/// # use zestors_distr::*;
+/// #[derive(StableId)]
+/// # #[zestors(distr_path = "zestors_distr")]
+/// #[msg(id = "0b0f7e4e-3f3a-4d5b-9d7e-6a1c2b3d4e92")]
+/// struct Ping;
+///
+/// assert_eq!(Ping::Id, Id::from_u128(0x0b0f7e4e_3f3a_4d5b_9d7e_6a1c2b3d4e92));
+/// ```
+#[proc_macro_derive(StableId, attributes(msg, zestors))]
+pub fn derive_message_id(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let attrs = match Attrs::from_attributes(&input.attrs) {
+        Ok(attrs) => attrs,
+        Err(err) => return err.write_errors().into(),
+    };
+    let name = &input.ident;
+    let distr_path = attrs.distr_path();
+
+    let Some(id) = attrs.id else {
+        let suggestion = uuid::Uuid::new_v4();
+        return syn::Error::new_spanned(
+            name,
+            format!(
+                "`StableId` requires a unique id; add this attribute to the type: #[msg(id = \"{suggestion}\")]"
+            ),
+        )
+        .to_compile_error()
+        .into();
+    };
+
+    let uuid = match uuid::Uuid::parse_str(&id.value()) {
+        Ok(uuid) => uuid.as_u128(),
+        Err(err) => {
+            return syn::Error::new(Span::call_site(), format!("invalid message id: {err}"))
+                .to_compile_error()
+                .into();
+        }
+    };
+
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    TokenStream::from(quote! {
+        impl #impl_generics #distr_path::StableId for #name #ty_generics #where_clause {
+            const Id: #distr_path::Id = #distr_path::Id::from_u128(#uuid);
+        }
+    })
 }
 
 fn extract_inner_envelope_type(ty: &Type) -> Option<&Type> {

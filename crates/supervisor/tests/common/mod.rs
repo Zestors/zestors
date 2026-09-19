@@ -20,17 +20,19 @@ use zestors_supervisor::{SupervisorBlueprint, SupervisorInterface};
 
 /// Tells a [`TestActor`] to exit with an error, simulating an unhandled crash.
 #[derive(Message, Debug)]
-#[msg(path = "zestors_interface", reply = "()")]
+#[zestors(interface_path = "zestors_interface")]
+#[msg(reply = "()")]
 pub struct Crash;
 
 /// Asks a [`TestActor`] which "generation" it currently is: how many times
 /// (including this one) it has been spawned.
 #[derive(Message, Debug)]
-#[msg(path = "zestors_interface", reply = "usize")]
+#[zestors(interface_path = "zestors_interface")]
+#[msg(reply = "usize")]
 pub struct Generation;
 
 #[derive(Interface, Debug)]
-#[interface(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 pub enum TestInterface {
     Crash(Envelope<Crash>),
     Generation(Envelope<Generation>),
@@ -72,7 +74,7 @@ impl Actor for TestActor {
 
 /// An actor that takes a configurable amount of time to actually exit once
 /// asked to shut down, so tests can observe a supervisor's state while one
-/// of its supervisees is still alive but mid-shutdown.
+/// of its supervisees is still alive but Id-shutdown.
 pub struct SlowShutdownActor {
     delay: Duration,
 }

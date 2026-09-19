@@ -208,12 +208,14 @@ pub mod messages {
     /// Registers a new child under a running supervisor. Fails if the spec's
     /// [`Pid`] is already registered.
     #[derive(Message, Debug)]
-    #[msg(path = "zestors_interface", reply = "Result<(), DuplicatePidError>")]
+    #[zestors(interface_path = "zestors_interface")]
+    #[msg(reply = "Result<(), DuplicatePidError>")]
     pub struct RegisterChild(pub ChildSpec);
 
     /// Removes a child from a running supervisor (stopping it if it's alive),
     /// returning its [`ChildDescription`] if it was present.
     #[derive(Message, Debug)]
-    #[msg(path = "zestors_interface", reply = "Option<ChildDescription>")]
+    #[zestors(interface_path = "zestors_interface")]
+    #[msg(reply = "Option<ChildDescription>")]
     pub struct DeregisterChild(pub Pid);
 }

@@ -12,11 +12,11 @@ use type_sets::{AsTypeSet, Members, Subset};
 /// # use zestors::runtime::prelude::*;
 /// # use zestors::runtime::{Dyn, spawn_rand};
 /// #[derive(Message, Debug)]
-/// # #[msg(path = "zestors::interface")]
+/// # #[zestors(interface_path = "zestors::interface")]
 /// struct Ping;
 ///
 /// #[derive(Interface, Debug)]
-/// # #[interface(path = "zestors::interface")]
+/// # #[zestors(interface_path = "zestors::interface")]
 /// enum PingInterface {
 ///     Ping(Envelope<Ping>),
 /// }

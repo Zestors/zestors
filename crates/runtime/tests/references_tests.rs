@@ -11,22 +11,22 @@ use zestors_runtime::{ActorStatus, AsDyn as _, Dyn, StrongAddress, spawn, spawn_
 mod common;
 
 #[derive(Message, Debug, Clone)]
-#[msg(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 struct Ping;
 
 #[derive(Message, Debug, Clone)]
-#[msg(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 struct Pong;
 
 #[derive(Interface, Debug)]
-#[interface(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 enum PingPongInterface {
     Ping(Envelope<Ping>),
     Pong(Envelope<Pong>),
 }
 
 #[derive(Interface, Debug)]
-#[interface(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 enum UnrelatedInterface {
     Ping(Envelope<Ping>),
 }

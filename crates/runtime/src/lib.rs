@@ -69,16 +69,16 @@
 //! # use zestors::runtime::prelude::*;
 //! # use zestors::runtime::spawn_rand;
 //! #[derive(Message, Debug)]
-//! # #[msg(path = "zestors::interface")]
+//! # #[zestors(interface_path = "zestors::interface")]
 //! struct Increment;
 //!
 //! #[derive(Message, Debug)]
 //! #[msg(reply = u32)]
-//! # #[msg(path = "zestors::interface")]
+//! # #[zestors(interface_path = "zestors::interface")]
 //! struct GetCount;
 //!
 //! #[derive(Interface, Debug)]
-//! # #[interface(path = "zestors::interface")]
+//! # #[zestors(interface_path = "zestors::interface")]
 //! enum CounterInterface {
 //!     Increment(Envelope<Increment>),
 //!     GetCount(Envelope<GetCount>),

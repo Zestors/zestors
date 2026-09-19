@@ -15,12 +15,14 @@ use zestors_codegen::Message;
 
 /// Requests the [`ChildDescription`] of every direct child of a supervisor.
 #[derive(Message, Debug)]
-#[msg(path = "zestors_interface", reply = "Vec<ChildDescription>")]
+#[zestors(interface_path = "zestors_interface")]
+#[msg(reply = "Vec<ChildDescription>")]
 pub struct GetChildren;
 
 /// Requests a supervisor's current [`Health`].
 #[derive(Message, Debug)]
-#[msg(path = "zestors_interface", reply = Health)]
+#[zestors(interface_path = "zestors_interface")]
+#[msg(reply = Health)]
 pub struct GetHealth;
 
 /// A point-in-time health report, as returned by [`GetHealth`].

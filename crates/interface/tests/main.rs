@@ -5,5 +5,5 @@ use zestors_codegen::Message;
 fn main() {}
 
 #[derive(Message)]
-#[msg(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 struct MyMessage;

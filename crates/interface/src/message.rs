@@ -25,14 +25,14 @@ use std::{convert::Infallible, fmt::Debug};
 /// // Fire-and-forget: no `reply` attribute, so `Output`/`Receipt`/
 /// // `Resolver` all default to `()`.
 /// #[derive(Message, Debug)]
-/// # #[msg(path = "zestors::interface")]
+/// # #[zestors(interface_path = "zestors::interface")]
 /// struct Greet(String);
 ///
 /// // Request-style: `Output = u32`, `Receipt = Reply<u32>`,
 /// // `Resolver = Request<u32>`.
 /// #[derive(Message, Debug)]
 /// #[msg(reply = u32)]
-/// # #[msg(path = "zestors::interface")]
+/// # #[zestors(interface_path = "zestors::interface")]
 /// struct CountLetters(String);
 /// ```
 pub trait Message: Send + 'static + Sized {

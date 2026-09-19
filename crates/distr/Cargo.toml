@@ -1,0 +1,24 @@
+[package]
+name = "zestors-distr"
+version = "0.2.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+description = "Distributed messaging for the zestors actor framework"
+repository = "https://github.com/Zestors/zestors"
+
+[dependencies]
+zestors-runtime.workspace = true
+zestors-interface.workspace = true
+zestors-actor.workspace = true
+zestors-supervision.workspace = true
+zestors-supervisor.workspace = true
+zestors-codegen.workspace = true
+uuid = { workspace = true, features = ["serde"] }
+serde.workspace = true
+
+[dev-dependencies]
+zestors.workspace = true
+
+[features]
+_ra = []

@@ -10,11 +10,11 @@ mod common;
 
 #[derive(Message, Debug)]
 #[msg(reply = ())]
-#[msg(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 struct Ack;
 
 #[derive(Interface, Debug)]
-#[interface(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 enum AckInterface {
     Ack(Envelope<Ack>),
 }

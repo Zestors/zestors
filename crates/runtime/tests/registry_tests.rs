@@ -9,17 +9,17 @@ use zestors_runtime::{Registry, TypedRegistryError, spawn};
 mod common;
 
 #[derive(Message, Debug)]
-#[msg(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 struct Ping;
 
 #[derive(Interface, Debug)]
-#[interface(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 enum PingInterface {
     Ping(Envelope<Ping>),
 }
 
 #[derive(Interface, Debug)]
-#[interface(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 enum OtherInterface {
     Ping(Envelope<Ping>),
 }

@@ -23,11 +23,11 @@ use crate::*;
 ///
 /// #[derive(Message, Debug)]
 /// #[msg(reply = u32)]
-/// # #[msg(path = "zestors::interface")]
+/// # #[zestors(interface_path = "zestors::interface")]
 /// struct Double(u32);
 ///
 /// #[derive(Interface, Debug)]
-/// # #[interface(path = "zestors::interface")]
+/// # #[zestors(interface_path = "zestors::interface")]
 /// enum MyInterface {
 ///     Double(Envelope<Double>),
 /// }

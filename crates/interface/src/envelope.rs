@@ -10,7 +10,7 @@ use std::any::Any;
 ///
 /// #[derive(Message, Debug)]
 /// #[msg(reply = u32)]
-/// # #[msg(path = "zestors::interface")]
+/// # #[zestors(interface_path = "zestors::interface")]
 /// struct Double(u32);
 ///
 /// # #[tokio::main]
@@ -63,11 +63,11 @@ impl<M: Message> Envelope<M> {
 /// # use zestors::interface::{AnyEnvelope, Message};
 ///
 /// #[derive(Message, Debug, PartialEq)]
-/// # #[msg(path = "zestors::interface")]
+/// # #[zestors(interface_path = "zestors::interface")]
 /// struct Ping;
 ///
 /// #[derive(Message, Debug, PartialEq)]
-/// # #[msg(path = "zestors::interface")]
+/// # #[zestors(interface_path = "zestors::interface")]
 /// struct Pong;
 ///
 /// let (any_envelope, _receipt) = AnyEnvelope::new_pair(Ping);

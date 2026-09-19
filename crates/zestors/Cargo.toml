@@ -15,6 +15,7 @@ zestors-api-server.workspace = true
 zestors-codegen.workspace = true
 zestors-interface.workspace = true
 zestors-supervisor.workspace = true
+zestors-distr.workspace = true
 
 [dev-dependencies]
 tracing-subscriber.workspace = true

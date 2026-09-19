@@ -114,7 +114,7 @@ async fn rest_for_one_restarts_the_crashed_child_and_everything_after_it() {
 
 /// Regression test: a supervisor shutdown must not let an `Always`-mode
 /// child's own exit (which, under a graceful shutdown, is a `NormalShutdown`
-/// that `Always` would otherwise restart on) resurrect it mid-teardown.
+/// that `Always` would otherwise restart on) resurrect it Id-teardown.
 #[tokio::test]
 async fn shutdown_does_not_resurrect_always_mode_children() {
     let (spec_a, addr_a, gen_a) = test_child(RestartMode::Always);

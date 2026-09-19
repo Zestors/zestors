@@ -15,16 +15,16 @@ use zestors_runtime::{CallOptions, spawn_rand};
 mod common;
 
 #[derive(Message, Debug, Clone)]
-#[msg(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 struct Bump;
 
 #[derive(Message, Debug)]
 #[msg(reply = usize)]
-#[msg(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 struct GetCount;
 
 #[derive(Interface, Debug)]
-#[interface(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 enum CounterInterface {
     Bump(Envelope<Bump>),
     GetCount(Envelope<GetCount>),
@@ -45,11 +45,11 @@ async fn counter_handler(mut inbox: Inbox<CounterInterface>) -> Result<(), Repor
 
 #[derive(Message, Debug)]
 #[msg(reply = ())]
-#[msg(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 struct NeverReplied;
 
 #[derive(Interface, Debug)]
-#[interface(path = "zestors_interface")]
+#[zestors(interface_path = "zestors_interface")]
 enum NeverRepliesInterface {
     NeverReplied(Envelope<NeverReplied>),
 }

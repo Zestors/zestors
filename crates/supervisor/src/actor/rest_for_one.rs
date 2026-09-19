@@ -383,7 +383,7 @@ impl<'a> Strategy for RestForOneSupervisor<'a> {
                 // to splice that into an active restart, cancel it and
                 // start a clean cascade from this trigger: it recomputes
                 // the full range from live state, so anything still
-                // mid-restart gets correctly stopped again.
+                // Id-restart gets correctly stopped again.
                 self.start_cascade(pid)
             }
 
