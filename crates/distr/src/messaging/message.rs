@@ -1,10 +1,10 @@
 use super::{
     Decode, Encode,
-    reply::{RemoteKind, RemoteReceipt, RemoteReply},
+    reply::{RemoteMessageKind, RemoteReceipt, RemoteReply},
 };
 use crate::StableId;
 use std::time::Duration;
-use zestors_interface::{Message, MessageKind, ReceiptOf};
+use zestors_interface::{Message, ReceiptOf};
 
 /// A [`Message`] that can be sent to an actor on another node.
 ///
@@ -13,10 +13,7 @@ use zestors_interface::{Message, MessageKind, ReceiptOf};
 /// is one. With serde that is
 /// `#[derive(Message, StableId, Serialize, Deserialize)]`.
 pub trait RemoteMessage:
-    Message<Output: Encode + Decode, Kind: MessageKind<Self::Output, Receipt: RemoteKind>>
-    + StableId
-    + Encode
-    + Decode
+    Message<Output: Encode + Decode, Kind: RemoteMessageKind<Self::Output>> + StableId + Encode + Decode
 {
     /// What sending the message gives back to wait on, like
     /// [`Message::Receipt`]: `()` if it expects no reply, else a
@@ -33,19 +30,19 @@ pub trait RemoteMessage:
 
 impl<M> RemoteMessage for M
 where
-    M: Message<Output: Encode + Decode, Kind: MessageKind<Self::Output, Receipt: RemoteKind>>
+    M: Message<Output: Encode + Decode, Kind: RemoteMessageKind<M::Output>>
         + StableId
         + Encode
         + Decode,
 {
-    type RemoteReceipt = <ReceiptOf<M> as RemoteKind>::Remote;
+    type RemoteReceipt = <Self::Kind as RemoteMessageKind<M::Output>>::RemoteReceipt;
 
-    fn remote_receipt(waiting: Option<RemoteReply<Self::Output>>) -> Self::RemoteReceipt {
-        <ReceiptOf<M> as RemoteKind>::remote(waiting)
+    fn remote_receipt(waiting: Option<RemoteReply<M::Output>>) -> Self::RemoteReceipt {
+        <Self::Kind as RemoteMessageKind<M::Output>>::remote(waiting)
     }
 
     fn local_receipt(receipt: ReceiptOf<M>, timeout: Option<Duration>) -> Self::RemoteReceipt {
-        <ReceiptOf<M> as RemoteKind>::local(receipt, timeout)
+        <Self::Kind as RemoteMessageKind<M::Output>>::local(receipt, timeout)
     }
 }
 

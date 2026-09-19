@@ -7,6 +7,7 @@ use bytes::Bytes;
 use dashmap::DashMap;
 use std::{future::Future, sync::Arc, time::Duration};
 use tokio::{sync::oneshot, time::timeout};
+use zestors_interface::{Call, Cast, MessageKind};
 
 /// What a sent message gives back to wait on, the remote counterpart of
 /// [`Receipt`](zestors_interface::Receipt): `()` for a message that expects no
@@ -93,21 +94,21 @@ impl<T> RemoteReply<T> {
 /// How the [`Receipt`](zestors_interface::Receipt) of a message, `()` or
 /// [`Reply<T>`](zestors_interface::Reply), is sent and received remotely. The
 /// two are all there are.
-pub trait RemoteKind: zestors_interface::Receipt {
-    type Remote: RemoteReceipt<Output = Self::Output>;
+pub trait RemoteMessageKind<T>: MessageKind<T> {
+    type RemoteReceipt: RemoteReceipt<Output = T>;
 
     /// Whether the message gets a reply.
     const REPLIES: bool;
 
     /// The remote receipt, given what to wait on if there is a reply.
-    fn remote(waiting: Option<RemoteReply<Self::Output>>) -> Self::Remote;
+    fn remote(waiting: Option<RemoteReply<T>>) -> Self::RemoteReceipt;
 
     /// What is waited on for a message sent to an actor on this node.
-    fn local(receipt: Self, timeout: Option<Duration>) -> Self::Remote;
+    fn local(receipt: Self::Receipt, timeout: Option<Duration>) -> Self::RemoteReceipt;
 }
 
-impl RemoteKind for () {
-    type Remote = ();
+impl RemoteMessageKind<()> for Cast {
+    type RemoteReceipt = ();
     const REPLIES: bool = false;
 
     fn remote(_: Option<RemoteReply<()>>) {}
@@ -115,15 +116,15 @@ impl RemoteKind for () {
     fn local(_: (), _: Option<Duration>) {}
 }
 
-impl<T: Send + 'static> RemoteKind for zestors_interface::Reply<T> {
-    type Remote = RemoteReply<T>;
+impl<T: Send + 'static> RemoteMessageKind<T> for Call {
+    type RemoteReceipt = RemoteReply<T>;
     const REPLIES: bool = true;
 
     fn remote(waiting: Option<RemoteReply<T>>) -> RemoteReply<T> {
         waiting.expect("A message with a reply is sent as a call")
     }
 
-    fn local(receipt: Self, timeout: Option<Duration>) -> RemoteReply<T> {
+    fn local(receipt: Self::Receipt, timeout: Option<Duration>) -> RemoteReply<T> {
         RemoteReply::local(receipt, timeout)
     }
 }

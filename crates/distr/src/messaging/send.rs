@@ -4,7 +4,7 @@ use super::{
     Decode, NodeRef, RemoteCallOptions, RemoteCastError, RemoteMessage, RemoteOpError,
     RemoteReceipt as _, RemoteReply,
     context::{Exports, Wire},
-    reply::RemoteKind,
+    reply::RemoteMessageKind,
     wire::Frame,
 };
 use crate::{
@@ -20,7 +20,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::mpsc;
-use zestors_interface::{Message, ReceiptOf};
+use zestors_interface::Message;
 use zestors_runtime::{Context, Dyn, Name};
 
 /// An actor on another node, that messages can be sent to: the remote analog of
@@ -201,7 +201,7 @@ impl<C: Context> RemoteAddress<C> {
         let exports = wire.exports();
         let payload = payload.map_err(Refusal::Encode)?;
         let (target, id) = (self.target.name().clone(), M::Id);
-        let call_id = <ReceiptOf<M> as RemoteKind>::REPLIES
+        let call_id = <M::Kind as RemoteMessageKind<M::Output>>::REPLIES
             .then(|| shared.next_call.fetch_add(1, Ordering::Relaxed));
         let frame = match call_id {
             Some(call_id) => Frame::Call {
