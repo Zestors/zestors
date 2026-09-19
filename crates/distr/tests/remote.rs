@@ -17,10 +17,10 @@ use zestors::{
     supervisor::Supervisor,
 };
 use zestors_distr::{
-    Cluster, ClusterConfig, ClusterNode, ClusterNodeError, Decode, DecodeError, Encode,
-    EncodeError, GlobalName, Remote, RemoteAccepts, RemoteActorOps, RemoteAddress, RemoteCallError,
-    RemoteCallOptions, RemoteCastError, RemoteError, RemoteOpError, RemoteReceipt as _,
-    RemoteReplyError, RemoteRequest, Seed, StableId, sim::SimNetwork,
+    AddressError, Cluster, ClusterAddress, ClusterConfig, ClusterNode, ClusterNodeError, Decode,
+    DecodeError, Encode, EncodeError, GlobalName, NodeRef, RemoteAccepts, RemoteActorOps,
+    RemoteAddress, RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError, RemoteOpError,
+    RemoteReceipt as _, RemoteReplyError, RemoteRequest, Seed, StableId, sim::SimNetwork,
 };
 
 // Messages. All but `Reverse` cross the network with serde.
@@ -138,8 +138,27 @@ struct BigFetch {
     reply: RemoteRequest<u32>,
 }
 
+/// A message that can't be put on the wire at all: it can only be delivered to
+/// an actor on the same node.
+#[derive(Message, StableId, Debug)]
+#[msg(reply = u32, id = "6b0e3f0e-6c2a-4c9b-8f57-0d7a5f8d0a0f")]
+struct NoWire(u32);
+
+impl Encode for NoWire {
+    fn encode(&self) -> Result<Bytes, EncodeError> {
+        Err(EncodeError::new("Never leaves the process"))
+    }
+}
+
+impl Decode for NoWire {
+    fn decode(_: Bytes) -> Result<Self, DecodeError> {
+        Err(DecodeError::new("Never leaves the process"))
+    }
+}
+
 #[derive(Interface, Debug)]
 enum WorkerInterface {
+    NoWire(Envelope<NoWire>),
     Fetch(Envelope<Fetch>),
     FetchAndForget(Envelope<FetchAndForget>),
     FetchAndHang(Envelope<FetchAndHang>),
@@ -193,6 +212,10 @@ fn worker(name: &'static str, log: Log) -> zestors::runtime::Child<(), WorkerInt
                         let n = envelope.msg.0;
                         let _ = envelope.reply(n * 2);
                     }
+                    WorkerInterface::NoWire(envelope) => {
+                        let n = envelope.msg.0;
+                        let _ = envelope.reply(n + 1);
+                    }
                     WorkerInterface::Note(envelope) => log.0.lock().unwrap().push(envelope.msg.0),
                     WorkerInterface::Hang(envelope) => hung.push(envelope),
                     WorkerInterface::Forget(envelope) => drop(envelope),
@@ -226,7 +249,7 @@ fn fast_foca() -> foca::Config {
 }
 
 struct Node {
-    remote: Remote,
+    remote: NodeRef,
     cluster: Cluster,
     shutdown: zestors_supervisor::NodeShutdown,
     task: JoinHandle<Result<(), ClusterNodeError>>,
@@ -317,7 +340,9 @@ impl Pair {
 
     /// The actor `name` on node-b, as node-a sees it.
     fn on_b<C: zestors::runtime::Context>(&self, name: &'static str) -> RemoteAddress<C> {
-        self.a.remote.address(GlobalName::new(name, "node-b"))
+        self.a
+            .remote
+            .address_unchecked(GlobalName::new(name, "node-b"))
     }
 }
 
@@ -516,8 +541,10 @@ async fn messages_that_cant_be_sent_are_given_back() {
     let pair = Pair::start().await;
 
     // A node that isn't in the cluster.
-    let stranger: RemoteAddress<Dyn<(Note,)>> =
-        pair.a.remote.address(GlobalName::new("any", "node-z"));
+    let stranger: RemoteAddress<Dyn<(Note,)>> = pair
+        .a
+        .remote
+        .address_unchecked(GlobalName::new("any", "node-z"));
     let Err(RemoteCastError::NotAMember(Note(3))) = stranger.cast(Note(3)).await else {
         panic!("Expected the message back")
     };
@@ -539,7 +566,8 @@ async fn nothing_is_sent_before_the_node_runs() {
     let node = node(&net, "node-a", 1, None);
     let remote = node.remote();
 
-    let target: RemoteAddress<Dyn<(Note,)>> = remote.address(GlobalName::new("any", "node-b"));
+    let target: RemoteAddress<Dyn<(Note,)>> =
+        remote.address_unchecked(GlobalName::new("any", "node-b"));
     assert!(matches!(
         target.cast(Note(1)).await,
         Err(RemoteCastError::NotRunning(_))
@@ -815,7 +843,7 @@ async fn what_an_actor_accepts_can_be_asked() {
     let snapshot = remote.snapshot().await.unwrap();
     assert_eq!(&snapshot.name, remote.target().name());
     assert!(remote.last_spawned_at().await.unwrap().is_some());
-    assert_eq!(remote.node().to_string(), "node-b");
+    assert_eq!(remote.target().node().to_string(), "node-b");
 }
 
 #[tokio::test(start_paused = true)]
@@ -839,9 +867,255 @@ async fn operations_report_why_they_failed() {
     let stranger: RemoteAddress<WorkerInterface> = pair
         .a
         .remote
-        .address(GlobalName::new("ops-nobody", "node-z"));
+        .address_unchecked(GlobalName::new("ops-nobody", "node-z"));
     assert!(matches!(
         stranger.signal_shutdown().await,
         Err(RemoteOpError::NotSent(RemoteCastError::NotAMember(())))
     ));
+}
+
+/// The address of an actor on node-b, as node-b itself sees it: a local one.
+fn local_on_b(pair: &Pair, name: &'static str) -> ClusterAddress<WorkerInterface> {
+    let address = pair
+        .b
+        .remote
+        .cluster_address::<WorkerInterface>(GlobalName::new(name, "node-b"))
+        .unwrap();
+    assert!(matches!(address, ClusterAddress::Local(_)));
+    address
+}
+
+/// The same actor as seen from node-a: a remote one.
+fn remote_on_b(pair: &Pair, name: &'static str) -> ClusterAddress<WorkerInterface> {
+    let address = pair
+        .a
+        .remote
+        .cluster_address::<WorkerInterface>(GlobalName::new(name, "node-b"))
+        .unwrap();
+    assert!(matches!(address, ClusterAddress::Remote(_)));
+    address
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cluster_address_reaches_an_actor_on_this_node() {
+    let pair = Pair::start().await;
+    let log = Log::default();
+    let _worker = worker("cluster-local", log.clone());
+    let local = local_on_b(&pair, "cluster-local");
+
+    assert_eq!(local.call(Double(21)).await.unwrap(), 42);
+    for i in 0..100 {
+        local.cast(Note(i)).await.unwrap();
+    }
+    // A call is behind all of them.
+    assert_eq!(local.call(Double(1)).await.unwrap(), 2);
+    assert_eq!(log.notes(), (0..100).collect::<Vec<_>>());
+
+    // A cast has a receipt to wait on for the reply.
+    assert_eq!(
+        local.cast(Double(4)).await.unwrap().wait().await.unwrap(),
+        8
+    );
+    assert_eq!(local.try_cast(Double(5)).unwrap().wait().await.unwrap(), 10);
+
+    // A reply channel in the message is just a request.
+    let (reply, count) = RemoteRequest::new();
+    local.cast(Fetch { n: 1, reply }).await.unwrap();
+    assert_eq!(count.await.unwrap(), 2);
+}
+
+/// The same code takes an actor wherever it is.
+#[tokio::test(start_paused = true)]
+async fn the_same_code_works_for_every_kind_of_address() {
+    let pair = Pair::start().await;
+    let _worker = worker("cluster-generic", Log::default());
+
+    assert_eq!(
+        double_via(&local_on_b(&pair, "cluster-generic"), 3).await,
+        6
+    );
+    assert_eq!(
+        double_via(&remote_on_b(&pair, "cluster-generic"), 4).await,
+        8
+    );
+    assert_eq!(
+        double_via(&pair.on_b::<WorkerInterface>("cluster-generic"), 5).await,
+        10
+    );
+}
+
+/// A message to an actor on this node isn't encoded, or it couldn't be sent
+/// here.
+#[tokio::test(start_paused = true)]
+async fn a_local_message_is_not_encoded() {
+    let pair = Pair::start().await;
+    let _worker = worker("cluster-nowire", Log::default());
+
+    assert_eq!(
+        local_on_b(&pair, "cluster-nowire")
+            .call(NoWire(1))
+            .await
+            .unwrap(),
+        2
+    );
+    assert!(matches!(
+        remote_on_b(&pair, "cluster-nowire").call(NoWire(1)).await,
+        Err(RemoteCallError::NotSent(RemoteCastError::Encode { .. }))
+    ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_local_actor_is_reached_without_the_node_running() {
+    let net = SimNetwork::new(1);
+    let idle = node(&net, "node-x", 9, None);
+    let remote = idle.remote();
+    let _worker = worker("cluster-idle", Log::default());
+
+    let local = remote
+        .cluster_address::<WorkerInterface>(GlobalName::new("cluster-idle", "node-x"))
+        .unwrap();
+    assert_eq!(local.call(Double(2)).await.unwrap(), 4);
+
+    let elsewhere = remote
+        .cluster_address::<WorkerInterface>(GlobalName::new("cluster-idle", "node-y"))
+        .unwrap();
+    assert!(matches!(
+        elsewhere.call(Double(2)).await,
+        Err(RemoteCallError::NotSent(RemoteCastError::NotRunning(_)))
+    ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_local_call_can_time_out_and_a_closed_actor_is_told() {
+    let pair = Pair::start().await;
+    let local_worker = worker("cluster-timeout", Log::default());
+    let local = local_on_b(&pair, "cluster-timeout");
+
+    // No timeout of its own, but a call can have one.
+    let started = tokio::time::Instant::now();
+    let result = local
+        .call_with(
+            Hang,
+            RemoteCallOptions::new().timeout(Duration::from_secs(2)),
+        )
+        .await;
+    assert!(matches!(
+        result,
+        Err(RemoteCallError::Reply(RemoteReplyError::Timeout))
+    ));
+    assert_eq!(started.elapsed(), Duration::from_secs(2));
+
+    // An actor that drops the request.
+    assert!(matches!(
+        local.call(Forget).await,
+        Err(RemoteCallError::Reply(RemoteReplyError::Remote(
+            RemoteError::NoReply
+        )))
+    ));
+
+    local_worker.signal_shutdown();
+    within(local_worker.watch_exit()).await.unwrap();
+    assert!(matches!(
+        local.call(Double(1)).await,
+        Err(RemoteCallError::NotSent(RemoteCastError::Closed(_)))
+    ));
+    assert!(matches!(
+        local.try_cast(Double(1)),
+        Err(RemoteCastError::Closed(_))
+    ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn making_an_address_checks_the_actor_on_this_node() {
+    let pair = Pair::start().await;
+    let _worker = worker("cluster-check", Log::default());
+    let (a, b) = (&pair.a.remote, &pair.b.remote);
+
+    // On this node the actor has to be there, and accept what is asked.
+    assert!(matches!(
+        b.cluster_address::<WorkerInterface>(GlobalName::new("cluster-nobody", "node-b")),
+        Err(AddressError::NoSuchActor(_))
+    ));
+    assert!(matches!(
+        b.cluster_address_dyn::<(Unwanted,)>(GlobalName::new("cluster-check", "node-b")),
+        Err(AddressError::TypeMismatch(_))
+    ));
+    assert!(
+        b.cluster_address_dyn::<(Double, Note)>(GlobalName::new("cluster-check", "node-b"))
+            .is_ok()
+    );
+
+    // On another node there is nothing to check, unless a process has one by
+    // that name that doesn't accept it.
+    assert!(
+        a.cluster_address::<WorkerInterface>(GlobalName::new("cluster-nobody", "node-b"))
+            .is_ok()
+    );
+    assert!(matches!(
+        a.address_dyn::<(Unwanted,)>(GlobalName::new("cluster-check", "node-b")),
+        Err(AddressError::TypeMismatch(_))
+    ));
+    assert!(
+        a.address::<WorkerInterface>(GlobalName::new("cluster-check", "node-b"))
+            .is_ok()
+    );
+
+    // Conversions.
+    let remote = a.address_unchecked::<WorkerInterface>(GlobalName::new("cluster-check", "node-b"));
+    assert!(matches!(
+        ClusterAddress::from(remote),
+        ClusterAddress::Remote(_)
+    ));
+
+    // A remote address to this node's own actor still goes over the network,
+    // where this node isn't a member.
+    let itself = b.address_unchecked::<WorkerInterface>(GlobalName::new("cluster-check", "node-b"));
+    assert!(matches!(
+        itself.call(Double(1)).await,
+        Err(RemoteCallError::NotSent(RemoteCastError::NotAMember(_)))
+    ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_local_actor_can_be_operated_on_through_a_cluster_address() {
+    let pair = Pair::start().await;
+    let child = worker("cluster-ops", Log::default());
+    child.watch_init().await.unwrap();
+    let local = local_on_b(&pair, "cluster-ops");
+
+    assert_eq!(local.status().await.unwrap(), ActorStatus::Running);
+    local.ping().await.unwrap();
+    assert!(local.msg_is_empty().await.unwrap());
+    assert!(!local.reached_backpressure().await.unwrap());
+    assert_eq!(&local.snapshot().await.unwrap().name, local.name());
+    assert!(local.last_spawned_at().await.unwrap().is_some());
+    assert!(local.accepts::<Double>().await.unwrap());
+    assert!(!local.accepts::<Unwanted>().await.unwrap());
+
+    // What needs the node's registry of messages isn't known for a local actor.
+    assert!(matches!(
+        local.members().await,
+        Err(RemoteOpError::Unsupported)
+    ));
+    assert!(matches!(
+        local.accepts_id(Double::Id).await,
+        Err(RemoteOpError::Unsupported)
+    ));
+    assert!(local.info().await.unwrap().accepts.is_none());
+
+    assert!(local.signal_suspend().await.unwrap());
+    local.ping().await.unwrap();
+    assert_eq!(local.status().await.unwrap(), ActorStatus::Suspended);
+    assert!(local.signal_resume().await.unwrap());
+    local.ping().await.unwrap();
+    assert!(local.signal_shutdown().await.unwrap());
+    assert!(within(child.watch_exit()).await.is_ok());
+    assert!(local.is_dead().await.unwrap());
+
+    // The same for the actor seen from the other node, over the network.
+    let _other = worker("cluster-ops-remote", Log::default());
+    let remote = remote_on_b(&pair, "cluster-ops-remote");
+    assert!(remote.accepts::<Double>().await.unwrap());
+    assert!(remote.members().await.unwrap().contains(&Double::Id));
+    assert!(remote.info().await.unwrap().accepts.is_some());
 }

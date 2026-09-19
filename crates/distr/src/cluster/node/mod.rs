@@ -2,7 +2,7 @@ mod config;
 mod error;
 
 use super::{Cluster, Member, generation, membership::Membership};
-use crate::{NodeAddr, backend::LocalNode, messaging::Remote};
+use crate::{NodeAddr, backend::LocalNode, messaging::NodeRef};
 pub use config::{ClusterConfig, ClusterTimings, Seed};
 pub use error::ClusterNodeError;
 use std::{net::SocketAddr, time::Duration};
@@ -20,7 +20,7 @@ pub struct ClusterNode {
     node: Node,
     config: ClusterConfig,
     cluster: Cluster,
-    remote: Remote,
+    remote: NodeRef,
 }
 
 impl ClusterNode {
@@ -40,7 +40,7 @@ impl ClusterNode {
                 .unwrap_or_else(|| NodeAddr::from(SocketAddr::from(([0, 0, 0, 0], 0)))),
             generation: 0,
         });
-        let remote = Remote::new(cluster.clone(), config.call_timeout, config.lanes.get());
+        let remote = NodeRef::new(cluster.clone(), config.call_timeout, config.lanes.get());
         Self {
             node,
             config,
@@ -75,7 +75,7 @@ impl ClusterNode {
     /// A handle for messaging actors on other nodes, and for registering the
     /// messages this node accepts from them. Cheap to clone and usable from
     /// anywhere, also before [`ClusterNode::run`] is called.
-    pub fn remote(&self) -> Remote {
+    pub fn remote(&self) -> NodeRef {
         self.remote.clone()
     }
 

@@ -1,7 +1,12 @@
 //! Sending to a remote actor: the [`RemoteAccepts`] trait and its options.
 
-use super::{RemoteCallError, RemoteCastError, RemoteMessage, RemoteReceipt};
+use super::{
+    RemoteActorRef, RemoteCallError, RemoteCastError, RemoteMessage, RemoteReceipt,
+    actor_ops::Route, cluster_address,
+};
 use std::{future::Future, time::Duration};
+use type_sets::Contains;
+use zestors_runtime::Context;
 
 /// Options for a single message sent with [`RemoteAccepts`], the remote
 /// counterpart of [`CallOptions`](zestors_runtime::CallOptions).
@@ -111,6 +116,37 @@ pub trait RemoteAccepts<M: RemoteMessage>: Sync {
         async move {
             let receipt = self.cast_with(msg, options).await?;
             receipt.wait().await.map_err(RemoteCallError::Reply)
+        }
+    }
+}
+
+/// One implementation for every kind of address: [`RemoteAddress`](super::RemoteAddress)
+/// and [`ClusterAddress`](super::ClusterAddress) both are sent to through it.
+impl<M, T> RemoteAccepts<M> for T
+where
+    M: RemoteMessage,
+    T: RemoteActorRef,
+    <T::Ctx as Context>::Set: Contains<M>,
+{
+    async fn cast_with(
+        &self,
+        msg: M,
+        options: RemoteCallOptions,
+    ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
+        match self.route() {
+            Route::Remote(address) => address.cast_remote(msg, options).await,
+            Route::Local(address) => cluster_address::cast(address, msg, options).await,
+        }
+    }
+
+    fn try_cast_with(
+        &self,
+        msg: M,
+        options: RemoteCallOptions,
+    ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
+        match self.route() {
+            Route::Remote(address) => address.try_cast_remote(msg, options),
+            Route::Local(address) => cluster_address::try_cast(address, msg, options),
         }
     }
 }

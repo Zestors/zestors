@@ -93,7 +93,7 @@ async fn actors_on_another_node_can_be_called_and_cast_to() {
     .unwrap();
 
     let greeter: RemoteAddress<GreeterInterface> =
-        a_remote.address(GlobalName::new("quic-greeter", "node-b"));
+        a_remote.address_unchecked(GlobalName::new("quic-greeter", "node-b"));
     assert_eq!(
         greeter.call(Greet("QUIC".into())).await.unwrap(),
         "Hello, QUIC!"

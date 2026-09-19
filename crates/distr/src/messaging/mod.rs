@@ -2,7 +2,9 @@
 //!
 //! A [`RemoteMessage`] is sent to a [`GlobalName`] through a [`RemoteAddress`];
 //! the node that hosts the actor decodes it and delivers it like any local
-//! message, and sends the reply back.
+//! message, and sends the reply back. A [`ClusterAddress`] is the same for an
+//! actor that may be on this node too, which is then reached without leaving
+//! the process.
 //!
 //! Which message types a node accepts is decided by registering them with
 //! [`Remote::register`]. Any registered message can then reach any local actor
@@ -39,7 +41,7 @@
 //! // On another node: address the actor, and call it.
 //! let counter: RemoteAddress<CounterInterface> = node
 //!     .remote()
-//!     .address(GlobalName::new("counter", "node-b"));
+//!     .address(GlobalName::new("counter", "node-b"))?;
 //! let doubled = counter.call(Double(21)).await?;
 //! # Ok(())
 //! # }
@@ -47,6 +49,7 @@
 
 mod accepts;
 mod actor_ops;
+mod cluster_address;
 mod codec;
 mod context;
 mod error;
@@ -60,9 +63,12 @@ mod send;
 mod wire;
 
 pub use accepts::{RemoteAccepts, RemoteCallOptions};
-pub use actor_ops::{RemoteActorOps, RemoteActorRef};
+pub use actor_ops::{RemoteActorOps, RemoteActorRef, Route};
+pub use cluster_address::ClusterAddress;
 pub use codec::{Decode, DecodeError, Encode, EncodeError};
-pub use error::{RemoteCallError, RemoteCastError, RemoteError, RemoteOpError, RemoteReplyError};
+pub use error::{
+    AddressError, RemoteCallError, RemoteCastError, RemoteError, RemoteOpError, RemoteReplyError,
+};
 pub use message::RemoteMessage;
 pub use ops::RemoteInfo;
 pub use reply::{RemoteReceipt, RemoteReply};
@@ -70,7 +76,7 @@ pub use request::RemoteRequest;
 pub use send::RemoteAddress;
 
 use crate::{
-    Cluster, GlobalName, Id,
+    Cluster, GlobalName, Id, NodeId,
     link::{Links, Protocol},
 };
 use dashmap::DashMap;
@@ -82,7 +88,18 @@ use std::{
     time::Duration,
 };
 use tokio_util::sync::{CancellationToken, DropGuard};
-use zestors_runtime::Context;
+use type_sets::{AsTypeSet, Members};
+use zestors_interface::Interface;
+use zestors_runtime::{Context, Dyn, TypedRegistryError};
+
+/// Whether a lookup in the registry of this process is no reason to refuse an
+/// address: the actor is there and accepts what is asked, or isn't there at all.
+fn check<T>(found: Result<T, TypedRegistryError>) -> Result<(), AddressError> {
+    match found {
+        Ok(_) | Err(TypedRegistryError::NotFound(_)) => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
 
 /// A node's messaging between actors: registers what it accepts, and makes
 /// [`RemoteAddress`]es to send with. Get it from
@@ -91,7 +108,7 @@ use zestors_runtime::Context;
 /// Cheap to clone, and usable before the node has started; sending fails until
 /// it has.
 #[derive(Clone)]
-pub struct Remote {
+pub struct NodeRef {
     shared: Arc<Shared>,
 }
 
@@ -119,7 +136,7 @@ impl Shared {
     }
 }
 
-impl Remote {
+impl NodeRef {
     pub(super) fn new(cluster: Cluster, call_timeout: Duration, shards: u8) -> Self {
         let handlers = DashMap::new();
         ops::register(&handlers);
@@ -147,10 +164,73 @@ impl Remote {
         self
     }
 
-    /// The actor `target`, to send messages to. `C` is what it accepts, see
-    /// [`RemoteAddress`].
-    pub fn address<C: Context>(&self, target: GlobalName) -> RemoteAddress<C> {
+    /// This node.
+    pub fn node(&self) -> NodeId {
+        self.shared.cluster.local().node
+    }
+
+    /// The actor `target` on another node, to send messages to. `I` is what it
+    /// accepts, see [`RemoteAddress`].
+    ///
+    /// Fails if an actor with that name is running in this process, and doesn't
+    /// accept `I`. An actor on another node can't be looked at, so it isn't
+    /// checked that it exists, or accepts `I`; that is answered when a message
+    /// is sent. Use [`Remote::address_unchecked`] to skip the check, or
+    /// [`Remote::address_dyn`] for a set of messages.
+    pub fn address<I: Interface>(
+        &self,
+        target: GlobalName,
+    ) -> Result<RemoteAddress<I>, AddressError> {
+        check(target.name().typed_address::<I>())?;
+        Ok(RemoteAddress::new(self.clone(), target))
+    }
+
+    /// Like [`Remote::address`], for the actor to accept a set of messages like
+    /// `Dyn<(Ping, Double)>`.
+    pub fn address_dyn<S>(&self, target: GlobalName) -> Result<RemoteAddress<Dyn<S>>, AddressError>
+    where
+        S: AsTypeSet + Members + 'static,
+    {
+        check(target.name().dyn_address::<S>())?;
+        Ok(RemoteAddress::new(self.clone(), target))
+    }
+
+    /// Like [`Remote::address`], but without looking whether an actor with that
+    /// name is running in this process.
+    pub fn address_unchecked<C: Context>(&self, target: GlobalName) -> RemoteAddress<C> {
         RemoteAddress::new(self.clone(), target)
+    }
+
+    /// The actor `target`, whether it is on this node or another: a
+    /// [`ClusterAddress::Local`] if it is on this node, else a
+    /// [`ClusterAddress::Remote`]. `I` is what it accepts.
+    ///
+    /// For an actor on this node it has to be running, and accept `I`;
+    /// otherwise this fails. For one on another node it is checked as with
+    /// [`Remote::address`].
+    pub fn cluster_address<I: Interface>(
+        &self,
+        target: GlobalName,
+    ) -> Result<ClusterAddress<I>, AddressError> {
+        if *target.node() == self.node() {
+            return Ok(ClusterAddress::Local(target.name().typed_address::<I>()?));
+        }
+        self.address(target).map(ClusterAddress::Remote)
+    }
+
+    /// Like [`Remote::cluster_address`], for the actor to accept a set of
+    /// messages like `Dyn<(Ping, Double)>`.
+    pub fn cluster_address_dyn<S>(
+        &self,
+        target: GlobalName,
+    ) -> Result<ClusterAddress<Dyn<S>>, AddressError>
+    where
+        S: AsTypeSet + Members + 'static,
+    {
+        if *target.node() == self.node() {
+            return Ok(ClusterAddress::Local(target.name().dyn_address::<S>()?));
+        }
+        self.address_dyn(target).map(ClusterAddress::Remote)
     }
 
     /// Starts taking in messages, and sends what is asked to, until the returned

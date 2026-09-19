@@ -1,8 +1,8 @@
 //! The sending side: [`RemoteAddress`], and how a message is put on its way.
 
 use super::{
-    Decode, Remote, RemoteAccepts, RemoteCallOptions, RemoteCastError, RemoteMessage,
-    RemoteOpError, RemoteReceipt as _, RemoteReply,
+    Decode, NodeRef, RemoteCallOptions, RemoteCastError, RemoteMessage, RemoteOpError,
+    RemoteReceipt as _, RemoteReply,
     context::{Exports, Wire},
     reply::RemoteKind,
     wire::Frame,
@@ -20,7 +20,6 @@ use std::{
     time::Duration,
 };
 use tokio::sync::mpsc;
-use type_sets::Contains;
 use zestors_interface::Message;
 use zestors_runtime::{Context, Dyn, Name};
 
@@ -33,11 +32,12 @@ use zestors_runtime::{Context, Dyn, Name};
 /// really does is up to the node it runs on to say: a message it doesn't accept
 /// is answered with [`RemoteError::NotAccepted`](super::RemoteError::NotAccepted).
 ///
-/// Messages are sent with [`RemoteAccepts`]. Messages sent to one actor arrive
+/// Messages are sent with [`RemoteAccepts`](super::RemoteAccepts), and the actor
+/// is operated on with [`RemoteActorOps`](super::RemoteActorOps). Messages sent to one actor arrive
 /// in the order they were sent. A message that is not answered is not sent
 /// again; delivery is at most once.
 pub struct RemoteAddress<C: Context = Dyn> {
-    remote: Remote,
+    node: NodeRef,
     target: GlobalName,
     timeout: Option<Duration>,
     _ctx: PhantomData<fn() -> C>,
@@ -46,7 +46,7 @@ pub struct RemoteAddress<C: Context = Dyn> {
 impl<C: Context> Clone for RemoteAddress<C> {
     fn clone(&self) -> Self {
         Self {
-            remote: self.remote.clone(),
+            node: self.node.clone(),
             target: self.target.clone(),
             timeout: self.timeout,
             _ctx: PhantomData,
@@ -59,50 +59,6 @@ impl<C: Context> fmt::Debug for RemoteAddress<C> {
         f.debug_struct("RemoteAddress")
             .field("target", &self.target)
             .finish()
-    }
-}
-
-impl<M, C> RemoteAccepts<M> for RemoteAddress<C>
-where
-    M: RemoteMessage,
-    C: Context,
-    C::Set: Contains<M>,
-{
-    async fn cast_with(
-        &self,
-        msg: M,
-        options: RemoteCallOptions,
-    ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
-        let (prepared, waiting) = match self.prepare(&msg, options) {
-            Ok(prepared) => prepared,
-            Err(refusal) => return Err(refusal.with(msg)),
-        };
-        match prepared.lane.send(prepared.frame).await {
-            Ok(()) => {
-                prepared.exports.commit();
-                Ok(M::remote_receipt(waiting))
-            }
-            Err(_) => Err(RemoteCastError::Unreachable(msg)),
-        }
-    }
-
-    fn try_cast_with(
-        &self,
-        msg: M,
-        options: RemoteCallOptions,
-    ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
-        let (prepared, waiting) = match self.prepare(&msg, options) {
-            Ok(prepared) => prepared,
-            Err(refusal) => return Err(refusal.with(msg)),
-        };
-        match prepared.lane.try_send(prepared.frame) {
-            Ok(()) => {
-                prepared.exports.commit();
-                Ok(M::remote_receipt(waiting))
-            }
-            Err(mpsc::error::TrySendError::Full(_)) => Err(RemoteCastError::Full(msg)),
-            Err(mpsc::error::TrySendError::Closed(_)) => Err(RemoteCastError::Unreachable(msg)),
-        }
     }
 }
 
@@ -138,12 +94,51 @@ struct Prepared {
 }
 
 impl<C: Context> RemoteAddress<C> {
-    pub(super) fn new(remote: Remote, target: GlobalName) -> Self {
+    pub(super) fn new(node: NodeRef, target: GlobalName) -> Self {
         Self {
-            remote,
+            node,
             target,
             timeout: None,
             _ctx: PhantomData,
+        }
+    }
+
+    /// Sends `msg` to the actor on its node, waiting for room in the lane to it.
+    pub(super) async fn cast_remote<M: RemoteMessage>(
+        &self,
+        msg: M,
+        options: RemoteCallOptions,
+    ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
+        let (prepared, waiting) = match self.prepare(&msg, options) {
+            Ok(prepared) => prepared,
+            Err(refusal) => return Err(refusal.with(msg)),
+        };
+        match prepared.lane.send(prepared.frame).await {
+            Ok(()) => {
+                prepared.exports.commit();
+                Ok(M::remote_receipt(waiting))
+            }
+            Err(_) => Err(RemoteCastError::Unreachable(msg)),
+        }
+    }
+
+    /// Like [`RemoteAddress::cast_remote`], but fails if the lane is full.
+    pub(super) fn try_cast_remote<M: RemoteMessage>(
+        &self,
+        msg: M,
+        options: RemoteCallOptions,
+    ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
+        let (prepared, waiting) = match self.prepare(&msg, options) {
+            Ok(prepared) => prepared,
+            Err(refusal) => return Err(refusal.with(msg)),
+        };
+        match prepared.lane.try_send(prepared.frame) {
+            Ok(()) => {
+                prepared.exports.commit();
+                Ok(M::remote_receipt(waiting))
+            }
+            Err(mpsc::error::TrySendError::Full(_)) => Err(RemoteCastError::Full(msg)),
+            Err(mpsc::error::TrySendError::Closed(_)) => Err(RemoteCastError::Unreachable(msg)),
         }
     }
 
@@ -152,7 +147,7 @@ impl<C: Context> RemoteAddress<C> {
         &self.target
     }
 
-    /// How long [`RemoteAccepts::call`] and [`RemoteReceipt::wait`](super::RemoteReceipt::wait) wait for a
+    /// How long [`RemoteAccepts::call`](super::RemoteAccepts::call) and [`RemoteReceipt::wait`](super::RemoteReceipt::wait) wait for a
     /// reply, instead of the node's
     /// [`ClusterConfig::call_timeout`](crate::ClusterConfig::call_timeout).
     /// [`RemoteCallOptions::timeout`] overrides it for one call.
@@ -161,9 +156,6 @@ impl<C: Context> RemoteAddress<C> {
         self
     }
 
-    /// Encodes `msg` and finds the lane to the node, as a call if the message
-    /// expects a reply, else as a cast. For a call, what to wait on for the
-    /// reply is set up, so that a reply can't beat it.
     /// Calls one of the [operations](super::ops) on the actor, whatever the
     /// actor accepts.
     pub(super) async fn call_op<M: RemoteMessage>(
@@ -181,12 +173,15 @@ impl<C: Context> RemoteAddress<C> {
         Ok(M::remote_receipt(waiting).wait().await?)
     }
 
+    /// Encodes `msg` and finds the lane to the node, as a call if the message
+    /// expects a reply, else as a cast. For a call, what to wait on for the
+    /// reply is set up, so that a reply can't beat it.
     fn prepare<M: RemoteMessage>(
         &self,
         msg: &M,
         options: RemoteCallOptions,
     ) -> Result<Sending<M>, Refusal> {
-        let shared = &self.remote.shared;
+        let shared = &self.node.shared;
         let running = shared.running().ok_or(Refusal::NotRunning)?;
         let member = shared
             .cluster
@@ -197,7 +192,7 @@ impl<C: Context> RemoteAddress<C> {
         }
 
         let wire = Wire::new(
-            self.remote.shared.clone(),
+            self.node.shared.clone(),
             running.clone(),
             member.node.clone(),
         );

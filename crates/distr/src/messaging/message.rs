@@ -3,6 +3,7 @@ use super::{
     reply::{RemoteKind, RemoteReceipt, RemoteReply},
 };
 use crate::StableId;
+use std::time::Duration;
 use zestors_interface::Message;
 
 /// A [`Message`] that can be sent to an actor on another node.
@@ -22,6 +23,12 @@ pub trait RemoteMessage:
     /// The [`RemoteReceipt`](Self::RemoteReceipt), given what to wait on if
     /// there is a reply.
     fn remote_receipt(waiting: Option<RemoteReply<Self::Output>>) -> Self::RemoteReceipt;
+
+    /// What to wait on for a message sent to an actor on this node.
+    fn local_receipt(
+        receipt: <Self as Message>::Receipt,
+        timeout: Option<Duration>,
+    ) -> Self::RemoteReceipt;
 }
 
 impl<M> RemoteMessage for M
@@ -32,6 +39,10 @@ where
 
     fn remote_receipt(waiting: Option<RemoteReply<Self::Output>>) -> Self::RemoteReceipt {
         <M::Receipt as RemoteKind>::remote(waiting)
+    }
+
+    fn local_receipt(receipt: M::Receipt, timeout: Option<Duration>) -> Self::RemoteReceipt {
+        <M::Receipt as RemoteKind>::local(receipt, timeout)
     }
 }
 

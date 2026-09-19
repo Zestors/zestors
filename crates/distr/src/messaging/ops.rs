@@ -48,8 +48,9 @@ pub struct RemoteInfo {
     /// Whether the actor's mailbox is full, so that sending to it waits.
     pub reached_backpressure: bool,
     /// The ids of the message types that the actor accepts and that its node
-    /// has registered with [`Remote::register`](super::Remote::register).
-    pub accepts: Vec<Id>,
+    /// has registered with [`Remote::register`](super::Remote::register). `None`
+    /// for an actor on this node, which can't tell.
+    pub accepts: Option<Vec<Id>>,
 }
 
 impl Operation for SignalOp {
@@ -89,7 +90,7 @@ impl Operation for InfoOp {
             Ok(RemoteInfo {
                 snapshot: address.snapshot(),
                 reached_backpressure: address.reached_backpressure(),
-                accepts,
+                accepts: Some(accepts),
             })
         })
     }

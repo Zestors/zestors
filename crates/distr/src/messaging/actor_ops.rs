@@ -1,44 +1,60 @@
 //! [`RemoteActorOps`]: what [`ActorOps`](zestors_runtime::ActorOps) offers for
-//! an actor on another node.
+//! an actor on another node, or on this one.
 
 use super::{
-    RemoteAddress, RemoteMessage, RemoteOpError,
+    RemoteAddress, RemoteError, RemoteMessage, RemoteOpError, RemoteReplyError,
     ops::{InfoOp, PingOp, RemoteInfo, SignalOp},
 };
-use crate::{GlobalName, Id, NodeId};
+use crate::Id;
 use jiff::Zoned;
 use std::future::Future;
-use zestors_runtime::{ActorStatus, ChannelSnapshot, Context, Signal};
+use zestors_runtime::{
+    ActorOps as _, ActorStatus, Address, ChannelSnapshot, Context, Name, Signal,
+};
 
-/// A reference to an actor on another node, which [`RemoteActorOps`] works on.
+/// How a [`RemoteActorRef`] reaches its actor. An implementation detail of
+/// [`RemoteAccepts`](super::RemoteAccepts) and [`RemoteActorOps`].
+#[doc(hidden)]
+pub enum Route<'a, C: Context> {
+    /// An actor on this node.
+    Local(&'a Address<C>),
+    /// An actor on another node.
+    Remote(&'a RemoteAddress<C>),
+}
+
+/// A reference to an actor on another node, or on this one, which
+/// [`RemoteAccepts`](super::RemoteAccepts) and [`RemoteActorOps`] work on:
+/// [`RemoteAddress`] and [`ClusterAddress`](super::ClusterAddress).
 ///
-/// Implement this trait, and [`RemoteActorOps`] is automatically implemented for
-/// your type.
+/// Implement this trait, and both are automatically implemented for your type.
 pub trait RemoteActorRef: Sync {
     /// The [`Context`] of the associated actor.
     type Ctx: Context;
 
-    /// The [`RemoteAddress`] of the associated actor.
-    fn remote_ref(&self) -> &RemoteAddress<Self::Ctx>;
+    /// How the actor is reached.
+    #[doc(hidden)]
+    fn route(&self) -> Route<'_, Self::Ctx>;
 }
 
 impl<C: Context> RemoteActorRef for RemoteAddress<C> {
     type Ctx = C;
 
-    fn remote_ref(&self) -> &RemoteAddress<C> {
-        self
+    fn route(&self) -> Route<'_, C> {
+        Route::Remote(self)
     }
 }
 
 /// Operations on actors on other nodes: the counterpart of
-/// [`ActorOps`](zestors_runtime::ActorOps) for a [`RemoteAddress`]. This trait
-/// is sealed, and is implemented automatically for any type that implements
-/// [`RemoteActorRef`].
+/// [`ActorOps`](zestors_runtime::ActorOps) for a [`RemoteAddress`] or a
+/// [`ClusterAddress`](super::ClusterAddress). This trait is sealed, and is
+/// implemented automatically for any type that implements [`RemoteActorRef`].
 ///
 /// Everything here asks the node the actor is on, so it is async and can fail.
-/// Each method that reads the actor's state asks again; to read several things
-/// consistently, get a [`RemoteInfo`] with [`RemoteActorOps::info`] and read
-/// them from that.
+/// If the actor is on this node, which a [`ClusterAddress`](super::ClusterAddress)
+/// can be for, the answer is read from it directly and the future is ready at
+/// once. Each method that reads the actor's state asks again; to read several
+/// things consistently, get a [`RemoteInfo`] with [`RemoteActorOps::info`] and
+/// read them from that.
 ///
 /// Sending messages is done with
 /// [`RemoteAccepts`](super::RemoteAccepts), and waiting for an actor's status to
@@ -49,7 +65,12 @@ pub trait RemoteActorOps: RemoteActorRef + sealed::Sealed {
     /// Sends the given [`Signal`] to the actor. Returns `false` if the actor
     /// was already exiting or dead.
     fn signal(&self, signal: Signal) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
-        async move { self.remote_ref().call_op(SignalOp(signal)).await }
+        async move {
+            match self.route() {
+                Route::Local(address) => Ok(address.signal(signal)),
+                Route::Remote(address) => address.call_op(SignalOp(signal)).await,
+            }
+        }
     }
 
     /// Sends a [`Signal::Shutdown`] to the actor. Returns `false` if it was
@@ -74,12 +95,29 @@ pub trait RemoteActorOps: RemoteActorRef + sealed::Sealed {
     /// before the messages queued, this confirms that the actor is alive and
     /// its event loop has caught up with its signals.
     fn ping(&self) -> impl Future<Output = Result<(), RemoteOpError>> + Send {
-        async move { self.remote_ref().call_op(PingOp).await }
+        async move {
+            match self.route() {
+                Route::Local(address) => address.ping().await.map_err(|_| {
+                    RemoteOpError::Reply(RemoteReplyError::Remote(RemoteError::NoReply))
+                }),
+                Route::Remote(address) => address.call_op(PingOp).await,
+            }
+        }
     }
 
-    /// Asks about the actor's state, everything at one instant.
+    /// Asks about the actor's state, everything at one instant. For a local
+    /// actor, [`RemoteInfo::accepts`] is `None`.
     fn info(&self) -> impl Future<Output = Result<RemoteInfo, RemoteOpError>> + Send {
-        async move { self.remote_ref().call_op(InfoOp).await }
+        async move {
+            match self.route() {
+                Route::Local(address) => Ok(RemoteInfo {
+                    snapshot: address.snapshot(),
+                    reached_backpressure: address.reached_backpressure(),
+                    accepts: None,
+                }),
+                Route::Remote(address) => address.call_op(InfoOp).await,
+            }
+        }
     }
 
     /// Captures a [`ChannelSnapshot`] of the actor. Its timestamps are from the
@@ -135,44 +173,48 @@ pub trait RemoteActorOps: RemoteActorRef + sealed::Sealed {
     }
 
     /// The ids of the message types the actor accepts and that its node has
-    /// registered, see [`RemoteInfo::accepts`].
+    /// registered, see [`RemoteInfo::accepts`]. Not supported for a local actor.
     fn members(&self) -> impl Future<Output = Result<Vec<Id>, RemoteOpError>> + Send {
-        async move { Ok(self.info().await?.accepts) }
+        async move { self.info().await?.accepts.ok_or(RemoteOpError::Unsupported) }
     }
 
-    /// Whether the actor accepts messages of type `M`. `false` also if the
-    /// actor's node hasn't registered it.
+    /// Whether the actor accepts messages of type `M`. For a remote actor,
+    /// `false` also if its node hasn't registered it.
     fn accepts<M: RemoteMessage>(
         &self,
     ) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
-        self.accepts_id(M::Id)
+        async move {
+            match self.route() {
+                Route::Local(address) => Ok(address.accepts::<M>()),
+                Route::Remote(_) => self.accepts_id(M::Id).await,
+            }
+        }
     }
 
     /// Whether the actor accepts messages with the id `id`, see
-    /// [`RemoteActorOps::accepts`].
+    /// [`RemoteActorOps::accepts`]. Not supported for a local actor.
     fn accepts_id(&self, id: Id) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
-        async move { Ok(self.info().await?.accepts.contains(&id)) }
+        async move { Ok(self.members().await?.contains(&id)) }
     }
 
-    /// Whether the actor accepts every message type in `ids`.
+    /// Whether the actor accepts every message type in `ids`. Not supported for
+    /// a local actor.
     fn is_superset_of<'a>(
         &'a self,
         ids: &'a [Id],
     ) -> impl Future<Output = Result<bool, RemoteOpError>> + Send + 'a {
         async move {
-            let accepts = self.info().await?.accepts;
+            let accepts = self.members().await?;
             Ok(ids.iter().all(|id| accepts.contains(id)))
         }
     }
 
-    /// The actor's name and node.
-    fn target(&self) -> &GlobalName {
-        self.remote_ref().target()
-    }
-
-    /// The node the actor is on.
-    fn node(&self) -> &NodeId {
-        self.remote_ref().target().node()
+    /// The actor's name.
+    fn name(&self) -> &Name {
+        match self.route() {
+            Route::Local(address) => address.name(),
+            Route::Remote(address) => address.target().name(),
+        }
     }
 }
 

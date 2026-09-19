@@ -1,4 +1,5 @@
 use super::{DecodeError, EncodeError};
+use zestors_runtime::{Name, TypedRegistryError};
 
 /// Why the node a message was sent to didn't deliver it, or its reply.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -55,6 +56,12 @@ pub enum RemoteCastError<M> {
     /// [`RemoteAccepts::try_cast`](super::RemoteAccepts::try_cast).
     #[error("Too many messages are waiting to be sent to the node")]
     Full(M),
+    /// The actor is on this node and is not taking messages any more.
+    #[error("The actor is closed")]
+    Closed(M),
+    /// The actor is on this node and doesn't accept this message type.
+    #[error("The actor doesn't accept this message")]
+    NotAccepted(M),
 }
 
 impl<M> RemoteCastError<M> {
@@ -65,6 +72,8 @@ impl<M> RemoteCastError<M> {
             | RemoteCastError::NotAMember(msg)
             | RemoteCastError::Unreachable(msg)
             | RemoteCastError::Full(msg)
+            | RemoteCastError::Closed(msg)
+            | RemoteCastError::NotAccepted(msg)
             | RemoteCastError::TooLarge { msg, .. }
             | RemoteCastError::Encode { msg, .. } => msg,
         }
@@ -101,6 +110,30 @@ pub enum RemoteOpError {
     /// The request was sent, but no answer came.
     #[error(transparent)]
     Reply(#[from] RemoteReplyError),
+    /// The actor is on this node, which can't answer that.
+    #[error("Not supported for an actor on this node")]
+    Unsupported,
+}
+
+/// An address for an actor couldn't be made.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum AddressError {
+    /// No actor with this name is running on this node.
+    #[error("No actor named {0} on this node")]
+    NoSuchActor(Name),
+    /// The actor on this node doesn't accept what the address is for.
+    #[error("The actor named {0} doesn't accept what the address is for")]
+    TypeMismatch(Name),
+}
+
+impl From<TypedRegistryError> for AddressError {
+    fn from(error: TypedRegistryError) -> Self {
+        match error {
+            TypedRegistryError::NotFound(name) => AddressError::NoSuchActor(name),
+            TypedRegistryError::TypeMismatch(name) => AddressError::TypeMismatch(name),
+        }
+    }
 }
 
 /// A call to a remote actor failed.

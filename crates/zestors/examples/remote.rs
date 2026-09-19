@@ -73,6 +73,7 @@ async fn main() {
     )
     .unwrap();
 
+    let host_remote = host.remote();
     let (caller_cluster, host_shutdown, caller_shutdown) = (
         caller.cluster(),
         host.shutdown_handle(),
@@ -80,13 +81,23 @@ async fn main() {
     );
     let greeter = caller
         .remote()
-        .address::<GreeterInterface>(GlobalName::new("greeter", "host"));
+        .address::<GreeterInterface>(GlobalName::new("greeter", "host"))
+        .unwrap();
+    // An address that works the same for an actor on this node: the host's own
+    // view of its greeter is delivered locally, without leaving the process.
+    let local_greeter = host_remote
+        .cluster_address::<GreeterInterface>(GlobalName::new("greeter", "host"))
+        .unwrap();
     let (host_task, caller_task) = (tokio::spawn(host.run()), tokio::spawn(caller.run()));
 
     // Wait until the caller knows the host, then call across.
     caller_cluster.wait_for_members(1).await;
     let greeting = greeter.call(Greet("world".into())).await.unwrap();
     println!("{greeting}");
+    println!(
+        "{}",
+        local_greeter.call(Greet("host".into())).await.unwrap()
+    );
 
     // A message with a reply channel in it: keep the `Reply`, send the request.
     let (reply, count) = RemoteRequest::new();

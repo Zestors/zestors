@@ -12,7 +12,7 @@
 //! | [`actor`] | The actors: implement `Handler` (per-message handlers) or `Actor` (the full event loop), then package either in an `Blueprint`. |
 //! | [`supervision`] | The supervisor's vocabulary: `ChildSpec` pairs a blueprint with its `ChildConfig`, and `RestartIntensity` bounds how often a child may restart. |
 //! | [`supervisor`] | The supervision actors: `Supervisor` starts, watches, and restarts children per a `SupervisionStrategy`; `Node` runs a root supervisor as a whole program. |
-//! | [`distr`] | Distributed messaging: nodes form a cluster, and `RemoteAddress` sends messages to actors on other nodes. `StableId` gives each message type a stable, globally unique `Id`. |
+//! | [`distr`] | Distributed messaging: nodes form a cluster, and `RemoteAddress` sends messages to actors on other nodes, and `ClusterAddress` to actors on this node or another. `StableId` gives each message type a stable, globally unique `Id`. |
 //! | [`distr_quic`] | The QUIC backend for [`distr`] clusters, with mutually authenticated nodes: `Quic` and `Tls`. |
 //! | [`api_server`] | HTTP introspection: `ApiServer` exposes `/processes`, `/snapshots`, and `/health` for a running tree. |
 //! | `zestors_inspector` | The `zestors-inspector` GUI — a separate workspace crate, not re-exported here — visualizes the same tree data that [`api_server`] exposes. |
