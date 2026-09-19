@@ -13,7 +13,7 @@ use zestors::{
     runtime::{Inbox, Name, spawn},
     supervisor::Supervisor,
 };
-use zestors_distr::{ClusterConfig, ClusterNode, GlobalName, RemoteAddress, Seed, StableId};
+use zestors_distr::{ClusterConfig, ClusterNode, GlobalName, Seed, StableId};
 use zestors_distr_quic::{Quic, QuicTimings, Tls};
 
 #[derive(Message, StableId, Serialize, Deserialize, Debug)]
@@ -103,8 +103,10 @@ async fn actors_on_another_node_can_be_called_and_cast_to() {
     )
     .unwrap();
 
-    let greeter: RemoteAddress<GreeterInterface> =
-        a_remote.address_unchecked(GlobalName::new("quic-greeter", "node-b"));
+    let greeter = a_remote
+        .address::<GreeterInterface>(GlobalName::new("quic-greeter", "node-b"))
+        .await
+        .unwrap();
     assert_eq!(
         greeter.call(Greet("QUIC".into())).await.unwrap(),
         "Hello, QUIC!"

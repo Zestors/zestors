@@ -13,16 +13,17 @@ use tokio::task::JoinHandle;
 use zestors::{
     interface::{Envelope, Interface, Message},
     prelude::*,
-    runtime::{ActorStatus, Dyn, Inbox, Name, spawn},
+    runtime::{ActorStatus, Inbox, Name, spawn},
     supervisor::Supervisor,
 };
 use zestors_distr::{
     AddressError, CastFailure, Cluster, ClusterAddress, ClusterConfig, ClusterNode,
     ClusterNodeError, Decode, DecodeError, Encode, EncodeError, GlobalName, RemoteAccepts,
-    RemoteActorOps, RemoteAddress, RemoteCallError, RemoteCallOptions, RemoteCastError,
-    RemoteError, RemoteOpError, RemoteReceipt as _, RemoteReplyError, RemoteRequest, Seed,
-    StableId, sim::SimNetwork,
+    RemoteActorOps, RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError,
+    RemoteOpError, RemoteReceipt as _, RemoteReplyError, RemoteRequest, Seed, StableId,
+    sim::SimNetwork,
 };
+use zestors_runtime::Registry;
 
 // Messages. All but `Reverse` cross the network with serde.
 
@@ -327,11 +328,17 @@ impl Pair {
         Self { a, b }
     }
 
-    /// The actor `name` on node-b, as node-a sees it.
-    fn on_b<C: zestors::runtime::Context>(&self, name: &'static str) -> RemoteAddress<C> {
+    /// The actor `name` on node-b, as node-a sees it. The actor has to be there
+    /// and accept `I`, which is what makes the address in the first place.
+    async fn on_b<I: Interface>(&self, name: &'static str) -> ClusterAddress<I>
+    where
+        I::Set: zestors_distr::RemoteSet,
+    {
         self.a
             .cluster
-            .address_unchecked(GlobalName::new(name, "node-b"))
+            .address::<I>(GlobalName::new(name, "node-b"))
+            .await
+            .expect("The actor is on node-b and accepts the interface")
     }
 }
 
@@ -348,7 +355,7 @@ async fn a_call_gets_the_actors_reply() {
     let pair = Pair::start().await;
     let _worker = worker("remote-call", Log::default());
 
-    let worker = pair.on_b::<WorkerInterface>("remote-call");
+    let worker = pair.on_b::<WorkerInterface>("remote-call").await;
     assert_eq!(worker.call(Double(21)).await.unwrap(), 42);
     assert_eq!(worker.call(Double(4)).await.unwrap(), 8);
 }
@@ -360,6 +367,7 @@ async fn a_cast_is_delivered_without_a_reply() {
     let _worker = worker("remote-cast", log.clone());
 
     pair.on_b::<WorkerInterface>("remote-cast")
+        .await
         .cast(Note(7))
         .await
         .unwrap();
@@ -382,7 +390,7 @@ async fn messages_to_one_actor_arrive_in_order() {
     let log = Log::default();
     let _worker = worker("remote-order", log.clone());
 
-    let worker = pair.on_b::<WorkerInterface>("remote-order");
+    let worker = pair.on_b::<WorkerInterface>("remote-order").await;
     for i in 0..1_000 {
         worker.cast(Note(i)).await.unwrap();
     }
@@ -410,7 +418,7 @@ async fn the_number_of_lanes_can_be_chosen() {
             .collect();
 
         for name in names {
-            let worker = pair.on_b::<WorkerInterface>(name);
+            let worker = pair.on_b::<WorkerInterface>(name).await;
             for i in 0..100 {
                 worker.cast(Note(i)).await.unwrap();
             }
@@ -433,6 +441,7 @@ async fn a_message_type_can_be_put_on_the_wire_without_serde() {
 
     let reversed = pair
         .on_b::<WorkerInterface>("remote-reverse")
+        .await
         .call(Reverse("stressed".into()))
         .await
         .unwrap();
@@ -453,29 +462,37 @@ async fn the_reason_a_message_wasnt_delivered_is_told() {
         }
     }
 
-    // A message type that node-b doesn't have registered.
-    let unknown = pair.on_b::<Dyn<(Unknown,)>>("remote-reasons");
-    assert_eq!(
-        remote_error(unknown.call(Unknown).await),
-        RemoteError::UnknownMessage
-    );
-
-    // An actor that isn't there.
-    let nobody = pair.on_b::<Dyn<(Double,)>>("remote-nobody");
-    assert_eq!(
-        remote_error(nobody.call(Double(1)).await),
-        RemoteError::NoSuchActor
-    );
-
-    // An actor that doesn't accept the message.
-    let unwanted = pair.on_b::<Dyn<(Unwanted,)>>("remote-reasons");
-    assert_eq!(
-        remote_error(unwanted.call(Unwanted).await),
-        RemoteError::NotAccepted
-    );
+    // Asking for the address is what now reports the three reasons a message
+    // would never be delivered, rather than the message coming back later:
+    // a type node-b hasn't registered, an actor that isn't there, and an actor
+    // that doesn't accept the message.
+    let address_of = async |name: &'static str| {
+        pair.a
+            .cluster
+            .address_dyn::<(Unknown,)>(GlobalName::new(name, "node-b"))
+            .await
+    };
+    assert!(matches!(
+        address_of("remote-reasons").await,
+        Err(AddressError::TypeMismatch(_))
+    ));
+    assert!(matches!(
+        pair.a
+            .cluster
+            .address_dyn::<(Double,)>(GlobalName::new("remote-nobody", "node-b"))
+            .await,
+        Err(AddressError::NoSuchActor(_))
+    ));
+    assert!(matches!(
+        pair.a
+            .cluster
+            .address_dyn::<(Unwanted,)>(GlobalName::new("remote-reasons", "node-b"))
+            .await,
+        Err(AddressError::TypeMismatch(_))
+    ));
 
     // An actor that drops the request.
-    let forgetful = pair.on_b::<WorkerInterface>("remote-reasons");
+    let forgetful = pair.on_b::<WorkerInterface>("remote-reasons").await;
     assert_eq!(
         remote_error(forgetful.call(Forget).await),
         RemoteError::NoReply
@@ -489,6 +506,7 @@ async fn a_call_that_is_not_answered_times_out() {
 
     let hangs = pair
         .on_b::<WorkerInterface>("remote-timeout")
+        .await
         .with_timeout(Duration::from_secs(2));
     let started = tokio::time::Instant::now();
     assert!(matches!(
@@ -505,6 +523,7 @@ async fn a_call_fails_when_the_node_leaves() {
 
     let reply = pair
         .on_b::<WorkerInterface>("remote-leave")
+        .await
         .cast(Hang)
         .await
         .unwrap();
@@ -522,6 +541,7 @@ async fn a_call_fails_when_the_node_crashes() {
 
     let reply = pair
         .on_b::<WorkerInterface>("remote-crash")
+        .await
         .cast(Hang)
         .await
         .unwrap();
@@ -543,6 +563,7 @@ async fn a_call_fails_when_this_node_stops_without_saying_so() {
 
     let reply = pair
         .on_b::<WorkerInterface>("sender-stops")
+        .await
         .cast(Hang)
         .await
         .unwrap();
@@ -557,22 +578,18 @@ async fn a_call_fails_when_this_node_stops_without_saying_so() {
 #[tokio::test(start_paused = true)]
 async fn messages_that_cant_be_sent_are_given_back() {
     let pair = Pair::start().await;
+    let _worker = worker("too-large", Log::default());
 
-    // A node that isn't in the cluster.
-    let stranger: RemoteAddress<Dyn<(Note,)>> = pair
+    // Both addresses are made while node-b is up; what goes wrong comes later.
+    let worker_address = pair.on_b::<WorkerInterface>("too-large").await;
+    let blobs = pair
         .a
         .cluster
-        .address_unchecked(GlobalName::new("any", "node-z"));
-    let Err(RemoteCastError {
-        msg: Note(3),
-        reason: CastFailure::NotAMember,
-    }) = stranger.cast(Note(3)).await
-    else {
-        panic!("Expected the message back")
-    };
+        .address_dyn::<(Blob,)>(GlobalName::new("too-large", "node-b"))
+        .await
+        .unwrap();
 
     // Too large for the network.
-    let blobs = pair.on_b::<Dyn<(Blob,)>>("any");
     let Err(RemoteCastError {
         msg,
         reason: CastFailure::TooLarge { size, max },
@@ -582,22 +599,33 @@ async fn messages_that_cant_be_sent_are_given_back() {
     };
     assert_eq!(msg.0.len(), 5 * 1024 * 1024);
     assert!(size > max);
+
+    // A node that has left since: the message comes back rather than going out.
+    stop(&pair.b.shutdown).await;
+    within(pair.a.cluster.wait_for_members(0)).await;
+    let Err(RemoteCastError {
+        msg: Note(3),
+        reason: CastFailure::NotAMember,
+    }) = worker_address.cast(Note(3)).await
+    else {
+        panic!("Expected the message back")
+    };
 }
 
 #[tokio::test(start_paused = true)]
-async fn nothing_is_sent_before_the_node_runs() {
+async fn nothing_reaches_another_node_before_this_one_runs() {
     let net = SimNetwork::new(1);
     let node = node(&net, "node-a", 1, None);
     let remote = node.cluster();
 
-    let target: RemoteAddress<Dyn<(Note,)>> =
-        remote.address_unchecked(GlobalName::new("any", "node-b"));
+    // Addressing asks the other node, which a node that isn't running can't do.
     assert!(matches!(
-        target.cast(Note(1)).await,
-        Err(RemoteCastError {
-            reason: CastFailure::NotRunning,
-            ..
-        })
+        remote
+            .address_dyn::<(Note,)>(GlobalName::new("any", "node-b"))
+            .await,
+        Err(AddressError::Remote(RemoteOpError::NotSent(
+            CastFailure::NotRunning
+        )))
     ));
 }
 
@@ -608,8 +636,8 @@ async fn a_slow_actor_does_not_delay_another() {
     let _slow = worker("remote-slow", Log::default());
     let _fast = worker("remote-fast", Log::default());
 
-    let slow = pair.on_b::<WorkerInterface>("remote-slow");
-    let fast = pair.on_b::<WorkerInterface>("remote-fast");
+    let slow = pair.on_b::<WorkerInterface>("remote-slow").await;
+    let fast = pair.on_b::<WorkerInterface>("remote-fast").await;
 
     // The slow actor has a queue of slow work.
     let mut slow_replies = Vec::new();
@@ -641,8 +669,13 @@ async fn generic_code_can_send_through_the_trait() {
     let _worker = worker("remote-generic", Log::default());
 
     // By interface, and by the one message it is used for.
-    let by_interface = pair.on_b::<WorkerInterface>("remote-generic");
-    let by_message = pair.on_b::<Dyn<(Double,)>>("remote-generic");
+    let by_interface = pair.on_b::<WorkerInterface>("remote-generic").await;
+    let by_message = pair
+        .a
+        .cluster
+        .address_dyn::<(Double,)>(GlobalName::new("remote-generic", "node-b"))
+        .await
+        .unwrap();
     assert_eq!(double_via(&by_interface, 5).await, 10);
     assert_eq!(double_via(&by_message, 6).await, 12);
 }
@@ -653,7 +686,7 @@ async fn a_call_can_have_a_timeout_of_its_own() {
     let _worker = worker("remote-call-options", Log::default());
 
     // The address would wait 10 seconds; this call doesn't.
-    let hangs = pair.on_b::<WorkerInterface>("remote-call-options");
+    let hangs = pair.on_b::<WorkerInterface>("remote-call-options").await;
     let started = tokio::time::Instant::now();
     let result = hangs
         .call_with(
@@ -675,7 +708,7 @@ async fn casting_gives_the_messages_receipt() {
     let pair = Pair::start().await;
     let log = Log::default();
     let _worker = worker("remote-receipts", log.clone());
-    let worker = pair.on_b::<WorkerInterface>("remote-receipts");
+    let worker = pair.on_b::<WorkerInterface>("remote-receipts").await;
 
     // No reply expected: `()`, as soon as it is queued.
     let (): () = worker.cast(Note(1)).await.unwrap();
@@ -695,7 +728,7 @@ async fn casting_gives_the_messages_receipt() {
 async fn a_request_in_a_message_is_answered_across_nodes() {
     let pair = Pair::start().await;
     let _worker = worker("request-answer", Log::default());
-    let worker = pair.on_b::<WorkerInterface>("request-answer");
+    let worker = pair.on_b::<WorkerInterface>("request-answer").await;
 
     for n in [1, 41] {
         let (reply, answer) = RemoteRequest::new();
@@ -712,6 +745,7 @@ async fn a_call_can_carry_a_request_as_well() {
     let (reply, answer) = RemoteRequest::new();
     let call = pair
         .on_b::<WorkerInterface>("request-both")
+        .await
         .call(Both { n: 5, reply })
         .await
         .unwrap();
@@ -726,6 +760,7 @@ async fn a_request_the_actor_drops_fails_its_reply() {
 
     let (reply, answer) = RemoteRequest::new();
     pair.on_b::<WorkerInterface>("request-drop")
+        .await
         .cast(FetchAndForget { reply })
         .await
         .unwrap();
@@ -735,12 +770,16 @@ async fn a_request_the_actor_drops_fails_its_reply() {
 #[tokio::test(start_paused = true)]
 async fn a_request_for_an_actor_that_is_not_there_fails_its_reply() {
     let pair = Pair::start().await;
+    let gone = worker("request-nobody", Log::default());
+    let address = pair.on_b::<WorkerInterface>("request-nobody").await;
+
+    // The actor is addressed while it is there, and gone by the time the
+    // message arrives.
+    gone.signal_shutdown();
+    within(gone.watch_exit()).await.unwrap();
 
     let (reply, answer) = RemoteRequest::new();
-    pair.on_b::<WorkerInterface>("request-nobody")
-        .cast(FetchAndForget { reply })
-        .await
-        .unwrap();
+    address.cast(FetchAndForget { reply }).await.unwrap();
     assert!(within(answer).await.is_err());
 }
 
@@ -751,6 +790,7 @@ async fn a_request_fails_when_the_node_holding_it_is_lost() {
 
     let (reply, answer) = RemoteRequest::new();
     pair.on_b::<WorkerInterface>("request-lost")
+        .await
         .cast(FetchAndHang { reply })
         .await
         .unwrap();
@@ -770,6 +810,7 @@ async fn a_request_the_actor_never_answers_runs_out_of_time() {
 
     let (reply, answer) = RemoteRequest::new();
     pair.on_b::<WorkerInterface>("request-held")
+        .await
         .cast(FetchAndHang { reply })
         .await
         .unwrap();
@@ -784,13 +825,19 @@ async fn a_request_the_actor_never_answers_runs_out_of_time() {
 #[tokio::test(start_paused = true)]
 async fn a_request_in_a_message_that_is_not_sent_fails_its_reply() {
     let pair = Pair::start().await;
+    let _worker = worker("request-too-large", Log::default());
+    let big = pair
+        .a
+        .cluster
+        .address_dyn::<(BigFetch,)>(GlobalName::new("request-too-large", "node-b"))
+        .await
+        .unwrap();
 
     let (reply, answer) = RemoteRequest::new();
     let Err(RemoteCastError {
         reason: CastFailure::TooLarge { .. },
         ..
-    }) = pair
-        .on_b::<Dyn<(BigFetch,)>>("any")
+    }) = big
         .cast(BigFetch {
             blob: vec![0; 5 * 1024 * 1024],
             reply,
@@ -814,7 +861,7 @@ async fn an_actor_on_another_node_can_be_signalled() {
     let pair = Pair::start().await;
     let local = worker("ops-signal", Log::default());
     local.watch_init().await.unwrap();
-    let remote = pair.on_b::<WorkerInterface>("ops-signal");
+    let remote = pair.on_b::<WorkerInterface>("ops-signal").await;
 
     assert_eq!(remote.status().await.unwrap(), ActorStatus::Running);
 
@@ -839,7 +886,7 @@ async fn an_actor_on_another_node_can_be_signalled() {
 async fn a_signal_does_not_wait_for_the_actors_messages() {
     let pair = Pair::start().await;
     let _worker = worker("ops-busy", Log::default());
-    let remote = pair.on_b::<WorkerInterface>("ops-busy");
+    let remote = pair.on_b::<WorkerInterface>("ops-busy").await;
 
     let _busy = remote.cast(Slow(600_000)).await.unwrap();
     for i in 0..2_000 {
@@ -862,7 +909,7 @@ async fn a_signal_does_not_wait_for_the_actors_messages() {
 async fn what_an_actor_accepts_can_be_asked() {
     let pair = Pair::start().await;
     let _worker = worker("ops-accepts", Log::default());
-    let remote = pair.on_b::<WorkerInterface>("ops-accepts");
+    let remote = pair.on_b::<WorkerInterface>("ops-accepts").await;
 
     assert!(remote.accepts::<Double>().await.unwrap());
     assert!(remote.accepts::<Note>().await.unwrap());
@@ -892,16 +939,23 @@ async fn what_an_actor_accepts_can_be_asked() {
     assert!(remote.signal_is_empty().await.unwrap());
     assert!(!remote.is_exiting().await.unwrap());
     let snapshot = remote.snapshot().await.unwrap();
-    assert_eq!(&snapshot.name, remote.name().name());
+    assert_eq!(&snapshot.name, remote.name());
     assert!(remote.last_spawned_at().await.unwrap().is_some());
-    assert_eq!(remote.name().node().to_string(), "node-b");
+    let ClusterAddress::Remote(address) = &remote else {
+        panic!("An actor on node-b is remote from node-a")
+    };
+    assert_eq!(address.name().node().to_string(), "node-b");
 }
 
 #[tokio::test(start_paused = true)]
 async fn operations_report_why_they_failed() {
     let pair = Pair::start().await;
 
-    let nobody = pair.on_b::<WorkerInterface>("ops-nobody");
+    // An actor that is gone by the time it is operated on.
+    let gone = worker("ops-nobody", Log::default());
+    let nobody = pair.on_b::<WorkerInterface>("ops-nobody").await;
+    gone.signal_shutdown();
+    within(gone.watch_exit()).await.unwrap();
     assert!(matches!(
         nobody.ping().await,
         Err(RemoteOpError::Reply(RemoteReplyError::Remote(
@@ -915,10 +969,11 @@ async fn operations_report_why_they_failed() {
         )))
     ));
 
-    let stranger: RemoteAddress<WorkerInterface> = pair
-        .a
-        .cluster
-        .address_unchecked(GlobalName::new("ops-nobody", "node-z"));
+    // A node that is no longer in the cluster.
+    let _worker = worker("ops-stranger", Log::default());
+    let stranger = pair.on_b::<WorkerInterface>("ops-stranger").await;
+    stop(&pair.b.shutdown).await;
+    within(pair.a.cluster.wait_for_members(0)).await;
     assert!(matches!(
         stranger.signal_shutdown().await,
         Err(RemoteOpError::NotSent(CastFailure::NotAMember))
@@ -992,7 +1047,7 @@ async fn the_same_code_works_for_every_kind_of_address() {
         8
     );
     assert_eq!(
-        double_via(&pair.on_b::<WorkerInterface>("cluster-generic"), 5).await,
+        double_via(&pair.on_b::<WorkerInterface>("cluster-generic").await, 5).await,
         10
     );
 }
@@ -1045,16 +1100,6 @@ async fn a_local_actor_is_reached_without_the_node_running() {
         Err(AddressError::Remote(RemoteOpError::NotSent(
             CastFailure::NotRunning
         )))
-    ));
-    let elsewhere = ClusterAddress::from(
-        remote.address_unchecked::<WorkerInterface>(GlobalName::new("cluster-idle", "node-y")),
-    );
-    assert!(matches!(
-        elsewhere.call(Double(2)).await,
-        Err(RemoteCallError::NotSent(RemoteCastError {
-            reason: CastFailure::NotRunning,
-            ..
-        }))
     ));
 }
 
@@ -1178,26 +1223,29 @@ async fn making_an_address_checks_the_actor_where_it_is() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_address_can_be_made_unchecked() {
+async fn an_address_for_an_actor_on_this_node_is_local() {
     let pair = Pair::start().await;
-    let (a, b) = (&pair.a.cluster, &pair.b.cluster);
+    let _worker = worker("cluster-check", Log::default());
+    let b = &pair.b.cluster;
 
-    // Conversions.
-    let remote = a.address_unchecked::<WorkerInterface>(GlobalName::new("cluster-check", "node-b"));
-    assert!(matches!(
-        ClusterAddress::from(remote),
-        ClusterAddress::Remote(_)
-    ));
+    // node-b's own actor is reached without leaving the process, and a plain
+    // `Address` converts to the same thing.
+    let itself = b
+        .address::<WorkerInterface>(GlobalName::new("cluster-check", "node-b"))
+        .await
+        .unwrap();
+    assert!(matches!(itself, ClusterAddress::Local(_)));
+    assert_eq!(itself.call(Double(1)).await.unwrap(), 2);
 
-    // A remote address to this node's own actor still goes over the network,
-    // where this node isn't a member.
-    let itself = b.address_unchecked::<WorkerInterface>(GlobalName::new("cluster-check", "node-b"));
+    // let address = Name::new_static("cluster-check")
+    //     .typed_address::<WorkerInterface>()
+    //     .unwrap();
+    let address = Registry::local()
+        .get_typed::<WorkerInterface>(&"cluster-check".into())
+        .unwrap();
     assert!(matches!(
-        itself.call(Double(1)).await,
-        Err(RemoteCallError::NotSent(RemoteCastError {
-            reason: CastFailure::NotAMember,
-            ..
-        }))
+        ClusterAddress::from(address),
+        ClusterAddress::Local(_)
     ));
 }
 

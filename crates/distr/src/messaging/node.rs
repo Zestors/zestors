@@ -22,7 +22,7 @@ use std::{
 use tokio_util::sync::{CancellationToken, DropGuard};
 use type_sets::{AsTypeSet, Members};
 use zestors_interface::Interface;
-use zestors_runtime::{Context, Dyn};
+use zestors_runtime::{Context, Dyn, Registry};
 
 /// What a node needs to message actors on other nodes, kept inside a
 /// [`Cluster`].
@@ -97,8 +97,8 @@ impl Cluster {
     /// and every message in `I` is asked about — which is why `I`'s messages
     /// must all be able to cross the network, see [`RemoteSet`].
     ///
-    /// Use [`Cluster::address_unchecked`] to skip all of this, or
-    /// [`Cluster::address_dyn`] for a set of messages instead of an interface.
+    /// Use [`Cluster::address_dyn`] for a set of messages instead of a whole
+    /// interface.
     pub async fn address<I: Interface>(
         &self,
         target: GlobalName,
@@ -107,7 +107,9 @@ impl Cluster {
         I::Set: RemoteSet,
     {
         if *target.node() == self.name() {
-            return Ok(ClusterAddress::Local(target.name().typed_address::<I>()?));
+            return Ok(ClusterAddress::Local(
+                Registry::local().get_typed::<I>(&target.name())?,
+            ));
         }
         self.resolve(target, <I::Set as RemoteSet>::MESSAGE_IDS)
             .await
@@ -124,7 +126,9 @@ impl Cluster {
         S: AsTypeSet + Members + RemoteSet + 'static,
     {
         if *target.node() == self.name() {
-            return Ok(ClusterAddress::Local(target.name().dyn_address::<S>()?));
+            return Ok(ClusterAddress::Local(
+                Registry::local().get_dyn::<S>(&target.name())?,
+            ));
         }
         self.resolve(target, S::MESSAGE_IDS)
             .await

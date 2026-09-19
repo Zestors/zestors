@@ -2,7 +2,6 @@ use crate::{registry::Registry, *};
 use bs58::Alphabet;
 use smol_str::SmolStr;
 use std::{borrow::Cow, fmt::Display, sync::Arc};
-use type_sets::{AsTypeSet, Members};
 
 /// The name of an actor: a cheaply-cloneable, human-readable string that
 /// uniquely names an actor in the local [`Registry`].
@@ -43,21 +42,6 @@ impl Name {
     /// if no actor with this `Name` is currently registered.
     pub fn address(&self) -> Option<Address> {
         Registry::local().get(&self)
-    }
-
-    /// Looks up the [`Address`] registered for this `Name`, downcast to the
-    /// given [`Interface`]. See [`Registry::get_typed`].
-    pub fn typed_address<I: Interface>(&self) -> Result<Address<I>, TypedRegistryError> {
-        Registry::local().get_typed::<I>(self)
-    }
-
-    /// Looks up the [`Address`] registered for this `Name`, downcast to the
-    /// given dynamic message set. See [`Registry::get_dyn`].
-    pub fn dyn_address<S>(&self) -> Result<Address<Dyn<S>>, TypedRegistryError>
-    where
-        S: AsTypeSet + 'static + Members,
-    {
-        Registry::local().get_dyn::<S>(self)
     }
 
     // /// Returns the [`Name`] of the actor currently running on this task, or

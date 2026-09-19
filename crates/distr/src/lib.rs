@@ -13,7 +13,7 @@ pub mod prelude {
     pub use crate::{
         Cluster, ClusterAddress, ClusterConfig, ClusterEvent, ClusterNode, ClusterNodeError,
         ClusterSnapshot, NodeStatus, RemoteAccepts, RemoteActorOps, RemoteAddress, RemoteMessage,
-        RemoteRequest, Seed,
+        RemoteRequest, RemoteSet, Seed,
     };
 }
 
@@ -71,5 +71,5 @@ pub use messaging::{
     AddressError, CastFailure, ClusterAddress, Decode, DecodeError, Encode, EncodeError,
     RemoteAccepts, RemoteActorOps, RemoteActorRef, RemoteAddress, RemoteCallError,
     RemoteCallOptions, RemoteCastError, RemoteError, RemoteInfo, RemoteMessage, RemoteOpError,
-    RemoteReceipt, RemoteReply, RemoteReplyError, RemoteRequest, Route,
+    RemoteReceipt, RemoteReply, RemoteReplyError, RemoteRequest, RemoteSet, Route,
 };
