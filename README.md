@@ -62,8 +62,8 @@ impl Handle<Ping> for Worker {
 async fn main() {
     let node = Node::new(
         Supervisor::blueprint()
-            .child(Worker.pid("worker").unwrap())
-            .rand_pid(),
+            .child(Worker.name("worker").unwrap())
+            .rand_name(),
     );
 
     // Starts the supervisor, restarts it on error, and shuts it down
@@ -91,7 +91,7 @@ There is a WIP inspector built using `egui`. It is still very much a proof-of-co
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | [`zestors`](crates/zestors)                 | Facade crate re-exporting the others; start here.                                                |
 | [`zestors-interface`](crates/interface)     | `Message`/`Interface`: the vocabulary for defining what an actor accepts.                        |
-| [`zestors-runtime`](crates/runtime)         | The actor runtime: `Inbox`, `Address`, `Pid`, `Registry`, signals.                               |
+| [`zestors-runtime`](crates/runtime)         | The actor runtime: `Inbox`, `Address`, `Name`, `Registry`, signals.                               |
 | [`zestors-actor`](crates/actor)             | `Handler`/`Actor`: declarative and low-level ways to implement an actor.                         |
 | [`zestors-supervision`](crates/supervision) | `ChildSpec`/`ChildConfig`/`RestartIntensity`: the supervisor's vocabulary.                       |
 | [`zestors-supervisor`](crates/supervisor)   | The `Supervisor` and `Node` actors that use it.                                                  |

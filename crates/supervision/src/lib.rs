@@ -7,7 +7,7 @@
 //!
 //! - [`ChildSpec`] pairs a child's blueprint with the [`ChildConfig`]
 //!   (restart mode/intensity, timeouts) a supervisor applies to it, and owns
-//!   the [`Pid`](zestors_runtime::Pid)/channel under which the child is
+//!   the [`Name`](zestors_runtime::Name)/channel under which the child is
 //!   registered.
 //! - [`ChildDescription`] is a serializable snapshot of a child's identity and
 //!   configuration, as returned by [`GetChildren`].
@@ -18,7 +18,7 @@
 //!   [`Blueprint`](zestors_actor::Blueprint) into something that
 //!   can (re)spawn an actor on an already-registered
 //!   [`StrongAddress`](zestors_runtime::StrongAddress), and
-//!   [`BlueprintSupervisionExt`] adds ergonomic `pid`/`with_rand_pid` helpers
+//!   [`BlueprintSupervisionExt`] adds ergonomic `name`/`with_rand_name` helpers
 //!   to every blueprint.
 //! - [`messages`] holds the request/response types used to query a running
 //!   supervisor (its children and its health).
@@ -66,7 +66,7 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() {
-//! let spec = ChildSpec::create_rand_pid(Worker)
+//! let spec = ChildSpec::create_rand_name(Worker)
 //!     .with_mode(RestartMode::Always)
 //!     .with_abort_timeout(Duration::from_secs(1));
 //!
@@ -79,7 +79,7 @@
 //! # }
 //! ```
 //!
-//! A [`ChildSpec`] on its own is just a recipe plus a reserved [`Pid`]; it
+//! A [`ChildSpec`] on its own is just a recipe plus a reserved [`Name`]; it
 //! doesn't watch the child or restart it. That behavior belongs to the
 //! `Supervisor` actor in `zestors-supervisor`, which holds a set of specs and
 //! calls `start`/`restart` on them according to a `SupervisionStrategy`.

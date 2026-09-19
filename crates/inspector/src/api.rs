@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use zestors::{
-    runtime::{ActorStatus, ChannelSnapshot, Pid},
+    runtime::{ActorStatus, ChannelSnapshot, Name},
     supervision::ChildConfig,
 };
 
@@ -15,7 +15,7 @@ static CLIENT: LazyLock<Client> =
 const SLEEP_INTERVAL: Duration = Duration::from_millis(500);
 
 pub enum ApiMessage {
-    ProcessesUpdate(rootcause::Result<IndexMap<Pid, (ChildConfig, ActorStatus, Vec<Pid>)>>),
+    ProcessesUpdate(rootcause::Result<IndexMap<Name, (ChildConfig, ActorStatus, Vec<Name>)>>),
     NewChannelSnapshots(rootcause::Result<Vec<Option<ChannelSnapshot>>>),
 }
 
@@ -35,11 +35,11 @@ pub async fn run_tree_poller(sender: mpsc::Sender<ApiMessage>, ctx: egui::Contex
 
 pub fn update_channel_snapshots(
     sender: mpsc::Sender<ApiMessage>,
-    pids: Vec<Pid>,
+    names: Vec<Name>,
     ctx: egui::Context,
 ) {
     tokio::spawn(async move {
-        let snapshots = CLIENT.get_channel_snapshots(pids).await;
+        let snapshots = CLIENT.get_channel_snapshots(names).await;
 
         sender
             .send(ApiMessage::NewChannelSnapshots(snapshots))

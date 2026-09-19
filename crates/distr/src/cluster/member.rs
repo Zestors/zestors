@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// currently be reached and may change between restarts. The `generation`
 /// distinguishes successive incarnations of the same node, so a restarted node
 /// replaces its previous incarnation (like Erlang's `creation`, but carried by
-/// the node rather than by pids).
+/// the node rather than by names).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Member {
     /// The node's name; must be a DNS name matching its TLS certificate.

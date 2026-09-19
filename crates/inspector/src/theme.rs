@@ -8,7 +8,7 @@ impl Theme {
     pub const CARD_BG: Color32 = Color32::from_rgb(26, 29, 38);
     pub const INNER_CARD_BG: Color32 = Color32::from_rgb(20, 22, 30);
     pub const BORDER_COLOR: Color32 = Color32::from_rgb(45, 50, 66);
-    pub const PID_BLUE: Color32 = Color32::from_rgb(97, 175, 239);
+    pub const NAME_BLUE: Color32 = Color32::from_rgb(97, 175, 239);
     pub const LABEL_MUTED: Color32 = Color32::from_rgb(140, 148, 170);
     pub const VALUE_PURPLE: Color32 = Color32::from_rgb(198, 120, 221);
     // pub const ERROR_RED: Color32 = Color32::from_rgb(224, 108, 117);

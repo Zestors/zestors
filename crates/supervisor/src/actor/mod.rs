@@ -14,7 +14,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use zestors_runtime::{ActorStatus, ExitStatus, errors::DuplicatePidError};
+use zestors_runtime::{ActorStatus, ExitStatus, errors::DuplicateNameError};
 use zestors_supervision::{
     RestartIntensity,
     messages::{Health, HealthStatus},
@@ -144,17 +144,17 @@ impl SupervisorInner {
         }
     }
 
-    fn add_spec(&mut self, spec: ChildSpec) -> Result<(), DuplicatePidError> {
+    fn add_spec(&mut self, spec: ChildSpec) -> Result<(), DuplicateNameError> {
         if self.is_exiting() {
             tracing::warn!("Attempted to add a child spec while supervisor is exiting");
             return Ok(());
         }
 
         let supervisee = Supervisee::new(spec);
-        let pid = supervisee.pid().clone();
+        let name = supervisee.name().clone();
         self.supervisees.add(supervisee)?;
         self.supervisees
-            .get_mut(&pid)
+            .get_mut(&name)
             .expect("Just inserted")
             .start()
             .expect("Supervisee should not be shutting down.");
@@ -168,7 +168,7 @@ impl SupervisorInner {
     /// `rest_for_one` doesn't use this — its children can depend on each
     /// other, so it tears them down one at a time instead (see
     /// `RestForOneSupervisor::shutdown`).
-    pub(super) fn shutdown(&mut self, exiting: &mut IndexSet<Pid>) -> ControlFlow<()> {
+    pub(super) fn shutdown(&mut self, exiting: &mut IndexSet<Name>) -> ControlFlow<()> {
         self.register_exiting();
 
         exiting.extend(self.supervisees.stop_all());
@@ -186,26 +186,26 @@ impl SupervisorInner {
         self.inbox.register_exiting();
     }
 
-    pub(super) fn handle_initialized(&mut self, initializing: &mut IndexSet<Pid>, pid: &Pid) {
-        if initializing.swap_remove(pid) && self.is_initializing() && initializing.is_empty() {
+    pub(super) fn handle_initialized(&mut self, initializing: &mut IndexSet<Name>, name: &Name) {
+        if initializing.swap_remove(name) && self.is_initializing() && initializing.is_empty() {
             self.inbox.register_initialized();
         }
     }
 
     /// The part of `remove_spec` common to every strategy; strategies with extra
-    /// per-pid bookkeeping (e.g. an in-progress restart cascade) clean that up
+    /// per-name bookkeeping (e.g. an in-progress restart cascade) clean that up
     /// themselves around this call.
     pub(super) fn remove_spec(
         &mut self,
-        initializing: &mut IndexSet<Pid>,
-        exiting: &mut IndexSet<Pid>,
-        pid: &Pid,
+        initializing: &mut IndexSet<Name>,
+        exiting: &mut IndexSet<Name>,
+        name: &Name,
     ) -> Option<Supervisee> {
-        let supervisee = self.supervisees.remove(pid);
+        let supervisee = self.supervisees.remove(name);
 
         if supervisee.is_some() {
-            initializing.swap_remove(pid);
-            exiting.swap_remove(pid);
+            initializing.swap_remove(name);
+            exiting.swap_remove(name);
         }
 
         supervisee

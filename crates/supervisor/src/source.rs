@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::sync::Notify;
-use zestors_runtime::errors::DuplicatePidError;
+use zestors_runtime::errors::DuplicateNameError;
 use zestors_supervision::Start;
 
 /// A [`SupervisorSource`] is a dynamic source of [`ChildSpec`]s for a
@@ -28,8 +28,8 @@ pub trait SupervisorSource: Debug + Send + Sync + 'static {
     /// Returns all child specs currently in the source, and clears the event queue.
     fn load_all(&self) -> BoxFuture<'_, Result<Vec<ChildSpec>, Report>>;
 
-    /// Removes and returns the child spec for `pid`, if the source has one.
-    fn remove(&self, pid: Pid) -> BoxFuture<'_, Result<Option<ChildSpec>, Report>>;
+    /// Removes and returns the child spec for `name`, if the source has one.
+    fn remove(&self, name: Name) -> BoxFuture<'_, Result<Option<ChildSpec>, Report>>;
 
     /// Adds `spec` to the source.
     fn add(&self, spec: ChildSpec) -> BoxFuture<'_, Result<(), Report>>;
@@ -41,8 +41,8 @@ pub trait SupervisorSource: Debug + Send + Sync + 'static {
 pub enum SupervisorSourceEvent {
     /// A child spec was added.
     Added(ChildSpec),
-    /// The child spec for this [`Pid`] was removed.
-    Removed(Pid),
+    /// The child spec for this [`Name`] was removed.
+    Removed(Name),
 }
 
 /// An in-memory, thread-safe [`SupervisorSource`], for managing a
@@ -56,7 +56,7 @@ pub struct InMemorySupervisorSource {
 
 #[derive(Debug, Clone, Default)]
 struct LocalSupervisorChildren {
-    children: IndexMap<Pid, ChildSpec>,
+    children: IndexMap<Name, ChildSpec>,
     events: VecDeque<SupervisorSourceEvent>,
 }
 
@@ -75,17 +75,17 @@ impl InMemorySupervisorSource {
         Arc::new(Self::new())
     }
 
-    /// Adds `spec`, failing if its [`Pid`] is already present.
-    pub fn add<T: Start>(&self, spec: ChildSpec<T>) -> Result<(), DuplicatePidError> {
+    /// Adds `spec`, failing if its [`Name`] is already present.
+    pub fn add<T: Start>(&self, spec: ChildSpec<T>) -> Result<(), DuplicateNameError> {
         let dyn_spec = spec.into_dyn();
-        let pid = dyn_spec.pid().clone();
+        let name = dyn_spec.name().clone();
 
         let mut inner = self.inner.lock().unwrap();
-        if inner.children.contains_key(&pid) {
-            return Err(DuplicatePidError { pid });
+        if inner.children.contains_key(&name) {
+            return Err(DuplicateNameError { name });
         }
 
-        inner.children.insert(pid, dyn_spec.clone());
+        inner.children.insert(name, dyn_spec.clone());
         inner
             .events
             .push_back(SupervisorSourceEvent::Added(dyn_spec));
@@ -94,14 +94,14 @@ impl InMemorySupervisorSource {
         Ok(())
     }
 
-    /// Removes and returns the child spec for `pid`, if present.
-    pub fn remove(&self, pid: Pid) -> Option<ChildSpec> {
+    /// Removes and returns the child spec for `name`, if present.
+    pub fn remove(&self, name: Name) -> Option<ChildSpec> {
         let mut inner = self.inner.lock().unwrap();
 
-        if let Some(spec) = inner.children.shift_remove(&pid) {
+        if let Some(spec) = inner.children.shift_remove(&name) {
             inner
                 .events
-                .push_back(SupervisorSourceEvent::Removed(pid.clone()));
+                .push_back(SupervisorSourceEvent::Removed(name.clone()));
 
             self.notify.notify_one();
             Some(spec)
@@ -121,9 +121,9 @@ impl InMemorySupervisorSource {
             .collect::<Vec<_>>()
     }
 
-    /// Returns the child spec for `pid`, if present.
-    pub fn get(&self, pid: &Pid) -> Option<ChildSpec> {
-        self.inner.lock().unwrap().children.get(pid).cloned()
+    /// Returns the child spec for `name`, if present.
+    pub fn get(&self, name: &Name) -> Option<ChildSpec> {
+        self.inner.lock().unwrap().children.get(name).cloned()
     }
 
     /// The number of child specs currently in the source.
@@ -174,7 +174,7 @@ impl SupervisorSource for InMemorySupervisorSource {
         })
     }
 
-    fn remove(&self, pid: Pid) -> BoxFuture<'_, Result<Option<ChildSpec>, Report>> {
-        Box::pin(async move { Ok((*self).remove(pid)) })
+    fn remove(&self, name: Name) -> BoxFuture<'_, Result<Option<ChildSpec>, Report>> {
+        Box::pin(async move { Ok((*self).remove(name)) })
     }
 }

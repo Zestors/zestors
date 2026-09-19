@@ -191,12 +191,12 @@ fn config(hub: &Hub, name: &str, n: u8) -> ClusterConfig {
 async fn nodes_join_over_a_custom_backend() {
     let hub = Hub::default();
     let a = ClusterNode::new(
-        Supervisor::blueprint().rand_pid(),
+        Supervisor::blueprint().rand_name(),
         config(&hub, "node-a", 1),
     )
     .with_exit_delay(Duration::ZERO);
     let b = ClusterNode::new(
-        Supervisor::blueprint().rand_pid(),
+        Supervisor::blueprint().rand_name(),
         config(&hub, "node-b", 2).seed(Seed::new("node-a", addr(1))),
     )
     .with_exit_delay(Duration::ZERO);
@@ -243,7 +243,7 @@ async fn nodes_join_over_a_custom_backend() {
 async fn a_node_cannot_get_in_under_a_name_the_backend_does_not_know_it_by() {
     let hub = Hub::default();
     let a = ClusterNode::new(
-        Supervisor::blueprint().rand_pid(),
+        Supervisor::blueprint().rand_name(),
         config(&hub, "node-a", 1),
     )
     .with_exit_delay(Duration::ZERO);
@@ -262,14 +262,14 @@ async fn a_node_cannot_get_in_under_a_name_the_backend_does_not_know_it_by() {
     )
     .seed(Seed::new("node-a", addr(1)))
     .foca_config(fast_foca());
-    let mallory = ClusterNode::new(Supervisor::blueprint().rand_pid(), mallory)
+    let mallory = ClusterNode::new(Supervisor::blueprint().rand_name(), mallory)
         .with_exit_delay(Duration::ZERO);
     let mallory_shutdown = mallory.shutdown_handle();
     let mallory_task = tokio::spawn(mallory.run());
 
     // An honest node joins meanwhile, so we know node-a is listening.
     let c = ClusterNode::new(
-        Supervisor::blueprint().rand_pid(),
+        Supervisor::blueprint().rand_name(),
         config(&hub, "node-c", 3).seed(Seed::new("node-a", addr(1))),
     )
     .with_exit_delay(Duration::ZERO);

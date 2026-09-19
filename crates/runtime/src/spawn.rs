@@ -5,14 +5,14 @@ use tokio::task_local;
 use tracing::Instrument as _;
 
 task_local! {
-    static PID_INFO: PidInfo;
+    static NAME_INFO: NameInfo;
 }
 
 #[derive(Clone, Debug)]
-struct PidInfo {
-    this: Pid,
+struct NameInfo {
+    this: Name,
     #[expect(unused)]
-    parent: Option<Pid>,
+    parent: Option<Name>,
 }
 
 /// Same as [`spawn`], but spawns a process that cannot accept messages: its
@@ -27,7 +27,7 @@ struct PidInfo {
 ///
 /// # #[tokio::main]
 /// # async fn main() {
-/// let child = spawn_task(Pid::new("background-job"), |mut task_box: TaskBox| async move {
+/// let child = spawn_task(Name::new("background-job"), |mut task_box: TaskBox| async move {
 ///     task_box.wait_shutdown().await;
 ///     Ok(())
 /// })
@@ -38,14 +38,14 @@ struct PidInfo {
 /// # }
 /// ```
 pub fn spawn_task<E, F>(
-    pid: Pid,
+    name: Name,
     f: impl FnOnce(TaskBox) -> F,
-) -> Result<Child<E, Infallible>, DuplicatePidError>
+) -> Result<Child<E, Infallible>, DuplicateNameError>
 where
     E: Send + 'static,
     F: Future<Output = Result<E, rootcause::Report>> + Send + 'static,
 {
-    Ok(StrongAddress::create(pid)?
+    Ok(StrongAddress::create(name)?
         .spawn_task(f)
         .expect("Address was just created. Must be valid"))
 }
@@ -56,13 +56,13 @@ where
     E: Send + 'static,
     F: Future<Output = Result<E, rootcause::Report>> + Send + 'static,
 {
-    spawn_task(Pid::rand(), f).expect("Pid is unique")
+    spawn_task(Name::rand(), f).expect("Name is unique")
 }
 
-/// Spawns a process on a new [`StrongAddress`] with the given [`Pid`], and
+/// Spawns a process on a new [`StrongAddress`] with the given [`Name`], and
 /// registers it in the [`Registry`].
 ///
-/// Can fail if the pid is already registered.
+/// Can fail if the name is already registered.
 ///
 /// # Example
 ///
@@ -71,34 +71,34 @@ where
 /// # use zestors::runtime::spawn;
 /// # #[tokio::main]
 /// # async fn main() {
-/// let pid = Pid::new("my-actor");
-/// let child = spawn(pid.clone(), |mut inbox: Inbox<()>| async move {
+/// let name = Name::new("my-actor");
+/// let child = spawn(name.clone(), |mut inbox: Inbox<()>| async move {
 ///     while inbox.recv().await.is_some() {}
 ///     Ok(())
 /// })
 /// .unwrap();
 ///
-/// // A second actor can't reuse the same pid while this one is alive.
-/// assert!(spawn(pid, |_: Inbox<()>| async { Ok(()) }).is_err());
+/// // A second actor can't reuse the same name while this one is alive.
+/// assert!(spawn(name, |_: Inbox<()>| async { Ok(()) }).is_err());
 ///
 /// child.signal_shutdown();
 /// # }
 /// ```
 pub fn spawn<T, E, F>(
-    pid: impl Into<Pid>,
+    name: impl Into<Name>,
     f: impl FnOnce(Inbox<T>) -> F,
-) -> Result<Child<E, T>, DuplicatePidError>
+) -> Result<Child<E, T>, DuplicateNameError>
 where
     T: Interface,
     E: Send + 'static,
     F: Future<Output = Result<E, rootcause::Report>> + Send + 'static,
 {
-    Ok(StrongAddress::create(pid.into())?
+    Ok(StrongAddress::create(name.into())?
         .spawn(f)
         .expect("Address was just created. Must be valid"))
 }
 
-/// Spawns a process on a new [`StrongAddress`] with a random [`Pid`], and
+/// Spawns a process on a new [`StrongAddress`] with a random [`Name`], and
 /// registers it in the [`Registry`].
 pub fn spawn_rand<T, E, F>(f: impl FnOnce(Inbox<T>) -> F) -> Child<E, T>
 where
@@ -106,7 +106,7 @@ where
     E: Send + 'static,
     F: Future<Output = Result<E, rootcause::Report>> + Send + 'static,
 {
-    spawn(Pid::rand(), f).expect("Pid is unique")
+    spawn(Name::rand(), f).expect("Name is unique")
 }
 
 impl StrongAddress<Infallible> {
@@ -125,7 +125,7 @@ impl StrongAddress<Infallible> {
 }
 
 impl<T: Context> StrongAddress<T> {
-    /// Spawns a process on this channel, keeping its [`Pid`] and registry
+    /// Spawns a process on this channel, keeping its [`Name`] and registry
     /// entry. Fails with [`ConcurrentInboxError`] if a process is already
     /// running on it - so once one exits, [`StrongAddress`] is what lets you
     /// spawn another one *on the same channel*, rather than creating a new
@@ -138,7 +138,7 @@ impl<T: Context> StrongAddress<T> {
     ///
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let strong: StrongAddress<()> = StrongAddress::create(Pid::rand()).unwrap();
+    /// let strong: StrongAddress<()> = StrongAddress::create(Name::rand()).unwrap();
     ///
     /// let first = strong.clone().spawn(|mut inbox: Inbox<()>| async move {
     ///     while inbox.recv().await.is_some() {}
@@ -148,7 +148,7 @@ impl<T: Context> StrongAddress<T> {
     /// first.signal_shutdown();
     /// first.watch_exit().await.unwrap();
     ///
-    /// // The first process is gone, but the pid and registry entry live on,
+    /// // The first process is gone, but the name and registry entry live on,
     /// // so a second process can now be spawned on the very same channel.
     /// let second = strong.spawn(|mut inbox: Inbox<()>| async move {
     ///     while inbox.recv().await.is_some() {}
@@ -168,7 +168,7 @@ impl<T: Context> StrongAddress<T> {
         F: Future<Output = Result<R, Report>> + Send + 'static,
     {
         let tokio_handle = tokio::task::spawn({
-            let span = tracing::debug_span!("process", pid = %self.pid());
+            let span = tracing::debug_span!("process", name = %self.name());
             let inbox = Inbox::try_new(self.clone())?;
             let address = inbox.address().clone();
             let mut bomb = AbortBomb::new(address);
@@ -178,11 +178,11 @@ impl<T: Context> StrongAddress<T> {
                 .expect("Transition must succeed, because inbox was just created");
             let spawn_future = AssertUnwindSafe(spawn_fn(inbox)).catch_unwind();
 
-            PID_INFO
+            NAME_INFO
                 .scope(
-                    PidInfo {
-                        this: self.pid().clone(),
-                        parent: current_pid(),
+                    NameInfo {
+                        this: self.name().clone(),
+                        parent: current_name(),
                     },
                     async move {
                         let spawn_result = spawn_future.await;
@@ -252,11 +252,14 @@ impl<T: Context> Drop for AbortBomb<T> {
     }
 }
 
-pub(crate) fn current_pid() -> Option<Pid> {
-    PID_INFO.try_with(|info| info.this.clone()).ok()
+pub(crate) fn current_name() -> Option<Name> {
+    NAME_INFO.try_with(|info| info.this.clone()).ok()
 }
 
 #[expect(unused)]
-pub(crate) fn parent_pid() -> Option<Pid> {
-    PID_INFO.try_with(|info| info.parent.clone()).ok().flatten()
+pub(crate) fn parent_name() -> Option<Name> {
+    NAME_INFO
+        .try_with(|info| info.parent.clone())
+        .ok()
+        .flatten()
 }

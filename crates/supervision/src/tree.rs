@@ -41,7 +41,7 @@ impl SupervisionTree {
     pub fn new(description: ChildDescription) -> Self {
         Self {
             status: Registry::local()
-                .get(&description.pid)
+                .get(&description.name)
                 .map(|address| address.status()),
             description,
             health: None,
@@ -74,7 +74,7 @@ impl SupervisionTree {
     }
 
     async fn populate_layer(&mut self, timeout: Duration) {
-        let Some(address) = Registry::local().get(&self.description.pid) else {
+        let Some(address) = Registry::local().get(&self.description.name) else {
             return;
         };
 
@@ -82,14 +82,17 @@ impl SupervisionTree {
             Ok(Ok(children)) => children,
             Ok(Err(err)) => {
                 tracing::warn!(
-                    "Failed to get children for PID {}: {}",
-                    self.description.pid,
+                    "Failed to get children for name {}: {}",
+                    self.description.name,
                     err
                 );
                 vec![]
             }
             Err(_) => {
-                tracing::warn!("Timeout getting children for PID {}", self.description.pid);
+                tracing::warn!(
+                    "Timeout getting children for name {}",
+                    self.description.name
+                );
                 vec![]
             }
         };
@@ -108,7 +111,7 @@ impl SupervisionTree {
         queue.push_back(self);
 
         while let Some(node) = queue.pop_front() {
-            let address = match Registry::local().get(&node.description.pid) {
+            let address = match Registry::local().get(&node.description.name) {
                 Some(address) => address,
                 None => {
                     continue;

@@ -2,13 +2,13 @@ use crate::*;
 use std::sync::OnceLock;
 use type_sets::{AsTypeSet, Members};
 
-/// A thread-safe global registry mapping process identifiers ([`Pid`]) to their weak handles ([`Address`]).
+/// A thread-safe global registry mapping name ([`Name`]) to their weak handles ([`Address`]).
 ///
 /// Processes automatically register themselves in the registry upon creation
 /// and deregister upon termination.
 #[derive(Debug)]
 pub struct Registry {
-    processes: papaya::HashMap<Pid, Address>,
+    processes: papaya::HashMap<Name, Address>,
 }
 
 static REGISTRY: OnceLock<Registry> = OnceLock::new();
@@ -28,7 +28,7 @@ impl Registry {
             self.processes
                 .pin()
                 .iter()
-                .map(|(_pid, addr)| addr.clone())
+                .map(|(_name, addr)| addr.clone())
                 .collect()
         })
         .await
@@ -43,7 +43,7 @@ impl Registry {
     /// Registers a new process address.
     ///
     /// # Errors
-    /// Returns a [`RegistryAddError`] if the [`Pid`] is already registered.
+    /// Returns a [`RegistryAddError`] if the [`Name`] is already registered.
     pub(crate) fn register<C: Context>(
         &self,
         address: Address<C>,
@@ -51,7 +51,7 @@ impl Registry {
         let map = self.processes.pin();
 
         if map
-            .try_insert(address.pid().clone(), address.clone().into_dyn())
+            .try_insert(address.name().clone(), address.clone().into_dyn())
             .is_err()
         {
             Err(RegistryAddError { address })
@@ -60,59 +60,59 @@ impl Registry {
         }
     }
 
-    /// Removes and returns the registered [`Address`] for a given [`Pid`].
-    pub(crate) fn remove(&self, pid: &Pid) -> Option<Address> {
+    /// Removes and returns the registered [`Address`] for a given [`Name`].
+    pub(crate) fn remove(&self, name: &Name) -> Option<Address> {
         let guard = self.processes.guard();
         self.processes
-            .remove_entry(pid, &guard)
-            .map(|(_pid, addr)| addr.clone())
+            .remove_entry(name, &guard)
+            .map(|(_name, addr)| addr.clone())
     }
 
-    /// Fetches an untyped [`Address`] by its [`Pid`], returning `None` if not registered.
-    pub fn get(&self, pid: &Pid) -> Option<Address> {
+    /// Fetches an untyped [`Address`] by its [`Name`], returning `None` if not registered.
+    pub fn get(&self, name: &Name) -> Option<Address> {
         let guard = self.processes.guard();
-        self.processes.get(pid, &guard).cloned()
+        self.processes.get(name, &guard).cloned()
     }
 
-    /// Fetches a strongly typed [`Address<C>`] by its [`Pid`].
+    /// Fetches a strongly typed [`Address<C>`] by its [`Name`].
     ///
     /// # Errors
     /// Returns an error if
     /// - the process is not found
     /// - the address type downcast fails
-    pub fn get_typed<I: Interface>(&self, pid: &Pid) -> Result<Address<I>, TypedRegistryError> {
-        self.get(pid)
-            .ok_or_else(|| TypedRegistryError::NotFound(pid.clone()))?
+    pub fn get_typed<I: Interface>(&self, name: &Name) -> Result<Address<I>, TypedRegistryError> {
+        self.get(name)
+            .ok_or_else(|| TypedRegistryError::NotFound(name.clone()))?
             .downcast::<I>()
-            .map_err(|_| TypedRegistryError::TypeMismatch(pid.clone()))
+            .map_err(|_| TypedRegistryError::TypeMismatch(name.clone()))
     }
 
-    /// Fetches a dynamically typed [`Address<C>`] by its [`Pid`].
+    /// Fetches a dynamically typed [`Address<C>`] by its [`Name`].
     ///
     /// # Errors
     /// Returns an error if
     /// - the process is not found
     /// - the set of types does not match the registered address's type set
-    pub fn get_dyn<S>(&self, pid: &Pid) -> Result<Address<Dyn<S>>, TypedRegistryError>
+    pub fn get_dyn<S>(&self, name: &Name) -> Result<Address<Dyn<S>>, TypedRegistryError>
     where
         S: AsTypeSet + 'static + Members,
     {
-        self.get(pid)
-            .ok_or_else(|| TypedRegistryError::NotFound(pid.clone()))?
+        self.get(name)
+            .ok_or_else(|| TypedRegistryError::NotFound(name.clone()))?
             .into_dyn_checked::<S>()
-            .map_err(|_| TypedRegistryError::TypeMismatch(pid.clone()))
+            .map_err(|_| TypedRegistryError::TypeMismatch(name.clone()))
     }
 
-    /// Returns `true` if a process with the given [`Pid`] is registered.
-    pub fn contains(&self, pid: &Pid) -> bool {
+    /// Returns `true` if a process with the given [`Name`] is registered.
+    pub fn contains(&self, name: &Name) -> bool {
         let guard = self.processes.guard();
-        self.processes.contains_key(pid, &guard)
+        self.processes.contains_key(name, &guard)
     }
 }
 
-/// Error returned when registering a [`Pid`] that already exists in the [`Registry`].
+/// Error returned when registering a [`Name`] that already exists in the [`Registry`].
 #[derive(thiserror::Error)]
-#[error("Failed to add entry for pid {}", .address.pid())]
+#[error("Failed to add entry for name {}", .address.name())]
 pub(crate) struct RegistryAddError<T: Context = Dyn> {
     address: Address<T>,
 }
@@ -128,16 +128,16 @@ impl<T: Context> std::fmt::Debug for RegistryAddError<T> {
 /// Returned by [`Registry::get_typed`]/[`Registry::get_dyn`].
 #[derive(thiserror::Error, Debug)]
 pub enum TypedRegistryError {
-    /// No process is registered under this [`Pid`] at all.
-    #[error("Address not found for pid: {0}")]
-    NotFound(Pid),
+    /// No process is registered under this [`Name`] at all.
+    #[error("Address not found for name: {0}")]
+    NotFound(Name),
 
-    /// A process is registered under this [`Pid`], but its concrete
+    /// A process is registered under this [`Name`], but its concrete
     /// [`Interface`] doesn't match (for [`Registry::get_typed`]) or doesn't
     /// accept the requested message set (for [`Registry::get_dyn`]).
-    #[error("Address found for pid: {0} but type mismatch")]
-    TypeMismatch(Pid),
+    #[error("Address found for name: {0} but type mismatch")]
+    TypeMismatch(Name),
 }
 
-mod pid;
-pub use pid::*;
+mod name;
+pub use name::*;

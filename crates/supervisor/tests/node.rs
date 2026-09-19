@@ -11,7 +11,7 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 #[tokio::test(flavor = "multi_thread")]
 async fn shutdown_requested_immediately_is_not_lost() {
     for _ in 0..20 {
-        let node = Node::new(Supervisor::blueprint().rand_pid()).with_exit_delay(Duration::ZERO);
+        let node = Node::new(Supervisor::blueprint().rand_name()).with_exit_delay(Duration::ZERO);
         let shutdown = node.shutdown_handle();
 
         let handle = tokio::spawn(node.run());
@@ -28,7 +28,7 @@ async fn shutdown_requested_immediately_is_not_lost() {
 /// A shutdown requested before [`Node::run`] is even called is honored too.
 #[tokio::test]
 async fn shutdown_requested_before_run_is_honored() {
-    let node = Node::new(Supervisor::blueprint().rand_pid()).with_exit_delay(Duration::ZERO);
+    let node = Node::new(Supervisor::blueprint().rand_name()).with_exit_delay(Duration::ZERO);
     node.shutdown_handle().shutdown();
 
     tokio::time::timeout(TIMEOUT, node.run())

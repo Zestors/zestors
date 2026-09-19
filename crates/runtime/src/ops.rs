@@ -40,7 +40,7 @@ pub trait ActorRef {
 /// assert!(child.status().is_running());
 ///
 /// let snapshot = child.snapshot();
-/// assert_eq!(snapshot.pid, *child.pid());
+/// assert_eq!(snapshot.name, *child.name());
 /// assert_eq!(snapshot.msg_len, 0);
 ///
 /// child.signal_shutdown();
@@ -132,9 +132,9 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         async move { Ok(channel.cast_dyn_with(msg, options).await?.wait().await?) }
     }
 
-    /// Returns the actor's [`Pid`].
-    fn pid(&self) -> &Pid {
-        self.channel().pid()
+    /// Returns the actor's [`Name`].
+    fn name(&self) -> &Name {
+        self.channel().name()
     }
 
     /// Returns the actor's current [`ActorStatus`].
@@ -154,7 +154,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         let data = &self.channel();
 
         ChannelSnapshot {
-            pid: data.pid().clone(),
+            name: data.name().clone(),
             status: data.status(),
             signal_len: data.signal_len(),
             msg_len: data.msg_len(),

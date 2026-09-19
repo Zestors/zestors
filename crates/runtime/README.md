@@ -4,7 +4,7 @@
 [![Documentation](https://docs.rs/zestors-runtime/badge.svg)](https://docs.rs/zestors-runtime)
 
 The actor runtime underlying [`zestors`](https://crates.io/crates/zestors):
-`Inbox`, `Address`/`StrongAddress`, `Pid`, the global `Registry`, and
+`Inbox`, `Address`/`StrongAddress`, `Name`, the global `Registry`, and
 signals.
 
 Part of the [`zestors`](https://crates.io/crates/zestors) actor framework —

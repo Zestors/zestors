@@ -1,8 +1,8 @@
 //! Tests for the process registry (src/registry/*): lookup, registration,
-//! deregistration, typed/dynamic fetch, and `Pid` itself.
+//! deregistration, typed/dynamic fetch, and `Name` itself.
 
 use zestors_interface::{Envelope, Interface, Message};
-use zestors_runtime::errors::DuplicatePidError;
+use zestors_runtime::errors::DuplicateNameError;
 use zestors_runtime::prelude::*;
 use zestors_runtime::{Registry, TypedRegistryError, spawn};
 
@@ -29,16 +29,16 @@ enum OtherInterface {
 // ============================================================================
 
 #[tokio::test]
-async fn get_finds_a_registered_actor_and_none_for_an_unknown_pid() {
-    let pid = common::test_pid("registry_get");
-    let child = spawn(pid.clone(), common::simplest_handler).unwrap();
+async fn get_finds_a_registered_actor_and_none_for_an_unknown_name() {
+    let name = common::test_name("registry_get");
+    let child = spawn(name.clone(), common::simplest_handler).unwrap();
 
-    let found = Registry::local().get(&pid).expect("should be registered");
-    assert_eq!(found.pid(), &pid);
+    let found = Registry::local().get(&name).expect("should be registered");
+    assert_eq!(found.name(), &name);
 
     assert!(
         Registry::local()
-            .get(&Pid::new("definitely_not_registered"))
+            .get(&Name::new("definitely_not_registered"))
             .is_none()
     );
 
@@ -47,35 +47,35 @@ async fn get_finds_a_registered_actor_and_none_for_an_unknown_pid() {
 
 #[tokio::test]
 async fn contains_reflects_registration_and_removal() {
-    let pid = common::test_pid("registry_contains");
-    assert!(!Registry::local().contains(&pid));
+    let name = common::test_name("registry_contains");
+    assert!(!Registry::local().contains(&name));
 
-    let child = spawn(pid.clone(), common::simplest_handler).unwrap();
-    assert!(Registry::local().contains(&pid));
+    let child = spawn(name.clone(), common::simplest_handler).unwrap();
+    assert!(Registry::local().contains(&name));
 
     child.signal_shutdown();
     child.watch_exit().await.unwrap();
     drop(child);
 
-    assert!(!Registry::local().contains(&pid));
+    assert!(!Registry::local().contains(&name));
 }
 
 #[tokio::test]
 async fn get_typed_succeeds_for_the_right_interface_and_errors_otherwise() {
-    let pid = common::test_pid("registry_get_typed");
-    let child = spawn(pid.clone(), |mut inbox: Inbox<PingInterface>| async move {
+    let name = common::test_name("registry_get_typed");
+    let child = spawn(name.clone(), |mut inbox: Inbox<PingInterface>| async move {
         while inbox.recv().await.is_some() {}
         Ok(())
     })
     .unwrap();
 
-    let typed = Registry::local().get_typed::<PingInterface>(&pid);
+    let typed = Registry::local().get_typed::<PingInterface>(&name);
     assert!(typed.is_ok());
 
-    let wrong = Registry::local().get_typed::<OtherInterface>(&pid);
-    assert!(matches!(wrong, Err(TypedRegistryError::TypeMismatch(p)) if p == pid));
+    let wrong = Registry::local().get_typed::<OtherInterface>(&name);
+    assert!(matches!(wrong, Err(TypedRegistryError::TypeMismatch(p)) if p == name));
 
-    let missing = Registry::local().get_typed::<PingInterface>(&Pid::new("nope_not_here"));
+    let missing = Registry::local().get_typed::<PingInterface>(&Name::new("nope_not_here"));
     assert!(matches!(missing, Err(TypedRegistryError::NotFound(_))));
 
     child.signal_shutdown();
@@ -83,18 +83,18 @@ async fn get_typed_succeeds_for_the_right_interface_and_errors_otherwise() {
 
 #[tokio::test]
 async fn get_dyn_succeeds_for_an_accepted_subset_and_errors_otherwise() {
-    let pid = common::test_pid("registry_get_dyn");
-    let child = spawn(pid.clone(), |mut inbox: Inbox<PingInterface>| async move {
+    let name = common::test_name("registry_get_dyn");
+    let child = spawn(name.clone(), |mut inbox: Inbox<PingInterface>| async move {
         while inbox.recv().await.is_some() {}
         Ok(())
     })
     .unwrap();
 
-    let accepted = Registry::local().get_dyn::<(Ping,)>(&pid);
+    let accepted = Registry::local().get_dyn::<(Ping,)>(&name);
     assert!(accepted.is_ok());
 
-    let rejected = Registry::local().get_dyn::<(u8,)>(&pid);
-    assert!(matches!(rejected, Err(TypedRegistryError::TypeMismatch(p)) if p == pid));
+    let rejected = Registry::local().get_dyn::<(u8,)>(&name);
+    assert!(matches!(rejected, Err(TypedRegistryError::TypeMismatch(p)) if p == name));
 
     child.signal_shutdown();
 }
@@ -105,30 +105,30 @@ async fn get_dyn_succeeds_for_an_accepted_subset_and_errors_otherwise() {
 
 #[tokio::test]
 async fn spawn_auto_registers_and_exit_plus_drop_auto_deregisters() {
-    let pid = common::test_pid("auto_register_lifecycle");
-    assert!(!Registry::local().contains(&pid));
+    let name = common::test_name("auto_register_lifecycle");
+    assert!(!Registry::local().contains(&name));
 
-    let child = spawn(pid.clone(), common::simplest_handler).unwrap();
-    assert!(Registry::local().contains(&pid));
+    let child = spawn(name.clone(), common::simplest_handler).unwrap();
+    assert!(Registry::local().contains(&name));
 
     child.signal_shutdown();
     child.watch_exit().await.unwrap();
     // Still registered: `Child` itself is a strong reference.
-    assert!(Registry::local().contains(&pid));
+    assert!(Registry::local().contains(&name));
 
     drop(child);
     // Dropping the last strong reference deregisters synchronously - no
     // polling or sleeping needed.
-    assert!(!Registry::local().contains(&pid));
+    assert!(!Registry::local().contains(&name));
 }
 
 #[tokio::test]
-async fn duplicate_pid_is_rejected_and_reports_the_pid() {
-    let pid = common::test_pid("duplicate_pid");
-    let child = spawn(pid.clone(), common::simplest_handler).unwrap();
+async fn duplicate_name_is_rejected_and_reports_the_name() {
+    let name = common::test_name("duplicate_name");
+    let child = spawn(name.clone(), common::simplest_handler).unwrap();
 
-    let result = spawn(pid.clone(), common::simplest_handler);
-    assert!(matches!(result, Err(DuplicatePidError { pid: ref p }) if *p == pid));
+    let result = spawn(name.clone(), common::simplest_handler);
+    assert!(matches!(result, Err(DuplicateNameError { name: ref p }) if *p == name));
 
     child.signal_shutdown();
 }
@@ -136,20 +136,20 @@ async fn duplicate_pid_is_rejected_and_reports_the_pid() {
 #[tokio::test]
 async fn a_rejected_duplicate_spawn_does_not_deregister_the_original() {
     // Regression test: `StrongAddress::create` used to construct a full
-    // `StrongAddress` *before* registering it, so a rejected duplicate-pid
+    // `StrongAddress` *before* registering it, so a rejected duplicate-name
     // attempt would still run that (never-actually-registered) address's
     // `Drop` impl, which unconditionally removed whatever was currently
-    // registered under that pid - deregistering the pre-existing, still
+    // registered under that name - deregistering the pre-existing, still
     // very much alive, actor as a side effect of the rejection.
-    let pid = common::test_pid("dup_no_collateral_damage");
-    let child = spawn(pid.clone(), common::simplest_handler).unwrap();
-    assert!(Registry::local().contains(&pid));
+    let name = common::test_name("dup_no_collateral_damage");
+    let child = spawn(name.clone(), common::simplest_handler).unwrap();
+    assert!(Registry::local().contains(&name));
 
-    let duplicate = spawn(pid.clone(), common::simplest_handler);
+    let duplicate = spawn(name.clone(), common::simplest_handler);
     assert!(duplicate.is_err());
 
     assert!(
-        Registry::local().contains(&pid),
+        Registry::local().contains(&name),
         "the original actor must still be registered after a rejected duplicate spawn"
     );
     assert!(!child.is_dead());
@@ -157,18 +157,18 @@ async fn a_rejected_duplicate_spawn_does_not_deregister_the_original() {
     child.signal_shutdown();
     child.watch_exit().await.unwrap();
     drop(child);
-    assert!(!Registry::local().contains(&pid));
+    assert!(!Registry::local().contains(&name));
 }
 
 #[tokio::test]
-async fn pid_can_be_reused_once_the_previous_actor_is_fully_gone() {
-    let pid = common::test_pid("pid_reuse");
-    let child1 = spawn(pid.clone(), common::simplest_handler).unwrap();
+async fn name_can_be_reused_once_the_previous_actor_is_fully_gone() {
+    let name = common::test_name("name_reuse");
+    let child1 = spawn(name.clone(), common::simplest_handler).unwrap();
     child1.signal_shutdown();
     child1.watch_exit().await.unwrap();
     drop(child1);
 
-    let child2 = spawn(pid.clone(), common::simplest_handler);
+    let child2 = spawn(name.clone(), common::simplest_handler);
     assert!(child2.is_ok());
 
     child2.unwrap().signal_shutdown();
@@ -176,14 +176,14 @@ async fn pid_can_be_reused_once_the_previous_actor_is_fully_gone() {
 
 #[tokio::test]
 async fn strong_address_create_also_registers() {
-    let pid = common::test_pid("strong_address_registers");
+    let name = common::test_name("strong_address_registers");
     let strong: zestors_runtime::StrongAddress<()> =
-        zestors_runtime::StrongAddress::create(pid.clone()).unwrap();
+        zestors_runtime::StrongAddress::create(name.clone()).unwrap();
 
-    assert!(Registry::local().contains(&pid));
+    assert!(Registry::local().contains(&name));
 
     drop(strong);
-    assert!(!Registry::local().contains(&pid));
+    assert!(!Registry::local().contains(&name));
 }
 
 // ============================================================================
@@ -193,20 +193,20 @@ async fn strong_address_create_also_registers() {
 #[tokio::test]
 async fn fetch_addresses_includes_every_currently_registered_actor() {
     let mut children = Vec::new();
-    let mut pids = Vec::new();
+    let mut names = Vec::new();
     for i in 0..5 {
-        let pid = common::test_pid(&format!("fetch_all_{i}"));
-        children.push(spawn(pid.clone(), common::simplest_handler).unwrap());
-        pids.push(pid);
+        let name = common::test_name(&format!("fetch_all_{i}"));
+        children.push(spawn(name.clone(), common::simplest_handler).unwrap());
+        names.push(name);
     }
 
     let addresses = Registry::local().fetch_addresses().await;
-    let fetched_pids: std::collections::HashSet<_> =
-        addresses.iter().map(|a| a.pid().clone()).collect();
-    for pid in &pids {
+    let fetched_names: std::collections::HashSet<_> =
+        addresses.iter().map(|a| a.name().clone()).collect();
+    for name in &names {
         assert!(
-            fetched_pids.contains(pid),
-            "fetch_addresses should include {pid}"
+            fetched_names.contains(name),
+            "fetch_addresses should include {name}"
         );
     }
 
@@ -216,63 +216,63 @@ async fn fetch_addresses_includes_every_currently_registered_actor() {
 }
 
 // ============================================================================
-// Pid.
+// Name.
 // ============================================================================
 
 #[test]
-fn rand_pids_are_unique() {
+fn rand_names_are_unique() {
     let mut seen = std::collections::HashSet::new();
     for _ in 0..500 {
-        assert!(seen.insert(Pid::rand()), "Pid::rand produced a duplicate");
+        assert!(seen.insert(Name::rand()), "Name::rand produced a duplicate");
     }
 }
 
 #[test]
-fn pid_conversions_round_trip_through_string() {
-    let pid = Pid::new("some-name");
-    let s: String = (&pid).into();
+fn name_conversions_round_trip_through_string() {
+    let name = Name::new("some-name");
+    let s: String = (&name).into();
     assert_eq!(s, "some-name");
-    assert_eq!(Pid::new(s), pid);
+    assert_eq!(Name::new(s), name);
 }
 
 #[tokio::test]
-async fn pid_address_and_typed_address_mirror_the_registry() {
-    let pid = common::test_pid("pid_helper_methods");
-    let child = spawn(pid.clone(), |mut inbox: Inbox<PingInterface>| async move {
+async fn name_address_and_typed_address_mirror_the_registry() {
+    let name = common::test_name("name_helper_methods");
+    let child = spawn(name.clone(), |mut inbox: Inbox<PingInterface>| async move {
         while inbox.recv().await.is_some() {}
         Ok(())
     })
     .unwrap();
 
-    assert!(pid.address().is_some());
-    assert!(pid.typed_address::<PingInterface>().is_ok());
-    assert!(pid.typed_address::<OtherInterface>().is_err());
+    assert!(name.address().is_some());
+    assert!(name.typed_address::<PingInterface>().is_ok());
+    assert!(name.typed_address::<OtherInterface>().is_err());
 
     child.signal_shutdown();
     child.watch_exit().await.unwrap();
     drop(child);
 
-    assert!(pid.address().is_none());
+    assert!(name.address().is_none());
 }
 
 // #[tokio::test]
-// async fn pid_current_and_parent_reflect_the_spawn_tree() {
+// async fn name_current_and_parent_reflect_the_spawn_tree() {
 //     let (tx, rx) = tokio::sync::oneshot::channel();
 
 //     let parent = spawn_rand(move |mut inbox: Inbox<()>| async move {
-//         let parent_pid = inbox.pid().clone();
-//         assert_eq!(Pid::current(), Some(parent_pid.clone()));
-//         assert_eq!(Pid::parent(), None, "a top-level spawn has no parent");
+//         let parent_name = inbox.name().clone();
+//         assert_eq!(Name::current(), Some(parent_name.clone()));
+//         assert_eq!(Name::parent(), None, "a top-level spawn has no parent");
 
 //         // A panic here is caught by the runtime and turned into an
 //         // `ExitStatus::Panicked` on this child, rather than unwinding into
 //         // the test - so we report success/failure back through the oneshot
 //         // instead of relying on an in-task panic to surface directly.
 //         let child = spawn_rand(move |mut child_inbox: Inbox<()>| {
-//             let parent_pid = parent_pid.clone();
+//             let parent_name = parent_name.clone();
 //             async move {
-//                 assert_eq!(Pid::current(), Some(child_inbox.pid().clone()));
-//                 assert_eq!(Pid::parent(), Some(parent_pid));
+//                 assert_eq!(Name::current(), Some(child_inbox.name().clone()));
+//                 assert_eq!(Name::parent(), Some(parent_name));
 //                 while child_inbox.recv().await.is_some() {}
 //                 Ok(())
 //             }
@@ -288,7 +288,7 @@ async fn pid_address_and_typed_address_mirror_the_registry() {
 
 //     assert!(
 //         rx.await.unwrap(),
-//         "the child's Pid::current/Pid::parent assertions must have held"
+//         "the child's Name::current/Name::parent assertions must have held"
 //     );
 
 //     parent.signal_shutdown();

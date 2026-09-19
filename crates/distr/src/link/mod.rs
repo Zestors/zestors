@@ -4,8 +4,8 @@
 //! [`Links`] is what the layers of a node send and receive messages through.
 //! It keeps one connection per pair of nodes, dials on demand and backs off
 //! while a peer is unreachable, and reports [`PeerEvent`]s. Messages go into a
-//! bounded pipe per peer, [`Protocol`] and [`Delivery`]; each ordered pipe is a
-//! long-lived stream, so messages on it arrive in order, while the pipes to one
+//! bounded lane per peer, [`Protocol`] and [`Delivery`]; each ordered lane is a
+//! long-lived stream, so messages on it arrive in order, while the lanes to one
 //! peer don't hold each other up. Messages that arrive are routed to whoever
 //! subscribed to their protocol.
 //!
@@ -19,7 +19,7 @@ mod wire;
 #[cfg(all(test, feature = "quic"))]
 mod tests;
 
-use crate::{ClusterTimings, Member, NodeAddr, NodeId, backend::LocalNode};
+use crate::{NodeAddr, NodeId, backend::LocalNode};
 use bytes::Bytes;
 use dashmap::{DashMap, mapref::entry::Entry};
 use dynamic::{DynConnection, DynEndpoint, ErasedBackend};
@@ -32,6 +32,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
+    time::Duration,
 };
 use tokio::{
     io::AsyncReadExt,
@@ -40,9 +41,47 @@ use tokio::{
     time::timeout,
 };
 use tokio_util::sync::{CancellationToken, DropGuard};
-use wire::{Hello, MAX_MESSAGE_SIZE, read_frame, read_hello, write_hello};
+use wire::{Hello, read_frame, read_hello, write_hello};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// The size of the largest message that can be sent, in bytes, and the largest
+/// accepted from a peer.
+pub(super) const MAX_MESSAGE_SIZE: usize = 4 * 1024 * 1024;
+
+/// The timeouts and intervals of the connections to other nodes.
+///
+/// The defaults suit real networks; shorten them for local tests.
+#[derive(Debug, Clone)]
+pub struct LinkTimings {
+    /// How long to wait for a connection to a peer to be established.
+    pub connect_timeout: Duration,
+    /// How long to wait for a new connection's identity exchange.
+    pub handshake_timeout: Duration,
+    /// How long the sender task for a peer lingers without messages to send.
+    pub peer_idle: Duration,
+    /// How long to wait after a failed attempt to connect to a peer before trying
+    /// again. Doubles with every further failure, up to `reconnect_backoff_max`.
+    /// Messages for the peer in the meantime are dropped.
+    pub reconnect_backoff_min: Duration,
+    /// The longest pause between attempts to connect to an unreachable peer.
+    pub reconnect_backoff_max: Duration,
+    /// How long to wait for queued messages to be delivered when shutting down.
+    pub shutdown_grace: Duration,
+}
+
+impl Default for LinkTimings {
+    fn default() -> Self {
+        Self {
+            connect_timeout: Duration::from_secs(5),
+            handshake_timeout: Duration::from_secs(5),
+            peer_idle: Duration::from_secs(60),
+            reconnect_backoff_min: Duration::from_millis(250),
+            reconnect_backoff_max: Duration::from_secs(10),
+            shutdown_grace: Duration::from_secs(2),
+        }
+    }
+}
 
 /// How many messages may be queued for one sender before it has to wait, or,
 /// for datagrams, before new ones are dropped.
@@ -68,7 +107,7 @@ pub(super) enum Delivery {
     /// itself anyway, such as gossip.
     Datagram,
     /// Arrives complete and in order relative to what else is sent on the same
-    /// pipe, or not at all if the connection is lost.
+    /// lane, or not at all if the connection is lost.
     Ordered,
 }
 
@@ -118,21 +157,21 @@ struct Registered {
     dialer: NodeId,
 }
 
-/// A pipe to a peer for one protocol and delivery.
+/// A lane to a peer for one protocol and delivery.
 struct Lane {
     tx: mpsc::Sender<Bytes>,
     addr: NodeAddr,
 }
 
-/// The peer, protocol and delivery of a pipe, and which of the several
-/// pipes for them it is: see [`Links::sender`].
+/// The peer, protocol and delivery of a lane, and which of the several
+/// lanes for them it is: see [`Links::sender`].
 type LaneKey = (NodeId, Protocol, Delivery, u8);
 
 struct Inner {
     endpoint: Box<dyn DynEndpoint>,
     local: NodeId,
     generation: u64,
-    timings: ClusterTimings,
+    timings: LinkTimings,
     next_conn: AtomicU64,
     conns: DashMap<NodeId, Registered>,
     /// Held while dialing a peer, so that its lanes share one connection
@@ -160,7 +199,7 @@ impl Starter {
     pub(super) async fn start(
         self,
         local: LocalNode,
-        timings: ClusterTimings,
+        timings: LinkTimings,
     ) -> io::Result<(Links, NodeAddr)> {
         let (id, generation) = (local.id.clone(), local.generation);
         let endpoint = self.0.start(local).await?;
@@ -204,33 +243,30 @@ pub(super) struct Links {
 }
 
 impl Links {
-    /// A pipe to `to` for one protocol, which its messages are sent into.
+    /// A lane to the peer `node`, reached at `addr`, for one protocol, which its
+    /// messages are sent into.
     ///
-    /// Cheap to call, and the sender is cheap to clone: clones of one pipe per
+    /// Cheap to call, and the sender is cheap to clone: clones of one lane per
     /// peer, protocol and delivery are handed out. The channel is bounded:
     /// awaiting `send` waits for room, for [`Delivery::Ordered`]; `try_send`
     /// fails when full, which suits [`Delivery::Datagram`]. Messages are at most
-    /// [`Links::max_message_size`] bytes. The channel closes when the peer is
+    /// [`MAX_MESSAGE_SIZE`] bytes. The channel closes when the peer is
     /// forgotten or the links shut down; callers that find it closed ask for a
     /// new one.
     ///
-    /// There can be several pipes per peer, protocol and delivery, told apart
-    /// by `shard`. Messages on one pipe stay in order and are not held up by
+    /// There can be several lanes per peer, protocol and delivery, told apart
+    /// by `shard`. Messages on one lane stay in order and are not held up by
     /// the others, so a layer that spreads its traffic over shards, keeping
     /// what must stay in order on one, doesn't let one large message stall it all.
     pub(super) fn sender(
         &self,
-        to: &Member,
+        node: &NodeId,
+        addr: &NodeAddr,
         protocol: Protocol,
         delivery: Delivery,
         shard: u8,
     ) -> mpsc::Sender<Bytes> {
-        self.inner.sender(to, protocol, delivery, shard)
-    }
-
-    /// The size of the largest message that can be sent, in bytes.
-    pub(super) fn max_message_size(&self) -> usize {
-        MAX_MESSAGE_SIZE
+        self.inner.sender(node, addr, protocol, delivery, shard)
     }
 
     /// Reports of changes in how peers can be reached, from now on. Receivers
@@ -268,10 +304,11 @@ impl Links {
         }
     }
 
-    /// Delivers what is already queued, waiting at most `grace`, then closes
-    /// every connection.
-    pub(super) async fn shutdown(&self, grace: std::time::Duration) {
-        // Dropping our ends of the pipes lets every lane finish its queue and exit.
+    /// Delivers what is already queued, waiting at most
+    /// [`LinkTimings::shutdown_grace`], then closes every connection.
+    pub(super) async fn shutdown(&self) {
+        let grace = self.inner.timings.shutdown_grace;
+        // Dropping our ends of the lanes lets every lane finish its queue and exit.
         self.inner.lanes.clear();
 
         let mut tasks = std::mem::take(&mut *self.inner.lane_tasks.lock().expect("Not poisoned"));
@@ -292,53 +329,50 @@ impl Inner {
         });
     }
 
-    /// The pipe to `to` for `protocol` and `delivery`, started if there is none.
+    /// The lane to `node` for `protocol` and `delivery`, started if there is none.
     fn sender(
         self: &Arc<Self>,
-        to: &Member,
+        node: &NodeId,
+        addr: &NodeAddr,
         protocol: Protocol,
         delivery: Delivery,
         shard: u8,
     ) -> mpsc::Sender<Bytes> {
-        let key = (to.node.clone(), protocol, delivery, shard);
-        match self.lanes.entry(key) {
-            Entry::Occupied(mut occupied) => {
-                let lane = occupied.get();
-                // The pipe ends when idle; one that leads to where the node used
-                // to be is stale.
-                if lane.addr == to.addr && !lane.tx.is_closed() {
-                    return lane.tx.clone();
-                }
-                let lane = self.start_lane(to, protocol, delivery);
-                let tx = lane.tx.clone();
-                occupied.insert(lane);
-                tx
-            }
-            Entry::Vacant(vacant) => {
-                let lane = self.start_lane(to, protocol, delivery);
-                let tx = lane.tx.clone();
-                vacant.insert(lane);
-                tx
-            }
+        let key = (node.clone(), protocol, delivery, shard);
+        let mut lane = self
+            .lanes
+            .entry(key)
+            .or_insert_with(|| self.start_lane(node, addr, protocol, delivery));
+        // The lane ends when idle; one that leads to where the node used to be
+        // is stale.
+        if lane.addr != *addr || lane.tx.is_closed() {
+            *lane = self.start_lane(node, addr, protocol, delivery);
         }
+        lane.tx.clone()
     }
 
-    /// Starts the task for a new pipe to `to`.
-    fn start_lane(self: &Arc<Self>, to: &Member, protocol: Protocol, delivery: Delivery) -> Lane {
+    /// Starts the task for a new lane to `node`.
+    fn start_lane(
+        self: &Arc<Self>,
+        node: &NodeId,
+        addr: &NodeAddr,
+        protocol: Protocol,
+        delivery: Delivery,
+    ) -> Lane {
         let (tx, rx) = mpsc::channel(LANE_QUEUE);
         let health = self
             .health
             .lock()
             .expect("Not poisoned")
-            .entry(to.node.clone())
+            .entry(node.clone())
             .or_default()
             .clone();
 
         let token = self.token.clone();
         let task = lane(
             self.clone(),
-            to.node.clone(),
-            to.addr.clone(),
+            node.clone(),
+            addr.clone(),
             protocol,
             delivery,
             health,
@@ -352,7 +386,7 @@ impl Inner {
             });
         Lane {
             tx,
-            addr: to.addr.clone(),
+            addr: addr.clone(),
         }
     }
 

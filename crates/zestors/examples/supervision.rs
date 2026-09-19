@@ -120,38 +120,38 @@ async fn main() -> Result<(), Report> {
     let source = InMemorySupervisorSource::new_arc();
 
     let (spec_a, _addr) = fn_blueprint(|| MyActor::new("A"))
-        .pid("HelloActor")?
+        .name("HelloActor")?
         .with_mode(RestartMode::Never)
         .split();
 
     let (spec_b, _addr) = fn_blueprint(|| MyActor::new("B"))
-        .pid("HelloActor2")?
+        .name("HelloActor2")?
         .with_mode(RestartMode::Always)
         .split();
 
     let (super_spec_a, _addr) = Supervisor::blueprint()
         .children([spec_a, spec_b])
-        .pid("SupervisorA")?
+        .name("SupervisorA")?
         .split();
 
     let (spec_c, _addr) = fn_blueprint(|| MyActor::new("C"))
-        .pid("HelloActor3")?
+        .name("HelloActor3")?
         .with_mode(RestartMode::Always)
         .split();
 
     let (spec_d, _addr) = fn_blueprint(|| MyActor::new("D"))
-        .pid("HelloActor4")?
+        .name("HelloActor4")?
         .with_mode(RestartMode::Always)
         .split();
 
     let (super_spec_b, _addr) = Supervisor::blueprint()
         .children([spec_c, spec_d])
         .source(source.clone())
-        .pid("SupervisorB")?
+        .name("SupervisorB")?
         .split();
 
     let (dyn_actor_spec, _addr) = fn_actor(async |_: Inbox<MyInterface>| Ok(()))
-        .pid("DynActor")?
+        .name("DynActor")?
         .split();
 
     let (task_spec, _addr) = fn_task(|mut task_box| async move {
@@ -178,7 +178,7 @@ async fn main() -> Result<(), Report> {
 
         Ok(())
     })
-    .pid("TaskActor")?
+    .name("TaskActor")?
     .split();
 
     let app_supervisor = Supervisor::blueprint()
@@ -189,23 +189,23 @@ async fn main() -> Result<(), Report> {
             dyn_actor_spec,
             task_spec,
             fn_blueprint(|| fn_actor(async |_: Inbox<MyInterface>| Ok(())))
-                .pid("DynBlueprintActor")?
+                .name("DynBlueprintActor")?
                 .into(),
             fn_blueprint(|| MyActor::new("E"))
-                .pid("DynBlueprintActor2")?
+                .name("DynBlueprintActor2")?
                 .into(),
         ])
-        .pid("app-supervisor")?;
+        .name("app-supervisor")?;
 
     let node = Node::new(
         Supervisor::blueprint()
             .strategy(SupervisionStrategy::RestForOne)
             .child(
                 ApiServer::blueprint("127.0.0.1:8080".parse().unwrap(), "root-supervisor")
-                    .pid("ApiServer")?,
+                    .name("ApiServer")?,
             )
             .child(app_supervisor)
-            .pid("root-supervisor")?,
+            .name("root-supervisor")?,
     );
 
     let root_address = node.root_supervisor().address().clone();
@@ -236,10 +236,10 @@ fn spawn_tasks_in_background(source: Arc<InMemorySupervisorSource>) {
                         .await?;
                         Ok(())
                     })
-                    .rand_pid()
+                    .rand_name()
                     .into_dyn(),
                 )
-                .expect("Pid is unique");
+                .expect("Name is unique");
         }
     });
 }

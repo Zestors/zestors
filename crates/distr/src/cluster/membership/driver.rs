@@ -135,9 +135,13 @@ impl Driver {
     /// Queues `message` for `to`. Membership tolerates loss, so a full queue
     /// just drops it.
     fn send(&self, to: &Member, message: Message) {
-        let sender = self
-            .links
-            .sender(to, Protocol::MEMBERSHIP, message.delivery(), 0);
+        let sender = self.links.sender(
+            &to.node,
+            &to.addr,
+            Protocol::MEMBERSHIP,
+            message.delivery(),
+            0,
+        );
         if sender.try_send(message.encode()).is_err() {
             tracing::debug!(node = %to.node, "Peer queue full or closed, dropping message");
         }
@@ -253,7 +257,9 @@ impl Driver {
 #[cfg(all(test, feature = "sim"))]
 mod tests {
     use super::*;
-    use crate::{Cluster, NodeAddr, backend::LocalNode, cluster::sim::SimNetwork, link::Starter};
+    use crate::{
+        Cluster, LinkTimings, NodeAddr, backend::LocalNode, cluster::sim::SimNetwork, link::Starter,
+    };
     use foca::Foca;
     use rand::SeedableRng;
 
@@ -274,7 +280,7 @@ mod tests {
                     id: NodeId::new("node-a"),
                     generation: 1,
                 },
-                ClusterTimings::default(),
+                LinkTimings::default(),
             )
             .await
             .unwrap();

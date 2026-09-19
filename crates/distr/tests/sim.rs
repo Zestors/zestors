@@ -242,10 +242,10 @@ async fn cluster_nodes_run_over_the_simulated_network() {
     let config = |name: &str, n: u8| {
         ClusterConfig::with_backend(name, net.backend(addr(n))).foca_config(fast_foca_config())
     };
-    let a = ClusterNode::new(Supervisor::blueprint().rand_pid(), config("node-a", 1))
+    let a = ClusterNode::new(Supervisor::blueprint().rand_name(), config("node-a", 1))
         .with_exit_delay(Duration::ZERO);
     let b = ClusterNode::new(
-        Supervisor::blueprint().rand_pid(),
+        Supervisor::blueprint().rand_name(),
         config("node-b", 2).seed(Seed::new("node-a", addr(1))),
     )
     .with_exit_delay(Duration::ZERO);

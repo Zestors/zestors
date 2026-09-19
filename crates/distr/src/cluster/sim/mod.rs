@@ -30,12 +30,12 @@
 mod fabric;
 
 use super::{
-    Cluster, ClusterTimings, Member, NodeAddr, Seed,
-    backend::{Backend, LocalNode},
+    Cluster, ClusterTimings, Member, Seed,
     membership::{Membership, Options},
 };
 use crate::{
-    NodeId,
+    LinkTimings, NodeAddr, NodeId,
+    backend::{Backend, LocalNode},
     link::{Links, Starter},
 };
 use fabric::{Fabric, SimEndpoint};
@@ -49,6 +49,7 @@ pub struct SimNetwork {
     generation: u64,
     foca: foca::Config,
     timings: ClusterTimings,
+    link_timings: LinkTimings,
 }
 
 impl SimNetwork {
@@ -64,6 +65,7 @@ impl SimNetwork {
             generation: 0,
             foca: foca::Config::new_lan(NonZeroU32::new(32).unwrap()),
             timings: ClusterTimings::default(),
+            link_timings: LinkTimings::default(),
         }
     }
 
@@ -72,10 +74,16 @@ impl SimNetwork {
         &mut self.foca
     }
 
-    /// The timeouts and intervals of nodes started from now on. The simulated
-    /// network only has a use for those of the membership layer.
+    /// The membership timeouts and intervals of nodes started from now on.
     pub fn timings_mut(&mut self) -> &mut ClusterTimings {
         &mut self.timings
+    }
+
+    /// The connection timeouts and intervals of nodes started from now on.
+    /// Connecting is instant on the simulated network, so mostly the idle and
+    /// shutdown ones matter.
+    pub fn link_timings_mut(&mut self) -> &mut LinkTimings {
+        &mut self.link_timings
     }
 
     /// Every message takes `latency` plus up to `jitter` to arrive.
@@ -130,7 +138,7 @@ impl SimNetwork {
                     id: local.node.clone(),
                     generation: self.generation,
                 },
-                self.timings.clone(),
+                self.link_timings.clone(),
             )
             .await
             .expect("The simulated network can always start");
@@ -147,7 +155,6 @@ impl SimNetwork {
         SimNode {
             cluster,
             running: Some((membership, links)),
-            shutdown_grace: self.timings.shutdown_grace,
         }
     }
 }
@@ -173,7 +180,6 @@ pub struct SimNode {
     pub cluster: Cluster,
     /// `None` once the node has left or crashed.
     running: Option<(Membership, Links)>,
-    shutdown_grace: Duration,
 }
 
 impl SimNode {
@@ -184,7 +190,7 @@ impl SimNode {
     pub async fn leave(&mut self) {
         let (membership, links) = self.running.take().expect("Node is running");
         membership.leave().await;
-        links.shutdown(self.shutdown_grace).await;
+        links.shutdown().await;
     }
 
     /// Stops without a word, like a crash: the rest of the cluster has to find

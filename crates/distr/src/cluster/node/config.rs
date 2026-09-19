@@ -1,6 +1,5 @@
-use crate::NodeAddr;
 use crate::{
-    ClusterTimings, NodeId, Seed, backend::Backend, cluster::membership::Options, link::Starter,
+    LinkTimings, NodeAddr, NodeId, backend::Backend, cluster::membership::Options, link::Starter,
 };
 use rand::{SeedableRng, rngs::StdRng};
 #[cfg(feature = "quic")]
@@ -16,6 +15,7 @@ pub struct ClusterConfig {
     pub(super) foca: Option<foca::Config>,
     pub(super) expected_size: NonZeroU32,
     pub(super) timings: ClusterTimings,
+    pub(super) link_timings: LinkTimings,
     pub(super) rng_seed: Option<u64>,
     pub(super) generation_store: Option<PathBuf>,
     pub(super) call_timeout: Duration,
@@ -42,6 +42,7 @@ impl ClusterConfig {
             foca: None,
             expected_size: NonZeroU32::new(32).unwrap(),
             timings: ClusterTimings::default(),
+            link_timings: LinkTimings::default(),
             rng_seed: None,
             generation_store: None,
             call_timeout: Duration::from_secs(30),
@@ -70,9 +71,15 @@ impl ClusterConfig {
         self
     }
 
-    /// Sets the timeouts and intervals of the connection and membership layers.
+    /// Sets the timeouts and intervals of the membership layer.
     pub fn timings(mut self, timings: ClusterTimings) -> Self {
         self.timings = timings;
+        self
+    }
+
+    /// Sets the timeouts and intervals of the connections to other nodes.
+    pub fn link_timings(mut self, timings: LinkTimings) -> Self {
+        self.link_timings = timings;
         self
     }
 
@@ -140,5 +147,50 @@ impl std::fmt::Debug for ClusterConfig {
             .field("node_id", &self.node_id)
             .field("seeds", &self.seeds)
             .finish_non_exhaustive()
+    }
+}
+
+/// A node to contact when joining the cluster.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Seed {
+    /// The seed's node name, which its certificate must carry.
+    pub node: NodeId,
+    pub addr: NodeAddr,
+}
+
+impl Seed {
+    pub fn new(node: impl Into<NodeId>, addr: impl Into<NodeAddr>) -> Self {
+        Self {
+            node: node.into(),
+            addr: addr.into(),
+        }
+    }
+}
+
+/// The timeouts and intervals of the membership layer.
+///
+/// How quickly failures are *detected* is decided by the membership protocol's
+/// own settings instead, see [`ClusterConfig::foca_config`](crate::ClusterConfig::foca_config).
+/// The defaults suit real networks; shorten them for local tests. For the
+/// connections underneath see [`LinkTimings`](crate::LinkTimings).
+#[derive(Debug, Clone)]
+pub struct ClusterTimings {
+    /// How often the seeds are contacted again while this node knows of no
+    /// other member.
+    pub seed_retry: Duration,
+    /// How long a node declared down by the failure detector may still turn out
+    /// to have said goodbye, before it is reported as failed.
+    pub departure_grace: Duration,
+    /// How long to wait for the membership protocol to announce our departure.
+    pub leave_grace: Duration,
+}
+
+impl Default for ClusterTimings {
+    fn default() -> Self {
+        Self {
+            seed_retry: Duration::from_secs(5),
+            departure_grace: Duration::from_millis(300),
+            leave_grace: Duration::from_secs(1),
+        }
     }
 }

@@ -2,11 +2,10 @@
 //! unreachable, reports when that changes, and writes messages to the peer.
 
 use super::{
-    Conn, Delivery, Inner, PeerEvent, Protocol,
-    wire::{MAX_MESSAGE_SIZE, write_frame},
+    Conn, Delivery, Inner, LinkTimings, MAX_MESSAGE_SIZE, PeerEvent, Protocol, wire::write_frame,
 };
 use crate::{
-    ClusterTimings, NodeAddr, NodeId,
+    NodeAddr, NodeId,
     backend::{DatagramError, RecvStream, SendStream},
 };
 use bytes::{BufMut, Bytes, BytesMut};
@@ -49,7 +48,7 @@ impl Health {
 
     /// Connecting failed. Returns how long to back off, and whether this is
     /// what makes the peer unreachable.
-    fn failed(&mut self, timings: &ClusterTimings) -> (Duration, bool) {
+    fn failed(&mut self, timings: &LinkTimings) -> (Duration, bool) {
         self.failures = self.failures.saturating_add(1);
         let backoff = backoff(timings, self.failures);
         self.retry_at = Some(Instant::now() + backoff);
@@ -186,10 +185,10 @@ async fn send_ordered(
 }
 
 /// How long to wait after the `failures`-th failed connection attempt in a row:
-/// doubling from [`ClusterTimings::reconnect_backoff_min`] up to
-/// [`ClusterTimings::reconnect_backoff_max`], with jitter so peers that lost
+/// doubling from [`LinkTimings::reconnect_backoff_min`] up to
+/// [`LinkTimings::reconnect_backoff_max`], with jitter so peers that lost
 /// the same node don't all retry in lockstep.
-fn backoff(timings: &ClusterTimings, failures: u32) -> Duration {
+fn backoff(timings: &LinkTimings, failures: u32) -> Duration {
     let exponent = failures.saturating_sub(1).min(16);
     let base = timings
         .reconnect_backoff_min

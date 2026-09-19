@@ -4,7 +4,7 @@ use zestors_interface::Interface;
 use zestors_runtime::{
     prelude::*,
     spawn_rand,
-    {TaskBox, errors::DuplicatePidError},
+    {TaskBox, errors::DuplicateNameError},
 };
 
 /// The core trait for an actor's behavior: given an [`Inbox`], runs until it exits.
@@ -50,17 +50,17 @@ pub trait ActorExt: Actor {
         WrapActor::new(self, mapper)
     }
 
-    /// Spawns this actor under a specific [`Pid`], returning a [`Child`] that
-    /// owns its task. Fails if `pid` is already registered. Mirrors
+    /// Spawns this actor under a specific [`Name`], returning a [`Child`] that
+    /// owns its task. Fails if `name` is already registered. Mirrors
     /// [`zestors_runtime::spawn`].
     fn spawn(
         self,
-        pid: impl Into<Pid>,
-    ) -> Result<Child<Self::Exit, Self::Interface>, DuplicatePidError> {
-        spawn(pid, |inbox| self.run(inbox))
+        name: impl Into<Name>,
+    ) -> Result<Child<Self::Exit, Self::Interface>, DuplicateNameError> {
+        spawn(name, |inbox| self.run(inbox))
     }
 
-    /// Spawns this actor under a freshly generated [`Pid`], returning a
+    /// Spawns this actor under a freshly generated [`Name`], returning a
     /// [`Child`] that owns its task. Mirrors [`zestors_runtime::spawn_rand`].
     fn spawn_rand(self) -> Child<Self::Exit, Self::Interface> {
         spawn_rand(|inbox| self.run(inbox))

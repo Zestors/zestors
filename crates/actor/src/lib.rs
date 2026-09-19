@@ -79,7 +79,7 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() {
-//! // `ActorExt::spawn_rand` starts the actor on a fresh `Pid`, same as
+//! // `ActorExt::spawn_rand` starts the actor on a fresh `Name`, same as
 //! // `zestors_runtime::spawn_rand` would for a hand-written `Actor`.
 //! let child = Counter { count: 0 }.spawn_rand();
 //!

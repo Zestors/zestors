@@ -97,16 +97,16 @@ impl Actor for SlowShutdownActor {
     }
 }
 
-/// Builds a [`SlowShutdownActor`] child (random pid) that sleeps for `delay`
+/// Builds a [`SlowShutdownActor`] child (random name) that sleeps for `delay`
 /// before actually exiting once told to stop.
 pub fn slow_shutdown_child(delay: Duration) -> ChildSpec {
     fn_blueprint(move || SlowShutdownActor { delay })
-        .rand_pid()
+        .rand_name()
         .split()
         .0
 }
 
-/// Builds a fresh [`TestActor`] child (random pid, short timeouts so a
+/// Builds a fresh [`TestActor`] child (random name, short timeouts so a
 /// misbehaving test fails fast instead of hanging), returning its spec (to
 /// hand to a [`SupervisorBlueprint`]), its address (to send it [`Crash`] /
 /// [`Generation`] directly, bypassing the supervisor), and its generation
@@ -118,7 +118,7 @@ pub fn test_child(mode: RestartMode) -> (ChildSpec, Address<TestInterface>, Arc<
     let (spec, address) = fn_blueprint(move || TestActor {
         generation: for_actor.clone(),
     })
-    .rand_pid()
+    .rand_name()
     .with_cfg(ChildConfig {
         restart_mode: mode,
         // The channel a just-stopped child was on can briefly still report
@@ -144,7 +144,7 @@ pub fn test_child(mode: RestartMode) -> (ChildSpec, Address<TestInterface>, Arc<
 pub async fn spawn_supervisor(
     blueprint: SupervisorBlueprint,
 ) -> (Child<(), Dyn>, Address<SupervisorInterface>) {
-    let (spec, address) = blueprint.rand_pid().split();
+    let (spec, address) = blueprint.rand_name().split();
     let child = spec.start().await.expect("supervisor should start");
     (child, address)
 }

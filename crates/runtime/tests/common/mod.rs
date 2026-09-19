@@ -34,10 +34,10 @@ pub async fn simplest_handler(mut inbox: Inbox<()>) -> Result<(), Report> {
     Ok(())
 }
 
-/// A stable [`Pid`] for tests that want a human-readable, collision-free
-/// name rather than [`Pid::rand`].
-pub fn test_pid(name: &str) -> Pid {
-    Pid::new(format!("test_{name}"))
+/// A stable [`Name`] for tests that want a human-readable, collision-free
+/// name rather than [`Name::rand`].
+pub fn test_name(name: &str) -> Name {
+    Name::new(format!("test_{name}"))
 }
 
 /// Waits, with a generous safety-net timeout, for `actor`'s status to

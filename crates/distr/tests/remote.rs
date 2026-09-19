@@ -13,12 +13,12 @@ use tokio::task::JoinHandle;
 use zestors::{
     interface::{Envelope, Interface, Message},
     prelude::*,
-    runtime::{Dyn, Inbox, Pid, spawn},
+    runtime::{Dyn, Inbox, Name, spawn},
     supervisor::Supervisor,
 };
 use zestors_distr::{
     Cluster, ClusterConfig, ClusterNode, ClusterNodeError, Decode, DecodeError, Encode,
-    EncodeError, GlobalPid, Remote, RemoteAccepts, RemoteAddress, RemoteCallError,
+    EncodeError, GlobalName, Remote, RemoteAccepts, RemoteAddress, RemoteCallError,
     RemoteCallOptions, RemoteCastError, RemoteError, RemoteReceipt as _, RemoteReplyError, Seed,
     StableId, sim::SimNetwork,
 };
@@ -120,10 +120,10 @@ impl Log {
     }
 }
 
-/// Runs a worker actor under `pid`.
-fn worker(pid: &'static str, log: Log) -> zestors::runtime::Child<(), WorkerInterface> {
+/// Runs a worker actor under `name`.
+fn worker(name: &'static str, log: Log) -> zestors::runtime::Child<(), WorkerInterface> {
     spawn(
-        Pid::new_static(pid),
+        Name::new_static(name),
         |mut inbox: Inbox<WorkerInterface>| async move {
             let mut hung = Vec::new();
             while let Some(msg) = inbox.recv().await {
@@ -149,7 +149,7 @@ fn worker(pid: &'static str, log: Log) -> zestors::runtime::Child<(), WorkerInte
             Ok(())
         },
     )
-    .expect("The pid is unused")
+    .expect("The name is unused")
 }
 
 fn addr(n: u8) -> SocketAddr {
@@ -181,7 +181,7 @@ fn node(net: &SimNetwork, name: &str, n: u8, seed: Option<u8>) -> ClusterNode {
             addr(seed),
         ));
     }
-    ClusterNode::new(Supervisor::blueprint().rand_pid(), config).with_exit_delay(Duration::ZERO)
+    ClusterNode::new(Supervisor::blueprint().rand_name(), config).with_exit_delay(Duration::ZERO)
 }
 
 impl Node {
@@ -233,9 +233,9 @@ impl Pair {
         Self { a, b }
     }
 
-    /// The actor `pid` on node-b, as node-a sees it.
-    fn on_b<C: zestors::runtime::Context>(&self, pid: &'static str) -> RemoteAddress<C> {
-        self.a.remote.address(GlobalPid::new(pid, "node-b"))
+    /// The actor `name` on node-b, as node-a sees it.
+    fn on_b<C: zestors::runtime::Context>(&self, name: &'static str) -> RemoteAddress<C> {
+        self.a.remote.address(GlobalName::new(name, "node-b"))
     }
 }
 
@@ -400,7 +400,7 @@ async fn messages_that_cant_be_sent_are_given_back() {
 
     // A node that isn't in the cluster.
     let stranger: RemoteAddress<Dyn<(Note,)>> =
-        pair.a.remote.address(GlobalPid::new("any", "node-z"));
+        pair.a.remote.address(GlobalName::new("any", "node-z"));
     let Err(RemoteCastError::NotAMember(Note(3))) = stranger.cast(Note(3)).await else {
         panic!("Expected the message back")
     };
@@ -422,7 +422,7 @@ async fn nothing_is_sent_before_the_node_runs() {
     let node = node(&net, "node-a", 1, None);
     let remote = node.remote();
 
-    let target: RemoteAddress<Dyn<(Note,)>> = remote.address(GlobalPid::new("any", "node-b"));
+    let target: RemoteAddress<Dyn<(Note,)>> = remote.address(GlobalName::new("any", "node-b"));
     assert!(matches!(
         target.cast(Note(1)).await,
         Err(RemoteCastError::NotRunning(_))

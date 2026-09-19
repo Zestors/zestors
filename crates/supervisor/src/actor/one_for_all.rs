@@ -4,17 +4,17 @@ use super::*;
 
 pub(super) struct OneForAllSupervisor<'a> {
     inner: &'a mut SupervisorInner,
-    initializing: IndexSet<Pid>,
-    exiting: IndexSet<Pid>,
-    /// Pids currently being stopped as part of an in-progress group restart,
+    initializing: IndexSet<Name>,
+    exiting: IndexSet<Name>,
+    /// Names currently being stopped as part of an in-progress group restart,
     /// i.e. the ones we're still waiting to hear an exit from.
-    restarting: IndexSet<Pid>,
+    restarting: IndexSet<Name>,
     /// Members of the current cascade (past or present members of `restarting`)
     /// that should be started again once every member has exited.
-    cascade_restart: IndexSet<Pid>,
+    cascade_restart: IndexSet<Name>,
     /// Members of the current cascade that should be dropped, rather than
     /// restarted, once they've exited (configured with `RestartMode::Never`).
-    cascade_drop: IndexSet<Pid>,
+    cascade_drop: IndexSet<Name>,
 }
 
 impl<'a> OneForAllSupervisor<'a> {
@@ -33,30 +33,30 @@ impl<'a> OneForAllSupervisor<'a> {
     /// the cascade, folding them in so they get restarted (or dropped, if
     /// configured with `RestartMode::Never`) once every member has exited.
     ///
-    /// `trigger` is the pid whose exit started (or is rejoining) the cascade;
+    /// `trigger` is the name whose exit started (or is rejoining) the cascade;
     /// it has already exited and does not need to be stopped itself.
-    fn start_cascade(&mut self, trigger: &Pid) -> ControlFlow<()> {
-        let siblings: Vec<Pid> = self
+    fn start_cascade(&mut self, trigger: &Name) -> ControlFlow<()> {
+        let siblings: Vec<Name> = self
             .inner
             .supervisees
-            .pids()
-            .filter(|pid| {
-                *pid != trigger
-                    && !self.cascade_restart.contains(*pid)
-                    && !self.cascade_drop.contains(*pid)
+            .names()
+            .filter(|name| {
+                *name != trigger
+                    && !self.cascade_restart.contains(*name)
+                    && !self.cascade_drop.contains(*name)
             })
             .cloned()
             .collect();
 
-        for pid in siblings {
-            let Some(supervisee) = self.inner.supervisees.get_mut(&pid) else {
+        for name in siblings {
+            let Some(supervisee) = self.inner.supervisees.get_mut(&name) else {
                 continue;
             };
 
             if supervisee.cfg().restart_mode == RestartMode::Never {
-                self.cascade_drop.insert(pid.clone());
+                self.cascade_drop.insert(name.clone());
                 if supervisee.stop().is_shutting_down() {
-                    self.restarting.insert(pid);
+                    self.restarting.insert(name);
                 }
                 continue;
             }
@@ -65,9 +65,9 @@ impl<'a> OneForAllSupervisor<'a> {
                 return self.shutdown();
             }
 
-            self.cascade_restart.insert(pid.clone());
+            self.cascade_restart.insert(name.clone());
             if supervisee.stop().is_shutting_down() {
-                self.restarting.insert(pid);
+                self.restarting.insert(name);
             }
         }
 
@@ -81,12 +81,12 @@ impl<'a> OneForAllSupervisor<'a> {
     /// Called once every member of the current cascade has exited: drops the
     /// ones configured with `RestartMode::Never` and restarts the rest.
     fn finish_cascade(&mut self) {
-        for pid in self.cascade_drop.drain(..).collect::<Vec<_>>() {
-            self.remove_spec(&pid);
+        for name in self.cascade_drop.drain(..).collect::<Vec<_>>() {
+            self.remove_spec(&name);
         }
 
-        for pid in self.cascade_restart.drain(..) {
-            let Some(supervisee) = self.inner.supervisees.get_mut(&pid) else {
+        for name in self.cascade_restart.drain(..) {
+            let Some(supervisee) = self.inner.supervisees.get_mut(&name) else {
                 continue;
             };
 
@@ -98,32 +98,32 @@ impl<'a> OneForAllSupervisor<'a> {
 }
 
 impl<'a> Strategy for OneForAllSupervisor<'a> {
-    fn parts(&mut self) -> (&mut SupervisorInner, &mut IndexSet<Pid>) {
+    fn parts(&mut self) -> (&mut SupervisorInner, &mut IndexSet<Name>) {
         (self.inner, &mut self.initializing)
     }
 
-    fn handle_exit(&mut self, pid: &Pid, reason: ExitReason) -> ControlFlow<()> {
-        if self.exiting.swap_remove(pid) {
+    fn handle_exit(&mut self, name: &Name, reason: ExitReason) -> ControlFlow<()> {
+        if self.exiting.swap_remove(name) {
             return match self.exiting.is_empty() {
                 true => ControlFlow::Break(()),
                 false => ControlFlow::Continue(()),
             };
         }
 
-        if self.restarting.swap_remove(pid) {
+        if self.restarting.swap_remove(name) {
             if self.restarting.is_empty() {
                 self.finish_cascade();
             }
             return ControlFlow::Continue(());
         }
 
-        let Some(supervisee) = self.inner.supervisees.get_mut(pid) else {
-            tracing::warn!("Supervisee not found for pid: {}", pid);
+        let Some(supervisee) = self.inner.supervisees.get_mut(name) else {
+            tracing::warn!("Supervisee not found for name: {}", name);
             return ControlFlow::Continue(());
         };
 
         if !reason.requires_restart(supervisee) {
-            self.remove_spec(pid);
+            self.remove_spec(name);
             return ControlFlow::Continue(());
         }
 
@@ -134,26 +134,26 @@ impl<'a> Strategy for OneForAllSupervisor<'a> {
         // One-for-all: this child alone decides *whether* the group restarts,
         // but once it does, every other live supervisee is stopped and
         // restarted alongside it (see `start_cascade` / `finish_cascade`).
-        self.cascade_restart.insert(pid.clone());
-        self.start_cascade(pid)
+        self.cascade_restart.insert(name.clone());
+        self.start_cascade(name)
     }
 
     fn shutdown(&mut self) -> ControlFlow<()> {
         self.inner.shutdown(&mut self.exiting)
     }
 
-    fn remove_spec(&mut self, pid: &Pid) -> Option<Supervisee> {
+    fn remove_spec(&mut self, name: &Name) -> Option<Supervisee> {
         let supervisee = self
             .inner
-            .remove_spec(&mut self.initializing, &mut self.exiting, pid);
+            .remove_spec(&mut self.initializing, &mut self.exiting, name);
 
         if supervisee.is_some() {
-            if self.restarting.swap_remove(pid) && self.restarting.is_empty() {
+            if self.restarting.swap_remove(name) && self.restarting.is_empty() {
                 self.finish_cascade();
             }
 
-            self.cascade_restart.swap_remove(pid);
-            self.cascade_drop.swap_remove(pid);
+            self.cascade_restart.swap_remove(name);
+            self.cascade_drop.swap_remove(name);
         }
 
         supervisee

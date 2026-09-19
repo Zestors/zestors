@@ -4,28 +4,28 @@ use smol_str::SmolStr;
 use std::{borrow::Cow, fmt::Display, sync::Arc};
 use type_sets::{AsTypeSet, Members};
 
-/// A process identifier: a cheaply-cloneable, human-readable string that
+/// The name of an actor: a cheaply-cloneable, human-readable string that
 /// uniquely names an actor in the local [`Registry`].
 ///
-/// A `Pid` is stable across restarts: creating a new [`StrongAddress`] with a
-/// given `Pid` (see [`StrongAddress::create`]) reuses the same registry entry,
+/// A `Name` is stable across restarts: creating a new [`StrongAddress`] with a
+/// given `Name` (see [`StrongAddress::create`]) reuses the same registry entry,
 /// which is what allows an actor to be restarted on the same channel.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Pid(SmolStr);
+pub struct Name(SmolStr);
 
-impl Pid {
-    /// Creates a `Pid` from any type that converts into one (a `String`,
+impl Name {
+    /// Creates a `Name` from any type that converts into one (a `String`,
     /// `&'static str`, etc.).
     pub fn new<T: Into<Self>>(s: T) -> Self {
         s.into()
     }
 
-    /// Creates a `Pid` from a `&'static str` without allocating.
+    /// Creates a `Name` from a `&'static str` without allocating.
     pub fn new_static(s: &'static str) -> Self {
-        Pid(SmolStr::new_static(s))
+        Name(SmolStr::new_static(s))
     }
 
-    /// Generates a new `Pid` from random bytes, base58-encoded.
+    /// Generates a new `Name` from random bytes, base58-encoded.
     pub fn rand() -> Self {
         let rand: [u8; 11] = rand::random();
 
@@ -39,19 +39,19 @@ impl Pid {
         Self::new(val)
     }
 
-    /// Looks up the untyped [`Address`] registered for this `Pid`, or `None`
-    /// if no actor with this `Pid` is currently registered.
+    /// Looks up the untyped [`Address`] registered for this `Name`, or `None`
+    /// if no actor with this `Name` is currently registered.
     pub fn address(&self) -> Option<Address> {
         Registry::local().get(&self)
     }
 
-    /// Looks up the [`Address`] registered for this `Pid`, downcast to the
+    /// Looks up the [`Address`] registered for this `Name`, downcast to the
     /// given [`Interface`]. See [`Registry::get_typed`].
     pub fn typed_address<I: Interface>(&self) -> Result<Address<I>, TypedRegistryError> {
         Registry::local().get_typed::<I>(self)
     }
 
-    /// Looks up the [`Address`] registered for this `Pid`, downcast to the
+    /// Looks up the [`Address`] registered for this `Name`, downcast to the
     /// given dynamic message set. See [`Registry::get_dyn`].
     pub fn dyn_address<S>(&self) -> Result<Address<Dyn<S>>, TypedRegistryError>
     where
@@ -60,92 +60,92 @@ impl Pid {
         Registry::local().get_dyn::<S>(self)
     }
 
-    // /// Returns the [`Pid`] of the actor currently running on this task, or
+    // /// Returns the [`Name`] of the actor currently running on this task, or
     // /// `None` if not called from within an actor's task.
     // pub fn current() -> Option<Self> {
-    //     crate::current_pid()
+    //     crate::current_name()
     // }
 
-    // /// Returns the [`Pid`] of the actor that spawned the actor currently
+    // /// Returns the [`Name`] of the actor that spawned the actor currently
     // /// running on this task, or `None` if not called from within an actor's
     // /// task, or if that actor has no parent.
     // pub fn parent() -> Option<Self> {
-    //     crate::parent_pid()
+    //     crate::parent_name()
     // }
 }
 
-impl Default for Pid {
+impl Default for Name {
     fn default() -> Self {
-        Pid::rand()
+        Name::rand()
     }
 }
 
-impl Display for Pid {
+impl Display for Name {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl From<&'static str> for Pid {
+impl From<&'static str> for Name {
     #[inline]
     fn from(s: &'static str) -> Self {
-        Pid(SmolStr::new_static(s))
+        Name(SmolStr::new_static(s))
     }
 }
 
-impl From<&mut str> for Pid {
+impl From<&mut str> for Name {
     #[inline]
     fn from(s: &mut str) -> Self {
-        Pid(SmolStr::from(s))
+        Name(SmolStr::from(s))
     }
 }
 
-impl From<&String> for Pid {
+impl From<&String> for Name {
     #[inline]
     fn from(s: &String) -> Self {
-        Pid(SmolStr::from(s))
+        Name(SmolStr::from(s))
     }
 }
 
-impl From<String> for Pid {
+impl From<String> for Name {
     #[inline(always)]
     fn from(text: String) -> Self {
-        Pid(SmolStr::from(text))
+        Name(SmolStr::from(text))
     }
 }
 
-impl From<Box<str>> for Pid {
+impl From<Box<str>> for Name {
     #[inline]
-    fn from(s: Box<str>) -> Pid {
-        Pid(SmolStr::from(s))
+    fn from(s: Box<str>) -> Name {
+        Name(SmolStr::from(s))
     }
 }
 
-impl From<Arc<str>> for Pid {
+impl From<Arc<str>> for Name {
     #[inline]
-    fn from(s: Arc<str>) -> Pid {
-        Pid(SmolStr::from(s))
+    fn from(s: Arc<str>) -> Name {
+        Name(SmolStr::from(s))
     }
 }
 
-impl<'a> From<Cow<'a, str>> for Pid {
+impl<'a> From<Cow<'a, str>> for Name {
     #[inline]
-    fn from(s: Cow<'a, str>) -> Pid {
-        Pid(SmolStr::from(s))
+    fn from(s: Cow<'a, str>) -> Name {
+        Name(SmolStr::from(s))
     }
 }
 
-impl From<Pid> for String {
+impl From<Name> for String {
     #[inline]
-    fn from(pid: Pid) -> String {
-        pid.0.into()
+    fn from(name: Name) -> String {
+        name.0.into()
     }
 }
 
-impl From<&Pid> for String {
+impl From<&Name> for String {
     #[inline]
-    fn from(pid: &Pid) -> String {
-        pid.0.to_string()
+    fn from(name: &Name) -> String {
+        name.0.to_string()
     }
 }
 
@@ -154,14 +154,14 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_pid() {
+    fn test_name() {
         for i in 0..100 {
-            let pid = Pid::rand();
-            println!("pid {}: {}", i, pid);
+            let name = Name::rand();
+            println!("name {}: {}", i, name);
         }
 
-        let pid1 = Pid::rand();
-        let pid2 = Pid::rand();
-        assert_ne!(pid1, pid2);
+        let name1 = Name::rand();
+        let name2 = Name::rand();
+        assert_ne!(name1, name2);
     }
 }

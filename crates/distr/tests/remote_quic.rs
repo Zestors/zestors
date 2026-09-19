@@ -10,11 +10,11 @@ use std::{
 use zestors::{
     interface::{Envelope, Interface, Message},
     prelude::*,
-    runtime::{Inbox, Pid, spawn},
+    runtime::{Inbox, Name, spawn},
     supervisor::Supervisor,
 };
 use zestors_distr::{
-    ClusterConfig, ClusterNode, GlobalPid, RemoteAddress, Seed, StableId, Tls,
+    ClusterConfig, ClusterNode, GlobalName, RemoteAddress, Seed, StableId, Tls,
     backend::{Quic, QuicTimings},
 };
 
@@ -52,7 +52,7 @@ fn node(name: &str, addr: SocketAddr, seed: Option<(&str, SocketAddr)>) -> Clust
     if let Some((seed, seed_addr)) = seed {
         config = config.seed(Seed::new(seed, seed_addr));
     }
-    ClusterNode::new(Supervisor::blueprint().rand_pid(), config).with_exit_delay(Duration::ZERO)
+    ClusterNode::new(Supervisor::blueprint().rand_name(), config).with_exit_delay(Duration::ZERO)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -73,7 +73,7 @@ async fn actors_on_another_node_can_be_called_and_cast_to() {
     // An actor on node-b.
     let notes = Arc::new(Mutex::new(Vec::new()));
     let _greeter = spawn(
-        Pid::new_static("quic-greeter"),
+        Name::new_static("quic-greeter"),
         |mut inbox: Inbox<GreeterInterface>| {
             let notes = notes.clone();
             async move {
@@ -95,7 +95,7 @@ async fn actors_on_another_node_can_be_called_and_cast_to() {
     .unwrap();
 
     let greeter: RemoteAddress<GreeterInterface> =
-        a_remote.address(GlobalPid::new("quic-greeter", "node-b"));
+        a_remote.address(GlobalName::new("quic-greeter", "node-b"));
     assert_eq!(
         greeter.call(Greet("QUIC".into())).await.unwrap(),
         "Hello, QUIC!"

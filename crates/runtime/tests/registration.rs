@@ -1,14 +1,14 @@
 use std::{assert_matches, time::Duration};
 use zestors_runtime::{
-    Registry, spawn_rand, {ActorOps as _, ActorStatus, ExitStatus, Pid, StrongAddress},
+    Registry, spawn_rand, {ActorOps as _, ActorStatus, ExitStatus, Name, StrongAddress},
 };
 
 #[tokio::test]
 async fn register_and_deregister_refcounts_basics() {
     let mut child = spawn_rand(common::simplest_handler);
-    let pid = child.pid().clone();
+    let name = child.name().clone();
 
-    assert!(Registry::local().get(&pid).is_some());
+    assert!(Registry::local().get(&name).is_some());
     assert_eq!(child.strong_count(), 2); // Child + Inbox
     assert_eq!(child.weak_count(), 2); // Registry + Spawn
 
@@ -24,11 +24,11 @@ async fn register_and_deregister_refcounts_basics() {
 
     child.watch_init().await.unwrap();
 
-    println!("Signaling shutdown for child with pid: {:?}", child.pid());
+    println!("Signaling shutdown for child with name: {:?}", child.name());
     child.signal_shutdown();
     (&mut child).await.unwrap();
 
-    assert!(Registry::local().get(&pid).is_some());
+    assert!(Registry::local().get(&name).is_some());
     assert_eq!(child.strong_count(), 1);
     assert_eq!(child.weak_count(), 1);
 
@@ -36,15 +36,15 @@ async fn register_and_deregister_refcounts_basics() {
     drop(child);
 
     assert_eq!(address.status(), ActorStatus::Exited(ExitStatus::Normal));
-    assert!(Registry::local().get(&pid).is_none());
+    assert!(Registry::local().get(&name).is_none());
     assert_eq!(address.strong_count(), 0);
     assert_eq!(address.weak_count(), 2);
 }
 
 #[tokio::test]
 async fn register_and_deregister_custom() {
-    let channel = StrongAddress::create(Pid::rand()).unwrap();
-    assert!(Registry::local().get(channel.pid()).is_some());
+    let channel = StrongAddress::create(Name::rand()).unwrap();
+    assert!(Registry::local().get(channel.name()).is_some());
     let child = channel.clone().spawn(common::simplest_handler).unwrap();
 
     assert_eq!(channel.strong_count(), 3); // Channel + Child + Inbox

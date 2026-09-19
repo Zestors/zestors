@@ -128,10 +128,7 @@ async fn exit_status_reflects_panic() {
 
     let outcome = child.watch_exit().await;
     assert_eq!(outcome, Err(ExitError::Panicked));
-    assert_eq!(
-        child.status(),
-        ActorStatus::Exited(ExitStatus::Panicked)
-    );
+    assert_eq!(child.status(), ActorStatus::Exited(ExitStatus::Panicked));
 }
 
 #[tokio::test]
@@ -181,12 +178,9 @@ async fn watch_resolves_for_an_already_satisfied_condition() {
 async fn watch_never_resolves_for_an_unreachable_condition() {
     let child = spawn_rand(common::simplest_handler);
 
-    let timed_out = tokio::time::timeout(
-        Duration::from_millis(100),
-        child.watch(|_| None::<()>),
-    )
-    .await
-    .is_err();
+    let timed_out = tokio::time::timeout(Duration::from_millis(100), child.watch(|_| None::<()>))
+        .await
+        .is_err();
     assert!(timed_out);
 
     child.signal_shutdown();
@@ -202,7 +196,9 @@ async fn permanently_dead_requires_every_strong_ref_to_be_gone() {
     child.watch_init().await.unwrap();
     assert!(!child.is_permanently_dead());
 
-    let strong = child.upgrade().expect("actor is alive, upgrade must succeed");
+    let strong = child
+        .upgrade()
+        .expect("actor is alive, upgrade must succeed");
     let weak = child.address().clone();
 
     child.signal_shutdown();
@@ -213,7 +209,10 @@ async fn permanently_dead_requires_every_strong_ref_to_be_gone() {
     assert!(!weak.is_permanently_dead());
 
     drop(child);
-    assert!(!weak.is_permanently_dead(), "`strong` still holds one reference");
+    assert!(
+        !weak.is_permanently_dead(),
+        "`strong` still holds one reference"
+    );
 
     drop(strong);
     assert!(weak.is_permanently_dead(), "no strong references remain");
@@ -224,12 +223,12 @@ async fn permanently_dead_requires_every_strong_ref_to_be_gone() {
 // ============================================================================
 
 #[tokio::test]
-async fn snapshot_reports_pid_status_and_empty_queues() {
+async fn snapshot_reports_name_status_and_empty_queues() {
     let child = spawn_rand(common::simplest_handler);
     child.watch_init().await.unwrap();
 
     let snapshot = child.snapshot();
-    assert_eq!(&snapshot.pid, child.pid());
+    assert_eq!(&snapshot.name, child.name());
     assert_eq!(snapshot.status, ActorStatus::Running);
     assert_eq!(snapshot.msg_len, 0);
     assert_eq!(snapshot.signal_len, 0);
@@ -262,7 +261,8 @@ async fn snapshot_msg_len_reflects_unprocessed_messages() {
 
 #[tokio::test]
 async fn spawn_and_exit_history_are_bounded_and_ordered() {
-    let strong: StrongAddress<()> = StrongAddress::create(common::test_pid("bounded_history")).unwrap();
+    let strong: StrongAddress<()> =
+        StrongAddress::create(common::test_name("bounded_history")).unwrap();
 
     let mut last_child = None;
     for _ in 0..10 {
@@ -279,9 +279,17 @@ async fn spawn_and_exit_history_are_bounded_and_ordered() {
     // 10 respawns happened, but the history is bounded - and bounded to
     // something smaller than "keep everything".
     assert!(!spawns.is_empty());
-    assert!(spawns.len() < 10, "spawn history should be capped, got {}", spawns.len());
+    assert!(
+        spawns.len() < 10,
+        "spawn history should be capped, got {}",
+        spawns.len()
+    );
     assert!(!exits.is_empty());
-    assert!(exits.len() < 10, "exit history should be capped, got {}", exits.len());
+    assert!(
+        exits.len() < 10,
+        "exit history should be capped, got {}",
+        exits.len()
+    );
 
     // Both histories are in chronological (oldest-first) order.
     assert!(spawns.windows(2).all(|w| w[0] <= w[1]));

@@ -9,11 +9,6 @@
 //! Actors on other nodes are messaged through a [`RemoteAddress`], from
 //! [`ClusterNode::remote`]; see [`Remote`].
 
-#[allow(unused_imports)]
-mod _prelude {
-    pub use crate::*;
-}
-
 pub mod prelude {
     #[cfg(feature = "quic")]
     pub use crate::Tls;
@@ -26,21 +21,28 @@ pub mod prelude {
 mod stable_id;
 pub use stable_id::*;
 
-mod global_pid;
-pub use global_pid::*;
+mod node_id;
+pub use node_id::*;
 
+mod node_addr;
+pub use node_addr::*;
+
+mod global_name;
+pub use global_name::*;
+
+pub mod backend;
 mod cluster;
 mod link;
 mod messaging;
-pub use cluster::backend;
+#[cfg(feature = "quic")]
+pub use backend::{Tls, TlsError};
 #[cfg(feature = "sim")]
 pub use cluster::sim;
 pub use cluster::{
     Cluster, ClusterConfig, ClusterEvent, ClusterNode, ClusterNodeError, ClusterSnapshot,
-    ClusterTimings, Member, NodeAddr, NodeStatus, Seed,
+    ClusterTimings, Member, NodeStatus, Seed,
 };
-#[cfg(feature = "quic")]
-pub use cluster::{Tls, TlsError};
+pub use link::LinkTimings;
 pub use messaging::{
     Decode, DecodeError, Encode, EncodeError, Remote, RemoteAccepts, RemoteAddress,
     RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError, RemoteMessage, RemoteReceipt,

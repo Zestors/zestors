@@ -15,26 +15,26 @@ pub(super) trait Strategy {
     /// Splits `self` into its (always-present) shared state: the supervisor's
     /// shared inner state, and the set of supervisees still being waited on
     /// to finish initializing.
-    fn parts(&mut self) -> (&mut SupervisorInner, &mut IndexSet<Pid>);
+    fn parts(&mut self) -> (&mut SupervisorInner, &mut IndexSet<Name>);
 
     /// Handles a supervisee exiting (or failing to start), deciding whether
     /// it (or anything else) should be restarted, dropped, or should trigger
     /// a shutdown.
-    fn handle_exit(&mut self, pid: &Pid, reason: ExitReason) -> ControlFlow<()>;
+    fn handle_exit(&mut self, name: &Name, reason: ExitReason) -> ControlFlow<()>;
 
     /// Tears down this strategy's supervisees in whatever order/grouping the
     /// strategy requires. Idempotent: a shutdown already in progress is left
     /// alone. Returns `Break` once there's nothing left to wait for.
     fn shutdown(&mut self) -> ControlFlow<()>;
 
-    /// Removes `pid`'s spec, cleaning up any strategy-specific bookkeeping
+    /// Removes `name`'s spec, cleaning up any strategy-specific bookkeeping
     /// for it along the way (e.g. an in-progress restart cascade).
-    fn remove_spec(&mut self, pid: &Pid) -> Option<Supervisee>;
+    fn remove_spec(&mut self, name: &Name) -> Option<Supervisee>;
 
     /// Called right after [`Strategy::handle_initialized`], for strategies
     /// that need to react to a supervisee finishing initialization beyond
     /// the shared bookkeeping. The default does nothing.
-    fn after_initialized(&mut self, _pid: &Pid) -> ControlFlow<()> {
+    fn after_initialized(&mut self, _name: &Name) -> ControlFlow<()> {
         ControlFlow::Continue(())
     }
 
@@ -42,7 +42,7 @@ pub(super) trait Strategy {
     async fn run(&mut self) -> Result<(), Report> {
         let (inner, initializing) = self.parts();
         let start_result = inner.supervisees.start_all();
-        *initializing = inner.supervisees.pids().cloned().collect();
+        *initializing = inner.supervisees.names().cloned().collect();
 
         // If some supervisees failed to start, tear down whichever ones did start
         // before bailing out, instead of leaving them running unsupervised.
@@ -59,7 +59,7 @@ pub(super) trait Strategy {
             }
         }
 
-        start_result.map_err(|(pid, e)| report!(e).attach(pid).into())
+        start_result.map_err(|(name, e)| report!(e).attach(name).into())
     }
 
     fn handle_next(&mut self, next: InnerNext) -> ControlFlow<()> {
@@ -87,11 +87,11 @@ pub(super) trait Strategy {
                         request.reply(self.parts().0.add_spec(spec)).ok();
                     }
                     SupervisorInterface::Deregister(Envelope {
-                        msg: DeregisterChild(pid),
+                        msg: DeregisterChild(name),
                         req: request,
                     }) => {
                         request
-                            .reply(self.remove_spec(&pid).map(|s| s.get_description()))
+                            .reply(self.remove_spec(&name).map(|s| s.get_description()))
                             .ok();
                     }
                 },
@@ -103,32 +103,32 @@ pub(super) trait Strategy {
                         tracing::warn!(%e, "Failed to add supervisee from source");
                     }
                 }
-                SupervisorSourceEvent::Removed(pid) => {
-                    self.remove_spec(&pid);
+                SupervisorSourceEvent::Removed(name) => {
+                    self.remove_spec(&name);
                 }
             },
 
-            InnerNext::Supervisee(SuperviseeNext { pid, item }) => match item {
+            InnerNext::Supervisee(SuperviseeNext { name, item }) => match item {
                 SuperviseeItem::Started(Ok(())) => {}
                 SuperviseeItem::Started(Err(error)) => {
                     tracing::warn!(%error, "Supervisee failed to start");
-                    self.handle_exit(&pid, ExitReason::StartFailure)?;
+                    self.handle_exit(&name, ExitReason::StartFailure)?;
                 }
 
                 SuperviseeItem::Initialized(Ok(())) => {
-                    self.handle_initialized(&pid);
-                    self.after_initialized(&pid)?;
+                    self.handle_initialized(&name);
+                    self.after_initialized(&name)?;
                 }
                 SuperviseeItem::Initialized(Err(status)) => {
                     tracing::warn!(%status, "Supervisee exited before finishing initialization");
-                    self.handle_exit(&pid, ExitReason::InitExit(status))?;
+                    self.handle_exit(&name, ExitReason::InitExit(status))?;
                 }
 
                 SuperviseeItem::Exit(exit) => {
                     if let SuperviseeExit::JoinError(e) = &exit {
                         tracing::warn!(%e, "Supervisee exited with a join error");
                     }
-                    self.handle_exit(&pid, ExitReason::Exit(exit))?;
+                    self.handle_exit(&name, ExitReason::Exit(exit))?;
                 }
             },
         }
@@ -136,8 +136,8 @@ pub(super) trait Strategy {
         ControlFlow::Continue(())
     }
 
-    fn handle_initialized(&mut self, pid: &Pid) {
+    fn handle_initialized(&mut self, name: &Name) {
         let (inner, initializing) = self.parts();
-        inner.handle_initialized(initializing, pid);
+        inner.handle_initialized(initializing, name);
     }
 }

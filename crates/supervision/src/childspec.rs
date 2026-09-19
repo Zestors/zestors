@@ -1,6 +1,6 @@
 use crate::_prelude::*;
 use serde::{Deserialize, Serialize};
-use zestors_runtime::{ActorRef, Address, errors::DuplicatePidError};
+use zestors_runtime::{ActorRef, Address, errors::DuplicateNameError};
 
 /// The settings a `Supervisor` applies to one
 /// of its children: when to
@@ -44,8 +44,8 @@ impl Default for ChildConfig {
 /// [`SupervisionTree`](crate::SupervisionTree).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChildDescription {
-    /// The child's [`Pid`].
-    pub pid: Pid,
+    /// The child's [`Name`].
+    pub name: Name,
     /// The child's [`ChildConfig`].
     pub cfg: ChildConfig,
 }
@@ -64,7 +64,7 @@ impl ChildConfig {
     }
 }
 
-/// A registered [`Pid`] together with a blueprint and the [`ChildConfig`] a
+/// A registered [`Name`] together with a blueprint and the [`ChildConfig`] a
 /// `Supervisor` should apply to it —
 /// everything needed to (re)start the
 /// child on demand.
@@ -84,7 +84,7 @@ impl<T: Blueprint> ChildSpec<T> {
     /// Creates a spec for `blueprint` registered under `id`, with
     /// [`ChildConfig`] defaults taken from the blueprint. Fails if `id` is
     /// already registered.
-    pub fn create(id: impl Into<Pid>, blueprint: T) -> Result<Self, DuplicatePidError> {
+    pub fn create(id: impl Into<Name>, blueprint: T) -> Result<Self, DuplicateNameError> {
         Ok(Self {
             channel: StrongAddress::<<T::Actor as Actor>::Interface>::create(id.into())?,
             cfg: ChildConfig::from_blueprint(&blueprint),
@@ -92,9 +92,9 @@ impl<T: Blueprint> ChildSpec<T> {
         })
     }
 
-    /// Same as [`ChildSpec::create`], with a freshly generated [`Pid`].
-    pub fn create_rand_pid(blueprint: T) -> Self {
-        Self::create(Pid::rand(), blueprint).expect("Pid is unique")
+    /// Same as [`ChildSpec::create`], with a freshly generated [`Name`].
+    pub fn create_rand_name(blueprint: T) -> Self {
+        Self::create(Name::rand(), blueprint).expect("Name is unique")
     }
 
     /// Splits off the child's [`Address`], returning it alongside the
@@ -208,15 +208,15 @@ pub trait BlueprintSupervisionExt: Blueprint + Sized {
         DynStarter::new(self)
     }
 
-    /// Creates a [`ChildSpec`] for this blueprint registered under `pid`.
-    /// Fails if `pid` is already registered.
-    fn pid(self, pid: impl Into<Pid>) -> Result<ChildSpec<Self>, DuplicatePidError> {
-        ChildSpec::create(pid, self)
+    /// Creates a [`ChildSpec`] for this blueprint registered under `name`.
+    /// Fails if `name` is already registered.
+    fn name(self, name: impl Into<Name>) -> Result<ChildSpec<Self>, DuplicateNameError> {
+        ChildSpec::create(name, self)
     }
 
-    /// Creates a [`ChildSpec`] for this blueprint under a freshly generated [`Pid`].
-    fn rand_pid(self) -> ChildSpec<Self> {
-        ChildSpec::create_rand_pid(self)
+    /// Creates a [`ChildSpec`] for this blueprint under a freshly generated [`Name`].
+    fn rand_name(self) -> ChildSpec<Self> {
+        ChildSpec::create_rand_name(self)
     }
 }
 impl<T: Blueprint> BlueprintSupervisionExt for T {}

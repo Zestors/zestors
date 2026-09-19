@@ -4,11 +4,11 @@ use super::*;
 
 pub(super) struct RestForOneSupervisor<'a> {
     inner: &'a mut SupervisorInner,
-    initializing: IndexSet<Pid>,
+    initializing: IndexSet<Name>,
     cascade: Cascade,
 }
 
-/// A rest-for-one restart in progress: everything after the pid that
+/// A rest-for-one restart in progress: everything after the name that
 /// triggered it is torn down one at a time, in reverse start order, then
 /// the trigger and survivors are started back up one at a time, in start
 /// order, each one waiting for the previous to finish initializing before
@@ -21,21 +21,21 @@ enum Cascade {
     /// yet told to stop, next-to-process at the back (i.e. reverse start
     /// order).
     Exiting {
-        current: Pid,
-        pending: Vec<Pid>,
+        current: Name,
+        pending: Vec<Name>,
         /// Accumulated in the order stopped (reverse start order); reversed
-        /// into start order once every pid has stopped.
-        to_restart: Vec<Pid>,
+        /// into start order once every name has stopped.
+        to_restart: Vec<Name>,
         /// Siblings configured with `RestartMode::Never`: stopped like
         /// everyone else, but dropped instead of restarted once they're dead.
-        to_drop: Vec<Pid>,
+        to_drop: Vec<Name>,
     },
 
     /// Restarting the cascade's members one at a time, in start order.
     /// `current` is the one we're waiting to finish initializing.
     Restarting {
-        current: Pid,
-        pending: VecDeque<Pid>,
+        current: Name,
+        pending: VecDeque<Name>,
     },
 
     /// The whole supervisor is shutting down: every remaining supervisee is
@@ -44,13 +44,13 @@ enum Cascade {
     /// a restart. `current` is the one we're waiting to hear an exit from;
     /// `pending` holds the rest, next up at the back.
     ShuttingDown {
-        current: Pid,
-        pending: Vec<Pid>,
+        current: Name,
+        pending: Vec<Name>,
     },
 }
 
 impl Cascade {
-    fn current(&self) -> Option<&Pid> {
+    fn current(&self) -> Option<&Name> {
         match self {
             Cascade::Idle => None,
             Cascade::Exiting { current, .. }
@@ -59,13 +59,13 @@ impl Cascade {
         }
     }
 
-    /// Whether `pid` is already queued to be stopped by this cascade, just
+    /// Whether `name` is already queued to be stopped by this cascade, just
     /// not reached yet (still alive, so it's able to exit on its own before
     /// its turn comes up).
-    fn pending_contains(&self, pid: &Pid) -> bool {
+    fn pending_contains(&self, name: &Name) -> bool {
         match self {
             Cascade::Exiting { pending, .. } | Cascade::ShuttingDown { pending, .. } => {
-                pending.contains(pid)
+                pending.contains(name)
             }
             Cascade::Idle | Cascade::Restarting { .. } => false,
         }
@@ -81,7 +81,7 @@ impl<'a> RestForOneSupervisor<'a> {
         }
     }
 
-    /// Handles an exit event for whichever pid the cascade is currently
+    /// Handles an exit event for whichever name the cascade is currently
     /// waiting on.
     ///
     /// During `Exiting` or `ShuttingDown`, this is the expected
@@ -92,9 +92,9 @@ impl<'a> RestForOneSupervisor<'a> {
     /// successful `Initialized`, which is handled separately via
     /// `after_initialized`; reaching this function means it failed to
     /// (re)start instead. Rather than silently abandoning it and moving on to
-    /// the next pid, retry it in place — same `current`, same `pending` — if
+    /// the next name, retry it in place — same `current`, same `pending` — if
     /// it still needs a restart and has budget for one.
-    fn handle_cascade_current_exit(&mut self, pid: &Pid, reason: ExitReason) -> ControlFlow<()> {
+    fn handle_cascade_current_exit(&mut self, name: &Name, reason: ExitReason) -> ControlFlow<()> {
         if !matches!(self.cascade, Cascade::Restarting { .. }) {
             // `current()` is only ever `Some` during `Exiting`,
             // `ShuttingDown`, or `Restarting`; we just ruled out the latter.
@@ -116,14 +116,14 @@ impl<'a> RestForOneSupervisor<'a> {
             ExitReason::StartFailure | ExitReason::InitExit(_)
         ));
 
-        let Some(supervisee) = self.inner.supervisees.get_mut(pid) else {
+        let Some(supervisee) = self.inner.supervisees.get_mut(name) else {
             return self.advance_cascade();
         };
 
         if !reason.requires_restart(supervisee) {
             // `remove_spec` already advances the cascade when the removed
-            // pid is `current`.
-            self.remove_spec(pid);
+            // name is `current`.
+            self.remove_spec(name);
             return ControlFlow::Continue(());
         }
 
@@ -140,8 +140,8 @@ impl<'a> RestForOneSupervisor<'a> {
 
     /// Begins a rest-for-one cascade: everything started after `trigger`
     /// gets stopped one at a time, in reverse start order.
-    fn start_cascade(&mut self, trigger: &Pid) -> ControlFlow<()> {
-        let all: Vec<Pid> = self.inner.supervisees.pids().cloned().collect();
+    fn start_cascade(&mut self, trigger: &Name) -> ControlFlow<()> {
+        let all: Vec<Name> = self.inner.supervisees.names().cloned().collect();
         let idx = all
             .iter()
             .position(|p| p == trigger)
@@ -154,24 +154,24 @@ impl<'a> RestForOneSupervisor<'a> {
     /// Folds a newly-crashed `trigger` into a cascade that's still stopping
     /// siblings, widening its scope to cover everything between `trigger`
     /// and whichever end of the current scope it falls outside of (below the
-    /// oldest pending pid, or above `current`, e.g. a pid added after the
+    /// oldest pending name, or above `current`, e.g. a name added after the
     /// cascade started). `current` itself is left untouched; whatever it
     /// finishes into will resume the (now wider) queue as usual.
     fn merge_into_stopping(
         &mut self,
-        trigger: Pid,
-        current: Pid,
-        old_pending: Vec<Pid>,
-        mut to_restart: Vec<Pid>,
-        to_drop: Vec<Pid>,
+        trigger: Name,
+        current: Name,
+        old_pending: Vec<Name>,
+        mut to_restart: Vec<Name>,
+        to_drop: Vec<Name>,
     ) -> ControlFlow<()> {
         // The caller (`handle_exit`) already routes an exit for `current`
         // itself through `handle_cascade_current_exit` before ever reaching
-        // here, so `trigger` must be some other pid.
+        // here, so `trigger` must be some other name.
         debug_assert_ne!(&trigger, &current);
 
-        let all: Vec<Pid> = self.inner.supervisees.pids().cloned().collect();
-        let pos_of = |target: &Pid| {
+        let all: Vec<Name> = self.inner.supervisees.names().cloned().collect();
+        let pos_of = |target: &Name| {
             all.iter()
                 .position(|p| p == target)
                 .expect("known supervisee")
@@ -182,14 +182,14 @@ impl<'a> RestForOneSupervisor<'a> {
         let low = trigger_idx.min(current_idx);
         let high = trigger_idx.max(current_idx);
 
-        // Already-settled pids (stopped and waiting to be dropped or
+        // Already-settled names (stopped and waiting to be dropped or
         // restarted) can fall inside [low, high] when `trigger` is above
-        // `current` (e.g. a pid added after the cascade started); they don't
+        // `current` (e.g. a name added after the cascade started); they don't
         // need stopping again.
-        let already_settled: std::collections::HashSet<Pid> =
+        let already_settled: std::collections::HashSet<Name> =
             to_restart.iter().chain(to_drop.iter()).cloned().collect();
 
-        let mut pending: Vec<Pid> = all[low + 1..high]
+        let mut pending: Vec<Name> = all[low + 1..high]
             .iter()
             .filter(|p| !already_settled.contains(*p))
             .cloned()
@@ -226,19 +226,19 @@ impl<'a> RestForOneSupervisor<'a> {
         }
     }
 
-    /// Stops the next pid in `pending` (from the back, i.e. reverse start
+    /// Stops the next name in `pending` (from the back, i.e. reverse start
     /// order). Once `pending` is empty, drops whatever was `RestartMode::Never`
     /// and moves on to restarting the rest.
     fn advance_stop(
         &mut self,
-        mut pending: Vec<Pid>,
-        mut to_restart: Vec<Pid>,
-        mut to_drop: Vec<Pid>,
+        mut pending: Vec<Name>,
+        mut to_restart: Vec<Name>,
+        mut to_drop: Vec<Name>,
     ) -> ControlFlow<()> {
         loop {
             let Some(next) = pending.pop() else {
-                for pid in to_drop {
-                    self.remove_spec(&pid);
+                for name in to_drop {
+                    self.remove_spec(&name);
                 }
                 to_restart.reverse();
                 return self.advance_restart(to_restart.into());
@@ -279,10 +279,10 @@ impl<'a> RestForOneSupervisor<'a> {
         }
     }
 
-    /// Starts the next pid in `pending` (from the front, i.e. start order).
+    /// Starts the next name in `pending` (from the front, i.e. start order).
     /// The cascade only moves on to the one after it once this one reports
     /// `SuperviseeItem::Initialized` (see `Strategy::after_initialized`).
-    fn advance_restart(&mut self, mut pending: VecDeque<Pid>) -> ControlFlow<()> {
+    fn advance_restart(&mut self, mut pending: VecDeque<Name>) -> ControlFlow<()> {
         loop {
             let Some(next) = pending.pop_front() else {
                 self.cascade = Cascade::Idle;
@@ -309,10 +309,10 @@ impl<'a> RestForOneSupervisor<'a> {
         }
     }
 
-    /// Stops the next pid in `pending` (from the back, i.e. reverse start
+    /// Stops the next name in `pending` (from the back, i.e. reverse start
     /// order). Once `pending` is empty, every supervisee has been told to
     /// stop and has exited, so the supervisor itself is done.
-    fn advance_shutdown(&mut self, mut pending: Vec<Pid>) -> ControlFlow<()> {
+    fn advance_shutdown(&mut self, mut pending: Vec<Name>) -> ControlFlow<()> {
         loop {
             let Some(next) = pending.pop() else {
                 self.cascade = Cascade::Idle;
@@ -335,29 +335,29 @@ impl<'a> RestForOneSupervisor<'a> {
 }
 
 impl<'a> Strategy for RestForOneSupervisor<'a> {
-    fn parts(&mut self) -> (&mut SupervisorInner, &mut IndexSet<Pid>) {
+    fn parts(&mut self) -> (&mut SupervisorInner, &mut IndexSet<Name>) {
         (self.inner, &mut self.initializing)
     }
 
-    fn handle_exit(&mut self, pid: &Pid, reason: ExitReason) -> ControlFlow<()> {
-        if self.cascade.current() == Some(pid) {
-            return self.handle_cascade_current_exit(pid, reason);
+    fn handle_exit(&mut self, name: &Name, reason: ExitReason) -> ControlFlow<()> {
+        if self.cascade.current() == Some(name) {
+            return self.handle_cascade_current_exit(name, reason);
         }
 
-        if self.cascade.pending_contains(pid) {
+        if self.cascade.pending_contains(name) {
             // Already queued by the in-progress cascade (it just happened to
             // exit on its own before its turn came up); it'll be handled
             // when the chain reaches it, nothing to do here.
             return ControlFlow::Continue(());
         }
 
-        let Some(supervisee) = self.inner.supervisees.get_mut(pid) else {
-            tracing::warn!("Supervisee not found for pid: {}", pid);
+        let Some(supervisee) = self.inner.supervisees.get_mut(name) else {
+            tracing::warn!("Supervisee not found for name: {}", name);
             return ControlFlow::Continue(());
         };
 
         if !reason.requires_restart(supervisee) {
-            self.remove_spec(pid);
+            self.remove_spec(name);
             return ControlFlow::Continue(());
         }
 
@@ -367,14 +367,14 @@ impl<'a> Strategy for RestForOneSupervisor<'a> {
         }
 
         match std::mem::replace(&mut self.cascade, Cascade::Idle) {
-            Cascade::Idle => self.start_cascade(pid),
+            Cascade::Idle => self.start_cascade(name),
 
             Cascade::Exiting {
                 current,
                 pending,
                 to_restart,
                 to_drop,
-            } => self.merge_into_stopping(pid.clone(), current, pending, to_restart, to_drop),
+            } => self.merge_into_stopping(name.clone(), current, pending, to_restart, to_drop),
 
             Cascade::Restarting { .. } => {
                 // A restart was already underway; this trigger means
@@ -384,7 +384,7 @@ impl<'a> Strategy for RestForOneSupervisor<'a> {
                 // start a clean cascade from this trigger: it recomputes
                 // the full range from live state, so anything still
                 // Id-restart gets correctly stopped again.
-                self.start_cascade(pid)
+                self.start_cascade(name)
             }
 
             Cascade::ShuttingDown { .. } => {
@@ -413,18 +413,18 @@ impl<'a> Strategy for RestForOneSupervisor<'a> {
         // Kept in start order; `advance_shutdown` pops from the back, so
         // the last-started supervisee is the first one told to stop (same
         // convention as `start_cascade`/`advance_stop`).
-        let pending: Vec<Pid> = self.inner.supervisees.pids().cloned().collect();
+        let pending: Vec<Name> = self.inner.supervisees.names().cloned().collect();
 
         self.advance_shutdown(pending)
     }
 
-    fn remove_spec(&mut self, pid: &Pid) -> Option<Supervisee> {
+    fn remove_spec(&mut self, name: &Name) -> Option<Supervisee> {
         let supervisee = self
             .inner
-            .remove_spec(&mut self.initializing, &mut IndexSet::new(), pid);
+            .remove_spec(&mut self.initializing, &mut IndexSet::new(), name);
 
-        if supervisee.is_some() && self.cascade.current() == Some(pid) {
-            // The pid our cascade was waiting on just got yanked out from
+        if supervisee.is_some() && self.cascade.current() == Some(name) {
+            // The name our cascade was waiting on just got yanked out from
             // under it; treat that the same as it finishing on its own so
             // the rest of the chain still proceeds.
             let _ = self.advance_cascade();
@@ -433,10 +433,10 @@ impl<'a> Strategy for RestForOneSupervisor<'a> {
         supervisee
     }
 
-    fn after_initialized(&mut self, pid: &Pid) -> ControlFlow<()> {
+    fn after_initialized(&mut self, name: &Name) -> ControlFlow<()> {
         // A restart step in our cascade just finished initializing; only now
         // move on to the next one.
-        if self.cascade.current() == Some(pid) {
+        if self.cascade.current() == Some(name) {
             self.advance_cascade()?;
         }
         ControlFlow::Continue(())

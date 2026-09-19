@@ -4,7 +4,7 @@ use super::*;
 use eyeball::ObservableWriteGuard;
 
 pub(crate) struct Channel<Q: ?Sized = dyn DynamicQueue> {
-    pid: Pid,
+    name: Name,
     signal_queue: ConcurrentQueue<SignalInterface>,
     signal_notifier: Notify,
     status_observer: SharedObservable<ActorStatus>,
@@ -18,9 +18,9 @@ pub(crate) struct Channel<Q: ?Sized = dyn DynamicQueue> {
 }
 
 impl<I: Interface> Channel<ConcurrentQueue<I>> {
-    pub(crate) fn new(pid: Pid, strong_count: usize, msg_queue: ConcurrentQueue<I>) -> Self {
+    pub(crate) fn new(name: Name, strong_count: usize, msg_queue: ConcurrentQueue<I>) -> Self {
         Self {
-            pid,
+            name,
             msg_notifier: Notify::new(),
             msg_backpressure_limit: BACKPRESSURE_LIMIT,
             signal_queue: ConcurrentQueue::bounded(SIGNAL_QUEUE_CAPACITY),
@@ -48,8 +48,8 @@ impl Channel {
         self.msg_backpressure_limit
     }
 
-    pub(crate) fn pid(&self) -> &Pid {
-        &self.pid
+    pub(crate) fn name(&self) -> &Name {
+        &self.name
     }
 
     pub(crate) fn status(&self) -> ActorStatus {

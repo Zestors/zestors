@@ -1,12 +1,12 @@
 use super::*;
 use std::{pin::Pin, task::ready};
 use streamunordered::{StreamUnordered, StreamYield};
-use zestors_runtime::errors::DuplicatePidError;
+use zestors_runtime::errors::DuplicateNameError;
 use zestors_supervision::ChildDescription;
 
 #[derive(Debug, Default)]
 pub(super) struct SuperviseeMap {
-    mapping: IndexMap<Pid, SuperviseeMapEntry>,
+    mapping: IndexMap<Name, SuperviseeMapEntry>,
     supervisees: Pin<Box<StreamUnordered<Supervisee>>>,
 }
 
@@ -27,21 +27,21 @@ impl SuperviseeMap {
 
         for spec in specs {
             let supervisee = Supervisee::new(spec);
-            let pid = supervisee.pid().clone();
+            let name = supervisee.name().clone();
 
             let token = this.supervisees.insert(supervisee);
-            this.mapping.insert(pid, SuperviseeMapEntry::new(token));
+            this.mapping.insert(name, SuperviseeMapEntry::new(token));
         }
 
         this
     }
 
-    pub(super) fn start_all(&mut self) -> Result<(), (Pid, SuperviseeIsShuttingDown)> {
-        for (pid, entry) in self.mapping.iter() {
+    pub(super) fn start_all(&mut self) -> Result<(), (Name, SuperviseeIsShuttingDown)> {
+        for (name, entry) in self.mapping.iter() {
             if let Some(token) = entry.token {
                 let supervisee = self.supervisees.get_mut(token).expect("Should exist");
                 if let Err(e) = supervisee.start() {
-                    return Err((pid.clone(), e));
+                    return Err((name.clone(), e));
                 }
             }
         }
@@ -52,15 +52,15 @@ impl SuperviseeMap {
     /// Stops every supervisee, returning the ones that are still alive
     /// afterward (and thus still owe an exit event to wait for).
     #[must_use]
-    pub(super) fn stop_all(&mut self) -> Vec<Pid> {
+    pub(super) fn stop_all(&mut self) -> Vec<Name> {
         self.mapping
             .iter()
-            .filter_map(|(pid, entry)| {
+            .filter_map(|(name, entry)| {
                 let supervisee = self
                     .supervisees
                     .get_mut(entry.token?)
                     .expect("Should exist");
-                supervisee.stop().is_shutting_down().then(|| pid.clone())
+                supervisee.stop().is_shutting_down().then(|| name.clone())
             })
             .collect()
     }
@@ -77,8 +77,8 @@ impl SuperviseeMap {
         self.supervisees().map(|s| s.address())
     }
 
-    pub(super) fn pids(&self) -> impl Iterator<Item = &Pid> {
-        self.addresses().map(|a| a.pid())
+    pub(super) fn names(&self) -> impl Iterator<Item = &Name> {
+        self.addresses().map(|a| a.name())
     }
 
     pub(super) fn child_descriptions(&self) -> Vec<ChildDescription> {
@@ -87,16 +87,16 @@ impl SuperviseeMap {
             .collect()
     }
 
-    pub(super) fn get_mut<'a>(&'a mut self, pid: &Pid) -> Option<&'a mut Supervisee> {
-        self.mapping.get(pid).and_then(|entry| {
+    pub(super) fn get_mut<'a>(&'a mut self, name: &Name) -> Option<&'a mut Supervisee> {
+        self.mapping.get(name).and_then(|entry| {
             entry
                 .token
                 .map(|token| self.supervisees.get_mut(token).unwrap())
         })
     }
 
-    pub(super) fn remove(&mut self, pid: &Pid) -> Option<Supervisee> {
-        match self.mapping.get_mut(pid) {
+    pub(super) fn remove(&mut self, name: &Name) -> Option<Supervisee> {
+        match self.mapping.get_mut(name) {
             Some(entry) => {
                 if let Some(token) = entry.token.take() {
                     let removed = self.supervisees.as_mut().take(token);
@@ -109,20 +109,20 @@ impl SuperviseeMap {
         }
     }
 
-    pub(super) fn add(&mut self, supervisee: Supervisee) -> Result<(), DuplicatePidError> {
+    pub(super) fn add(&mut self, supervisee: Supervisee) -> Result<(), DuplicateNameError> {
         if self
             .mapping
-            .get(supervisee.pid())
+            .get(supervisee.name())
             .is_some_and(|entry| entry.token.is_some())
         {
-            return Err(DuplicatePidError {
-                pid: supervisee.pid().clone(),
+            return Err(DuplicateNameError {
+                name: supervisee.name().clone(),
             });
         }
 
-        let pid = supervisee.pid().clone();
+        let name = supervisee.name().clone();
         let token = self.supervisees.as_mut().insert(supervisee);
-        self.mapping.insert(pid, SuperviseeMapEntry::new(token));
+        self.mapping.insert(name, SuperviseeMapEntry::new(token));
 
         Ok(())
     }

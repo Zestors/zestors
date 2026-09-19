@@ -1,17 +1,16 @@
 //! The receiving side: messages from other nodes are decoded and delivered to
 //! local actors, and answered.
 
-use super::{RemoteError, Running, SHARDS, Shared, send::Pending, wire::Frame};
+use super::{
+    RemoteError, SHARDS, Shared, Started, handler::ReplyFuture, reply::Pending, wire::Frame,
+};
 use crate::{
     ClusterEvent, Id, NodeId,
-    link::{Delivery, Incoming, Links, PeerEvent, Protocol},
+    link::{Delivery, Incoming, Links, MAX_MESSAGE_SIZE, PeerEvent, Protocol},
 };
 use bytes::Bytes;
 use std::{
     collections::HashMap,
-    future::Future,
-    marker::PhantomData,
-    pin::Pin,
     sync::Arc,
     sync::atomic::{AtomicUsize, Ordering},
     time::Duration,
@@ -20,16 +19,7 @@ use tokio::{
     sync::{broadcast, mpsc},
     time::timeout,
 };
-use zestors_interface::Receipt;
-use zestors_runtime::{Address, Pid, errors::CastDynError, prelude::*};
-
-use super::RemoteMessage;
-
-type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
-
-/// What is left to do for a message once it has been delivered: wait for the
-/// actor's reply, and encode it.
-pub(super) type ReplyFuture = BoxFuture<Result<Bytes, RemoteError>>;
+use zestors_runtime::Name;
 
 /// How much may wait for one actor before further messages are refused: bursts
 /// are taken in, sustained overload is not. Bounded by size and not only by
@@ -38,47 +28,6 @@ const ACTOR_QUEUE_MESSAGES: usize = 100_000;
 const ACTOR_QUEUE_BYTES: usize = 16 * 1024 * 1024;
 /// How long a task for an actor lingers without messages for it.
 const ACTOR_IDLE: Duration = Duration::from_secs(60);
-
-/// Delivers messages of one type to local actors. One is registered per
-/// message type; it is what knows the type, so that everything else needn't.
-pub(super) trait Handler: Send + Sync {
-    /// Decodes a message and puts it in the actor's mailbox, waiting out its
-    /// backpressure. If `reply` is set, the result is what to wait for then.
-    fn deliver(
-        &self,
-        address: Address,
-        payload: Bytes,
-        reply: bool,
-    ) -> BoxFuture<Result<Option<ReplyFuture>, RemoteError>>;
-}
-
-pub(super) struct Typed<M>(pub(super) PhantomData<fn() -> M>);
-
-impl<M: RemoteMessage> Handler for Typed<M> {
-    fn deliver(
-        &self,
-        address: Address,
-        payload: Bytes,
-        reply: bool,
-    ) -> BoxFuture<Result<Option<ReplyFuture>, RemoteError>> {
-        Box::pin(async move {
-            let msg = M::decode(payload).map_err(|error| RemoteError::Decode(error.to_string()))?;
-            let receipt = match address.cast_dyn(msg).await {
-                Ok(receipt) => receipt,
-                Err(CastDynError::Closed(_)) => return Err(RemoteError::Closed),
-                Err(CastDynError::NotAccepted(_)) => return Err(RemoteError::NotAccepted),
-            };
-            if !reply {
-                return Ok(None);
-            }
-            let reply: ReplyFuture = Box::pin(async move {
-                let output = receipt.wait().await.map_err(|_| RemoteError::NoReply)?;
-                M::encode_output(&output).map_err(|error| RemoteError::Encode(error.to_string()))
-            });
-            Ok(Some(reply))
-        })
-    }
-}
 
 /// What waits for one actor, so that it can be bounded.
 #[derive(Default)]
@@ -127,7 +76,7 @@ struct Work {
 /// they are lost.
 pub(super) async fn serve(
     shared: Arc<Shared>,
-    running: Running,
+    running: Started,
     mut inbox: mpsc::Receiver<Incoming>,
     mut peers: broadcast::Receiver<PeerEvent>,
     mut members: broadcast::Receiver<ClusterEvent>,
@@ -174,7 +123,7 @@ pub(super) async fn serve(
 struct Router {
     shared: Arc<Shared>,
     links: Links,
-    routes: HashMap<Pid, Route>,
+    routes: HashMap<Name, Route>,
 }
 
 impl Router {
@@ -213,7 +162,7 @@ impl Router {
         }
     }
 
-    fn route(&mut self, target: Pid, work: Work) {
+    fn route(&mut self, target: Name, work: Work) {
         let len = work.payload.len();
         let work = match self.routes.get(&target) {
             Some(route) => {
@@ -263,10 +212,10 @@ impl Router {
             tracing::warn!("Dropping a message for an actor with too much waiting: {error}");
             return;
         };
-        let Some(pipe) = reply_pipe(&self.shared, &self.links, &node, call_id) else {
+        let Some(lane) = reply_lane(&self.shared, &self.links, &node, call_id) else {
             return;
         };
-        let _ = pipe.try_send(
+        let _ = lane.try_send(
             Frame::Reply {
                 call_id,
                 result: Err(error),
@@ -276,8 +225,8 @@ impl Router {
     }
 }
 
-/// The pipe replies to `node` go through, if it is a member of the cluster.
-fn reply_pipe(
+/// The lane replies to `node` go through, if it is a member of the cluster.
+fn reply_lane(
     shared: &Shared,
     links: &Links,
     node: &NodeId,
@@ -288,7 +237,8 @@ fn reply_pipe(
         return None;
     };
     Some(links.sender(
-        &member,
+        &member.node,
+        &member.addr,
         Protocol::ACTORS,
         Delivery::Ordered,
         (call_id % SHARDS as u64) as u8,
@@ -303,25 +253,25 @@ async fn reply(
     call_id: u64,
     result: Result<Bytes, RemoteError>,
 ) {
-    let Some(pipe) = reply_pipe(shared, links, node, call_id) else {
+    let Some(lane) = reply_lane(shared, links, node, call_id) else {
         return;
     };
     let mut frame = Frame::Reply { call_id, result }.encode();
-    if frame.len() > links.max_message_size() {
+    if frame.len() > MAX_MESSAGE_SIZE {
         frame = Frame::Reply {
             call_id,
             result: Err(RemoteError::TooLarge),
         }
         .encode();
     }
-    let _ = pipe.send(frame).await;
+    let _ = lane.send(frame).await;
 }
 
 /// Delivers the messages for one actor, one after the other.
 async fn actor_task(
     shared: Arc<Shared>,
     links: Links,
-    pid: Pid,
+    name: Name,
     mut queue: mpsc::UnboundedReceiver<Work>,
     queued: Arc<Queued>,
 ) {
@@ -343,7 +293,7 @@ async fn actor_task(
             reply_to,
         } = work;
         match (
-            deliver(&shared, &pid, msg, payload, reply_to.is_some()).await,
+            deliver(&shared, &name, msg, payload, reply_to.is_some()).await,
             reply_to,
         ) {
             (Ok(Some(waiting)), Some((node, call_id))) => {
@@ -359,7 +309,7 @@ async fn actor_task(
                 reply(&shared, &links, &node, call_id, Err(error)).await;
             }
             (Err(error), None) => {
-                tracing::debug!(%pid, "Could not deliver a message that expected no reply: {error}");
+                tracing::debug!(%name, "Could not deliver a message that expected no reply: {error}");
             }
         }
     }
@@ -367,7 +317,7 @@ async fn actor_task(
 
 async fn deliver(
     shared: &Shared,
-    pid: &Pid,
+    name: &Name,
     msg: Id,
     payload: Bytes,
     reply: bool,
@@ -377,7 +327,7 @@ async fn deliver(
         .get(&msg)
         .map(|handler| handler.clone())
         .ok_or(RemoteError::UnknownMessage)?;
-    let address = pid.address().ok_or(RemoteError::NoSuchActor)?;
+    let address = name.address().ok_or(RemoteError::NoSuchActor)?;
     handler.deliver(address, payload, reply).await
 }
 

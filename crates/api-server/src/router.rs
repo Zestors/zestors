@@ -26,18 +26,18 @@ impl ApiServer {
 #[axum::debug_handler]
 async fn get_processes(
     State(state): State<ApiServer>,
-) -> ApiResult<Json<IndexMap<Pid, (ChildConfig, ActorStatus, Vec<Pid>)>>, (Internal<String>,)> {
+) -> ApiResult<Json<IndexMap<Name, (ChildConfig, ActorStatus, Vec<Name>)>>, (Internal<String>,)> {
     // let mut addresses = Registry::local().fetch_addresses().await;
 
     // stream::iter(addresses.drain(..)).buffered(10);
 
-    let root_pid = state.root_supervisor.clone();
+    let root_name = state.root_supervisor.clone();
     let root_desc = ChildDescription {
-        pid: root_pid,
+        name: root_name,
         cfg: ChildConfig::default(),
     };
     let root_address = Registry::local()
-        .get(&root_desc.pid)
+        .get(&root_desc.name)
         .ok_or_else(|| Internal("Root supervisor not found in registry".to_string()))?;
 
     let mut pending = Vec::from_iter([(root_address, root_desc)]);
@@ -54,15 +54,15 @@ async fn get_processes(
             .await;
 
         for ((address, desc), children) in new_children {
-            let child_pids = children.iter().map(|c| c.pid.clone()).collect();
-            let existing = results.insert(desc.pid, (desc.cfg, address.status(), child_pids));
+            let child_names = children.iter().map(|c| c.name.clone()).collect();
+            let existing = results.insert(desc.name, (desc.cfg, address.status(), child_names));
 
             if let Some(duplicate_process) = &existing {
                 return Err(Internal(format!("Supervision tree is circular or changed during traversal. Circle contains {duplicate_process:?}")).into());
             }
 
             for child in children {
-                let Some(child_address) = Registry::local().get(&child.pid) else {
+                let Some(child_address) = Registry::local().get(&child.name) else {
                     continue;
                 };
 
@@ -82,17 +82,17 @@ async fn get_children(address: &Address<impl Context>) -> rootcause::Result<Vec<
     .await??)
 }
 
-/// Returns a [`ChannelSnapshot`] for each requested [`Pid`], or `None` if it
+/// Returns a [`ChannelSnapshot`] for each requested [`Name`], or `None` if it
 /// is no longer registered.
 #[route(GET "/snapshots" with ApiServer)]
 async fn get_channel_snapshots(
-    Json(pids): Json<Vec<Pid>>,
+    Json(names): Json<Vec<Name>>,
 ) -> ApiResult<Json<Vec<Option<ChannelSnapshot>>>, ()> {
-    let results = pids
+    let results = names
         .into_iter()
-        .map(|pid| {
+        .map(|name| {
             Registry::local()
-                .get(&pid)
+                .get(&name)
                 .map(|address| address.snapshot())
         })
         .collect::<Vec<_>>();
@@ -100,12 +100,12 @@ async fn get_channel_snapshots(
     Ok(Json(results))
 }
 
-/// Returns the [`Health`] of each requested [`Pid`], or `None` if it is no
+/// Returns the [`Health`] of each requested [`Name`], or `None` if it is no
 /// longer registered or fails to respond in time.
 #[route(GET "/health" with ApiServer)]
-async fn get_health(Json(pids): Json<Vec<Pid>>) -> ApiResult<Json<Vec<Option<Health>>>, ()> {
-    let results = stream::iter(pids.into_iter().map(|pid| async move {
-        let Some(address) = Registry::local().get(&pid) else {
+async fn get_health(Json(names): Json<Vec<Name>>) -> ApiResult<Json<Vec<Option<Health>>>, ()> {
+    let results = stream::iter(names.into_iter().map(|name| async move {
+        let Some(address) = Registry::local().get(&name) else {
             return None;
         };
 

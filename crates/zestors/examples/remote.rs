@@ -6,10 +6,10 @@
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::Duration};
 use zestors::{
-    distr::{ClusterConfig, ClusterNode, GlobalPid, Seed, Tls},
+    distr::{ClusterConfig, ClusterNode, GlobalName, Seed, Tls},
     interface::{Envelope, Interface, Message},
     prelude::*,
-    runtime::{Inbox, Pid, spawn},
+    runtime::{Inbox, Name, spawn},
     supervisor::Supervisor,
 };
 
@@ -28,7 +28,7 @@ fn node(name: &str, addr: SocketAddr, seed: Option<(&str, SocketAddr)>) -> Clust
     if let Some((seed, seed_addr)) = seed {
         config = config.seed(Seed::new(seed, seed_addr));
     }
-    ClusterNode::new(Supervisor::blueprint().rand_pid(), config).with_exit_delay(Duration::ZERO)
+    ClusterNode::new(Supervisor::blueprint().rand_name(), config).with_exit_delay(Duration::ZERO)
 }
 
 #[tokio::main]
@@ -43,7 +43,7 @@ async fn main() {
     // The host accepts `Greet` from other nodes, and runs an actor that handles it.
     host.remote().register::<Greet>();
     let _greeter = spawn(
-        Pid::new_static("greeter"),
+        Name::new_static("greeter"),
         |mut inbox: Inbox<GreeterInterface>| async move {
             while let Some(GreeterInterface::Greet(envelope)) = inbox.recv().await {
                 let greeting = format!("Hello, {}!", envelope.msg.0);
@@ -61,7 +61,7 @@ async fn main() {
     );
     let greeter = caller
         .remote()
-        .address::<GreeterInterface>(GlobalPid::new("greeter", "host"));
+        .address::<GreeterInterface>(GlobalName::new("greeter", "host"));
     let (host_task, caller_task) = (tokio::spawn(host.run()), tokio::spawn(caller.run()));
 
     // Wait until the caller knows the host, then call across.

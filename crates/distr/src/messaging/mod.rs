@@ -1,12 +1,12 @@
 //! Messages to actors on other nodes.
 //!
-//! A [`RemoteMessage`] is sent to a [`GlobalPid`] through a [`RemoteAddress`];
+//! A [`RemoteMessage`] is sent to a [`GlobalName`] through a [`RemoteAddress`];
 //! the node that hosts the actor decodes it and delivers it like any local
 //! message, and sends the reply back.
 //!
 //! Which message types a node accepts is decided by registering them with
 //! [`Remote::register`]. Any registered message can then reach any local actor
-//! that accepts it, addressed by its [`Pid`](zestors_runtime::Pid).
+//! that accepts it, addressed by its [`Name`](zestors_runtime::Name).
 //!
 //! Nothing here requires a message to be serde: it must be [`Encode`] and
 //! [`Decode`], which every serde type is, and can be by hand for anything else.
@@ -15,7 +15,7 @@
 //! ```no_run
 //! use serde::{Deserialize, Serialize};
 //! use zestors::{
-//!     distr::{ClusterNode, GlobalPid, RemoteAddress},
+//!     distr::{ClusterNode, GlobalName, RemoteAddress},
 //!     interface::{Envelope, Interface, Message},
 //!     prelude::*,
 //! };
@@ -37,32 +37,36 @@
 //! // On another node: address the actor, and call it.
 //! let counter: RemoteAddress<CounterInterface> = node
 //!     .remote()
-//!     .address(GlobalPid::new("counter", "node-b"));
+//!     .address(GlobalName::new("counter", "node-b"));
 //! let doubled = counter.call(Double(21)).await?;
 //! # Ok(())
 //! # }
 //! ```
 
+mod accepts;
 mod codec;
 mod error;
+mod handler;
 mod message;
 mod receive;
+mod reply;
 mod send;
 mod wire;
 
+pub use accepts::{RemoteAccepts, RemoteCallOptions};
 pub use codec::{Decode, DecodeError, Encode, EncodeError};
 pub use error::{RemoteCallError, RemoteCastError, RemoteError, RemoteReplyError};
 pub use message::RemoteMessage;
-pub use send::{RemoteAccepts, RemoteAddress, RemoteCallOptions, RemoteReceipt, RemoteReply};
+pub use reply::{RemoteReceipt, RemoteReply};
+pub use send::RemoteAddress;
 
 use crate::{
-    Cluster,
+    Cluster, GlobalName, Id,
     link::{Links, Protocol},
 };
-use crate::{GlobalPid, Id};
 use dashmap::DashMap;
-use receive::{Handler, Typed};
-use send::Pending;
+use handler::{Handler, Typed};
+use reply::Pending;
 use std::{
     marker::PhantomData,
     sync::{Arc, RwLock, atomic::AtomicU64},
@@ -71,7 +75,7 @@ use std::{
 use tokio_util::sync::{CancellationToken, DropGuard};
 use zestors_runtime::Context;
 
-/// How many pipes to a peer messages between actors are spread over.
+/// How many lanes to a peer messages between actors are spread over.
 const SHARDS: u8 = 4;
 
 /// A node's messaging between actors: registers what it accepts, and makes
@@ -90,19 +94,19 @@ struct Shared {
     call_timeout: Duration,
     handlers: DashMap<Id, Arc<dyn Handler>>,
     /// Set while the node runs.
-    running: RwLock<Option<Running>>,
+    running: RwLock<Option<Started>>,
     next_call: AtomicU64,
 }
 
 /// What is there once the node runs.
 #[derive(Clone)]
-struct Running {
+struct Started {
     links: Links,
     pending: Arc<Pending>,
 }
 
 impl Shared {
-    fn running(&self) -> Option<Running> {
+    fn running(&self) -> Option<Started> {
         self.running.read().expect("Not poisoned").clone()
     }
 }
@@ -134,14 +138,14 @@ impl Remote {
 
     /// The actor `target`, to send messages to. `C` is what it accepts, see
     /// [`RemoteAddress`].
-    pub fn address<C: Context>(&self, target: GlobalPid) -> RemoteAddress<C> {
+    pub fn address<C: Context>(&self, target: GlobalName) -> RemoteAddress<C> {
         RemoteAddress::new(self.clone(), target)
     }
 
     /// Starts taking in messages, and sends what is asked to, until the returned
-    /// [`Service`] is stopped.
-    pub(super) fn start(&self, links: Links) -> Service {
-        let running = Running {
+    /// [`Serving`] is stopped.
+    pub(super) fn start(&self, links: Links) -> Serving {
+        let running = Started {
             links: links.clone(),
             pending: Arc::new(Pending::default()),
         };
@@ -157,7 +161,7 @@ impl Remote {
             serving.await;
         }));
         *self.shared.running.write().expect("Not poisoned") = Some(running);
-        Service {
+        Serving {
             shared: self.shared.clone(),
             _stop: token.drop_guard(),
         }
@@ -165,12 +169,12 @@ impl Remote {
 }
 
 /// [`Remote`] while the node runs. Stops when stopped or dropped.
-pub(super) struct Service {
+pub(super) struct Serving {
     shared: Arc<Shared>,
     _stop: DropGuard,
 }
 
-impl Service {
+impl Serving {
     /// Stops taking in messages, and gives up on the calls still waiting.
     pub(super) fn stop(self) {
         if let Some(running) = self.shared.running.write().expect("Not poisoned").take() {

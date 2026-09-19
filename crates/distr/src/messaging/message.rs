@@ -1,9 +1,8 @@
 use super::{
-    Decode, DecodeError, Encode, EncodeError,
-    send::{RemoteKind, RemoteReceipt, RemoteReply},
+    Decode, Encode,
+    reply::{RemoteKind, RemoteReceipt, RemoteReply},
 };
 use crate::StableId;
-use bytes::Bytes;
 use zestors_interface::Message;
 
 /// A [`Message`] that can be sent to an actor on another node.
@@ -12,21 +11,13 @@ use zestors_interface::Message;
 /// [`Encode`]d and [`Decode`]d, and whose reply ([`Message::Output`]) can be too,
 /// is one. With serde that is
 /// `#[derive(Message, StableId, Serialize, Deserialize)]`.
-pub trait RemoteMessage: Message + StableId + Encode + Decode {
+pub trait RemoteMessage:
+    Message<Output: Encode + Decode, Receipt: RemoteKind> + StableId + Encode + Decode
+{
     /// What sending the message gives back to wait on, like
     /// [`Message::Receipt`]: `()` if it expects no reply, else a
     /// [`RemoteReply`](super::RemoteReply).
     type RemoteReceipt: RemoteReceipt<Output = Self::Output>;
-
-    /// Encodes the reply to this message.
-    fn encode_output(output: &Self::Output) -> Result<Bytes, EncodeError>;
-
-    /// Decodes the reply to this message.
-    fn decode_output(bytes: Bytes) -> Result<Self::Output, DecodeError>;
-
-    /// Whether the message gets a reply.
-    #[doc(hidden)]
-    const REPLIES: bool;
 
     /// The [`RemoteReceipt`](Self::RemoteReceipt), given what to wait on if
     /// there is a reply.
@@ -36,21 +27,9 @@ pub trait RemoteMessage: Message + StableId + Encode + Decode {
 
 impl<M> RemoteMessage for M
 where
-    M: Message + StableId + Encode + Decode,
-    M::Output: Encode + Decode,
-    M::Receipt: RemoteKind,
+    M: Message<Output: Encode + Decode, Receipt: RemoteKind> + StableId + Encode + Decode,
 {
     type RemoteReceipt = <M::Receipt as RemoteKind>::Remote;
-
-    const REPLIES: bool = <M::Receipt as RemoteKind>::REPLIES;
-
-    fn encode_output(output: &Self::Output) -> Result<Bytes, EncodeError> {
-        output.encode()
-    }
-
-    fn decode_output(bytes: Bytes) -> Result<Self::Output, DecodeError> {
-        <M::Output as Decode>::decode(bytes)
-    }
 
     fn remote_receipt(waiting: Option<RemoteReply<Self::Output>>) -> Self::RemoteReceipt {
         <M::Receipt as RemoteKind>::remote(waiting)
@@ -60,6 +39,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{DecodeError, EncodeError};
+    use bytes::Bytes;
     use serde::{Deserialize, Serialize};
 
     /// A message and reply that go over the wire with serde, for free.
@@ -119,8 +100,8 @@ mod tests {
 
         let bytes = Double(21).encode().unwrap();
         assert_eq!(Double::decode(bytes).unwrap(), Double(21));
-        let reply = Double::encode_output(&42).unwrap();
-        assert_eq!(Double::decode_output(reply).unwrap(), 42);
+        let reply = 42u32.encode().unwrap();
+        assert_eq!(u32::decode(reply).unwrap(), 42);
     }
 
     #[test]
@@ -131,11 +112,8 @@ mod tests {
         assert_eq!(&bytes[..], b"reverse:abc");
         assert_eq!(Reverse::decode(bytes).unwrap(), Reverse("abc".into()));
 
-        let reply = Reverse::encode_output(&Reversed("cba".into())).unwrap();
-        assert_eq!(
-            Reverse::decode_output(reply).unwrap(),
-            Reversed("cba".into())
-        );
+        let reply = Reversed("cba".into()).encode().unwrap();
+        assert_eq!(Reversed::decode(reply).unwrap(), Reversed("cba".into()));
     }
 
     #[test]

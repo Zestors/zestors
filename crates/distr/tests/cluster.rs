@@ -2,8 +2,8 @@ use std::{net::SocketAddr, num::NonZeroU32, time::Duration};
 use tokio::{sync::broadcast, task::JoinHandle};
 use zestors::{prelude::*, supervisor::Supervisor};
 use zestors_distr::{
-    Cluster, ClusterConfig, ClusterEvent, ClusterNode, ClusterNodeError, ClusterTimings, NodeId,
-    NodeStatus, Seed, Tls,
+    Cluster, ClusterConfig, ClusterEvent, ClusterNode, ClusterNodeError, ClusterTimings,
+    LinkTimings, NodeId, NodeStatus, Seed, Tls,
     backend::{Quic, QuicTimings},
 };
 
@@ -24,17 +24,22 @@ fn fast_foca_config() -> foca::Config {
     config
 }
 
-fn fast_timings() -> ClusterTimings {
-    ClusterTimings {
+fn fast_link_timings() -> LinkTimings {
+    LinkTimings {
         connect_timeout: Duration::from_millis(500),
         handshake_timeout: Duration::from_millis(500),
         peer_idle: Duration::from_secs(5),
         reconnect_backoff_min: Duration::from_millis(50),
         reconnect_backoff_max: Duration::from_millis(400),
+        shutdown_grace: Duration::from_millis(200),
+    }
+}
+
+fn fast_timings() -> ClusterTimings {
+    ClusterTimings {
         seed_retry: Duration::from_millis(200),
         departure_grace: Duration::from_millis(100),
         leave_grace: Duration::from_millis(200),
-        shutdown_grace: Duration::from_millis(200),
     }
 }
 
@@ -59,11 +64,12 @@ struct TestNode {
 fn start(name: &str, addr: SocketAddr, seed: Option<(&str, SocketAddr)>) -> TestNode {
     let mut config = quic(name, addr, Tls::insecure_dev().unwrap())
         .timings(fast_timings())
+        .link_timings(fast_link_timings())
         .foca_config(fast_foca_config());
     if let Some((seed_name, seed_addr)) = seed {
         config = config.seed(Seed::new(seed_name, seed_addr));
     }
-    let node = ClusterNode::new(Supervisor::blueprint().rand_pid(), config)
+    let node = ClusterNode::new(Supervisor::blueprint().rand_name(), config)
         .with_exit_delay(Duration::ZERO);
     TestNode {
         cluster: node.cluster(),
@@ -197,7 +203,7 @@ impl Ca {
 }
 
 fn start_with(config: ClusterConfig) -> TestNode {
-    let node = ClusterNode::new(Supervisor::blueprint().rand_pid(), config)
+    let node = ClusterNode::new(Supervisor::blueprint().rand_name(), config)
         .with_exit_delay(Duration::ZERO);
     TestNode {
         cluster: node.cluster(),
@@ -209,6 +215,7 @@ fn start_with(config: ClusterConfig) -> TestNode {
 fn config(name: &str, addr: SocketAddr, tls: Tls) -> ClusterConfig {
     quic(name, addr, tls)
         .timings(fast_timings())
+        .link_timings(fast_link_timings())
         .foca_config(fast_foca_config())
 }
 
@@ -248,7 +255,7 @@ async fn node_cannot_use_a_name_its_certificate_lacks() {
 async fn status_follows_the_node_lifecycle() {
     let addr = free_addr();
     let node = ClusterNode::new(
-        Supervisor::blueprint().rand_pid(),
+        Supervisor::blueprint().rand_name(),
         config("node-a", addr, Tls::insecure_dev().unwrap()),
     )
     .with_exit_delay(Duration::ZERO);
@@ -274,7 +281,7 @@ async fn generation_store_keeps_generations_growing() {
     std::fs::write(&store, future.to_string()).unwrap();
 
     let node = ClusterNode::new(
-        Supervisor::blueprint().rand_pid(),
+        Supervisor::blueprint().rand_name(),
         config("node-a", free_addr(), Tls::insecure_dev().unwrap()).generation_store(&store),
     )
     .with_exit_delay(Duration::ZERO);

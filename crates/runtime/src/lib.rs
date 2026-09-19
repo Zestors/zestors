@@ -15,7 +15,7 @@
 //! - [`Child`] owns the [`tokio::task::JoinHandle`] together with a
 //!   [`StrongAddress`], and aborts the task when dropped unless detached.
 //!
-//! Actors are looked up process-wide by [`Pid`] through the global [`Registry`].
+//! Actors are looked up process-wide by [`Name`] through the global [`Registry`].
 //!
 //! Once you have a reference, [`Accepts`] and [`ActorOps`] (both re-exported
 //! through the [`prelude`]) provide the methods for interacting with the
@@ -110,10 +110,10 @@
 //! # }
 //! ```
 //!
-//! ## Looking an actor up by `Pid`, and a bounded shutdown
+//! ## Looking an actor up by `Name`, and a bounded shutdown
 //!
 //! Actors don't have to be wired together by holding onto references
-//! directly: any code that knows an actor's [`Pid`] can look it up through
+//! directly: any code that knows an actor's [`Name`] can look it up through
 //! the global [`Registry`], from anywhere in the process.
 //!
 //! ```
@@ -122,21 +122,21 @@
 //! # use zestors::runtime::spawn;
 //! # #[tokio::main]
 //! # async fn main() {
-//! let pid = Pid::new("counter");
-//! let child = spawn(pid.clone(), |mut inbox: Inbox<()>| async move {
+//! let name = Name::new("counter");
+//! let child = spawn(name.clone(), |mut inbox: Inbox<()>| async move {
 //!     while inbox.recv().await.is_some() {}
 //!     Ok(())
 //! })
 //! .unwrap();
 //!
-//! // Elsewhere in the process, with only the `Pid` in hand:
-//! let found = pid.typed_address::<()>().expect("still registered");
+//! // Elsewhere in the process, with only the `Name` in hand:
+//! let found = name.typed_address::<()>().expect("still registered");
 //! found.cast(()).await.unwrap();
 //!
 //! // `shutdown_abort` signals a shutdown and gives the actor a grace
 //! // period to exit on its own, aborting it only if it overruns that.
 //! child.shutdown_abort(Duration::from_secs(1)).await.unwrap();
-//! assert!(pid.address().is_none(), "deregistered once fully gone");
+//! assert!(name.address().is_none(), "deregistered once fully gone");
 //! # }
 //! ```
 
@@ -152,7 +152,7 @@ pub(crate) use zestors_interface::*;
 #[doc(hidden)]
 pub mod prelude {
     pub use crate::{
-        Accepts as _, ActorOps as _, Address, Child, Inbox, InboxEvent, IntoDyn as _, Pid, Signal,
+        Accepts as _, ActorOps as _, Address, Child, Inbox, InboxEvent, IntoDyn as _, Name, Signal,
         StrongAddress, spawn,
     };
 }

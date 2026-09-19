@@ -6,14 +6,14 @@ use super::*;
 
 #[derive(Default, Debug)]
 pub struct ProcessMap {
-    pub map: IndexMap<Pid, ProcessMapEntry>,
+    pub map: IndexMap<Name, ProcessMapEntry>,
 }
 
 impl ProcessMap {
-    pub fn merge(&mut self, new_map: IndexMap<Pid, (ChildConfig, ActorStatus, Vec<Pid>)>) {
+    pub fn merge(&mut self, new_map: IndexMap<Name, (ChildConfig, ActorStatus, Vec<Name>)>) {
         // Mark outdated entries that are no longer present
-        for (pid, entry) in self.map.iter_mut() {
-            if !new_map.contains_key(pid) {
+        for (name, entry) in self.map.iter_mut() {
+            if !new_map.contains_key(name) {
                 entry.outdated_since.get_or_insert_with(Instant::now);
             } else {
                 entry.outdated_since = None;
@@ -21,14 +21,14 @@ impl ProcessMap {
         }
 
         // Add or update entries from the new map
-        for (pid, (cfg, status, children)) in new_map {
-            match self.map.get_mut(&pid) {
+        for (name, (cfg, status, children)) in new_map {
+            match self.map.get_mut(&name) {
                 Some(entry) => {
                     entry.update(cfg, status, children);
                 }
                 None => {
-                    let entry = ProcessMapEntry::new(pid.clone(), cfg, status, children);
-                    self.map.insert(pid.clone(), entry);
+                    let entry = ProcessMapEntry::new(name.clone(), cfg, status, children);
+                    self.map.insert(name.clone(), entry);
                 }
             }
         }
@@ -37,7 +37,7 @@ impl ProcessMap {
     pub fn add_snapshots(&mut self, snapshots: Vec<Option<ChannelSnapshot>>) {
         for snapshot in snapshots {
             if let Some(snapshot) = snapshot {
-                if let Some(entry) = self.map.get_mut(&snapshot.pid) {
+                if let Some(entry) = self.map.get_mut(&snapshot.name) {
                     entry.snapshot = Some(snapshot);
                 }
             }
@@ -53,7 +53,7 @@ impl ProcessMap {
                 .is_none_or(|since| now.duration_since(since) <= Duration::from_secs(10))
         };
 
-        let child_pids: HashSet<_> = self
+        let child_names: HashSet<_> = self
             .map
             .values()
             .filter(|entry| is_visible(entry))
@@ -63,13 +63,13 @@ impl ProcessMap {
         self.map
             .iter()
             .filter(|(_, entry)| is_visible(entry))
-            .filter(|(pid, _)| !child_pids.contains(*pid))
-            .filter_map(|(pid, _)| self.build_tree(pid, now))
+            .filter(|(name, _)| !child_names.contains(*name))
+            .filter_map(|(name, _)| self.build_tree(name, now))
             .collect()
     }
 
-    fn build_tree(&self, pid: &Pid, now: Instant) -> Option<ProcessTree<'_>> {
-        let process = self.map.get(pid)?;
+    fn build_tree(&self, name: &Name, now: Instant) -> Option<ProcessTree<'_>> {
+        let process = self.map.get(name)?;
 
         if process
             .outdated_since
@@ -81,7 +81,7 @@ impl ProcessMap {
         let children = process
             .children
             .iter()
-            .filter_map(|child_pid| self.build_tree(child_pid, now))
+            .filter_map(|child_name| self.build_tree(child_name, now))
             .collect();
 
         Some(ProcessTree {
@@ -98,19 +98,19 @@ pub struct ProcessTree<'a> {
 
 #[derive(Clone, Debug)]
 pub struct ProcessMapEntry {
-    pub pid: Pid,
+    pub name: Name,
     pub cfg: ChildConfig,
     pub status: ActorStatus,
-    pub children: Vec<Pid>,
+    pub children: Vec<Name>,
     pub snapshot: Option<ChannelSnapshot>,
     pub health: Option<Health>,
     pub outdated_since: Option<Instant>,
 }
 
 impl ProcessMapEntry {
-    pub fn new(pid: Pid, cfg: ChildConfig, status: ActorStatus, children: Vec<Pid>) -> Self {
+    pub fn new(name: Name, cfg: ChildConfig, status: ActorStatus, children: Vec<Name>) -> Self {
         Self {
-            pid,
+            name,
             cfg,
             status,
             children,
@@ -120,7 +120,7 @@ impl ProcessMapEntry {
         }
     }
 
-    pub fn update(&mut self, cfg: ChildConfig, status: ActorStatus, children: Vec<Pid>) {
+    pub fn update(&mut self, cfg: ChildConfig, status: ActorStatus, children: Vec<Name>) {
         self.cfg = cfg;
         self.status = status;
         self.children = children;

@@ -11,7 +11,7 @@ use std::{
 };
 use tokio::time::{error::Elapsed, timeout};
 use zestors_runtime::{
-    ActorRef, Address, Child, Dyn, ExitStatus, Pid, ShutdownChild, errors::JoinError,
+    ActorRef, Address, Child, Dyn, ExitStatus, Name, ShutdownChild, errors::JoinError,
 };
 use zestors_supervision::{ChildConfig, ChildDescription, StartOnError};
 
@@ -48,7 +48,7 @@ impl Supervisee {
 
     pub(super) fn get_description(&self) -> ChildDescription {
         ChildDescription {
-            pid: self.pid().clone(),
+            name: self.name().clone(),
             cfg: self.spec.cfg().clone(),
         }
     }
@@ -231,7 +231,7 @@ impl Stream for Supervisee {
 
         item.map(|item| {
             Some(SuperviseeNext {
-                pid: self.pid().clone(),
+                name: self.name().clone(),
                 item,
             })
         })
@@ -248,7 +248,7 @@ impl ActorRef for Supervisee {
 
 #[derive(Debug)]
 pub(super) struct SuperviseeNext {
-    pub(super) pid: Pid,
+    pub(super) name: Name,
     pub(super) item: SuperviseeItem,
 }
 

@@ -5,7 +5,7 @@
 use super::RemoteError;
 use crate::Id;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use zestors_runtime::Pid;
+use zestors_runtime::Name;
 
 const KIND_CAST: u8 = 1;
 const KIND_CALL: u8 = 2;
@@ -18,14 +18,14 @@ const ERR: u8 = 1;
 pub(super) enum Frame {
     /// A message that expects no reply.
     Cast {
-        target: Pid,
+        target: Name,
         msg: Id,
         payload: Bytes,
     },
     /// A message that is answered by a [`Frame::Reply`] with the same `call_id`.
     Call {
         call_id: u64,
-        target: Pid,
+        target: Name,
         msg: Id,
         payload: Bytes,
     },
@@ -111,24 +111,24 @@ impl Frame {
     }
 }
 
-/// Who a message is for, and what it is: the pid (length-prefixed) and the message id.
-fn put_target(buf: &mut BytesMut, target: &Pid, msg: &Id) {
-    let pid = String::from(target);
-    buf.put_u16(pid.len() as u16);
-    buf.put_slice(pid.as_bytes());
+/// Who a message is for, and what it is: the name (length-prefixed) and the message id.
+fn put_target(buf: &mut BytesMut, target: &Name, msg: &Id) {
+    let name = String::from(target);
+    buf.put_u16(name.len() as u16);
+    buf.put_slice(name.as_bytes());
     buf.put_u128(msg.as_uuid().as_u128());
 }
 
-fn get_target(bytes: &mut Bytes) -> Option<(Pid, Id)> {
+fn get_target(bytes: &mut Bytes) -> Option<(Name, Id)> {
     let len = get_u16(bytes)? as usize;
     if bytes.remaining() < len {
         return None;
     }
-    let pid = std::str::from_utf8(&bytes.split_to(len)).ok()?.to_owned();
+    let name = std::str::from_utf8(&bytes.split_to(len)).ok()?.to_owned();
     if bytes.remaining() < 16 {
         return None;
     }
-    Some((Pid::new(pid), Id::from_u128(bytes.get_u128())))
+    Some((Name::new(name), Id::from_u128(bytes.get_u128())))
 }
 
 const E_UNKNOWN_MESSAGE: u8 = 1;
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn frames_round_trip() {
-        let (target, msg) = (Pid::new("counter"), Id::from_u128(0xabcdef));
+        let (target, msg) = (Name::new("counter"), Id::from_u128(0xabcdef));
         round_trips(Frame::Cast {
             target: target.clone(),
             msg,
@@ -243,7 +243,7 @@ mod tests {
         // Cut short at every point.
         let frame = Frame::Call {
             call_id: 7,
-            target: Pid::new("counter"),
+            target: Name::new("counter"),
             msg: Id::from_u128(1),
             payload: Bytes::new(),
         }

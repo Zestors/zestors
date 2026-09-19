@@ -7,7 +7,7 @@ pub enum RemoteError {
     /// The node doesn't have this message type registered.
     #[error("The node doesn't know this message type")]
     UnknownMessage,
-    /// No actor with this pid is running on the node.
+    /// No actor with this name is running on the node.
     #[error("No such actor on the node")]
     NoSuchActor,
     /// The actor doesn't accept this message type.

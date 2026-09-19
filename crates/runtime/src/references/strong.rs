@@ -16,26 +16,26 @@ pub struct StrongAddress<C: Context = Dyn> {
 }
 
 impl<T: Context> StrongAddress<T> {
-    /// Creates a new channel with the given `pid` and registers it in the
+    /// Creates a new channel with the given `name` and registers it in the
     /// local registry.
-    pub fn create(pid: Pid) -> Result<Self, DuplicatePidError>
+    pub fn create(name: Name) -> Result<Self, DuplicateNameError>
     where
         T: Interface,
     {
         // Register the plain `Address` first, and only wrap it into a
         // `StrongAddress` once that succeeds. `Address` has no `Drop` of its
-        // own, but `StrongAddress` does: it removes its pid's entry from the
+        // own, but `StrongAddress` does: it removes its name's entry from the
         // registry once its strong count reaches zero. Wrapping eagerly
         // (before knowing whether registration succeeded) meant a *rejected*
-        // duplicate-pid attempt would still construct and then drop a full
+        // duplicate-name attempt would still construct and then drop a full
         // `StrongAddress`, deregistering the entry actually owned by the
-        // pre-existing address under that pid.
-        let address = Address::new(pid, 1);
+        // pre-existing address under that name.
+        let address = Address::new(name, 1);
 
         Registry::local()
             .register(address.clone())
-            .map_err(|_e| DuplicatePidError {
-                pid: address.pid().clone(),
+            .map_err(|_e| DuplicateNameError {
+                name: address.name().clone(),
             })?;
 
         Ok(StrongAddress { address })
@@ -55,18 +55,18 @@ impl<T: Context> StrongAddress<T> {
 impl<C: Context> Drop for StrongAddress<C> {
     fn drop(&mut self) {
         if self.channel().decr_strong_count() {
-            let removed_address = Registry::local().remove(self.pid());
+            let removed_address = Registry::local().remove(self.name());
 
             if removed_address.is_none() {
                 if cfg!(debug_assertions) {
                     panic!(
                         "Address {} was not found in the registry when dropping the last strong reference",
-                        self.pid()
+                        self.name()
                     );
                 } else {
                     tracing::error!(
                         "Address {} was not found in the registry when dropping the last strong reference",
-                        self.pid()
+                        self.name()
                     );
                 }
             }
@@ -120,14 +120,14 @@ impl<T: Context> Debug for StrongAddress<T> {
 
 impl<T: Context> PartialEq for StrongAddress<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.pid() == other.pid()
+        self.name() == other.name()
     }
 }
 impl<T: Context> Eq for StrongAddress<T> {}
 
 impl<T: Context> Hash for StrongAddress<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.pid().hash(state);
+        self.name().hash(state);
     }
 }
 
@@ -136,8 +136,8 @@ impl<T: Context> Hash for StrongAddress<T> {
 /// [`ActorOps`], every field here reflects the exact same instant.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChannelSnapshot {
-    /// The actor's [`Pid`].
-    pub pid: Pid,
+    /// The actor's [`Name`].
+    pub name: Name,
     /// The actor's [`ActorStatus`] at the time of the snapshot.
     pub status: ActorStatus,
     /// The number of signals queued at the time of the snapshot.

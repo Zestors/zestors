@@ -9,9 +9,6 @@ use bytes::Bytes;
 use std::io;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-/// The largest message that can be sent or is accepted from a peer.
-pub(super) const MAX_MESSAGE_SIZE: usize = 4 * 1024 * 1024;
-
 /// The most a [`Hello`] can take.
 const MAX_HELLO_SIZE: usize = 1024;
 

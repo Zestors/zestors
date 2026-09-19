@@ -1,7 +1,7 @@
 use crate::{Actor, ActorExt, RestartMode};
 use rootcause::Report;
 use std::{fmt::Debug, future::Future, time::Duration};
-use zestors_runtime::errors::DuplicatePidError;
+use zestors_runtime::errors::DuplicateNameError;
 
 /// A reusable recipe for producing an [`Actor`], together with the default
 /// settings a supervisor should use when starting/restarting it.
@@ -42,7 +42,7 @@ impl<T: Actor + Clone + Debug + Send + Sync + 'static> Blueprint for T {
 }
 
 /// Returned by [`BlueprintExt::start`]: either instantiating the actor
-/// from its blueprint failed, or the given [`Pid`] was already registered -
+/// from its blueprint failed, or the given [`Name`] was already registered -
 /// the same failure [`zestors_runtime::spawn`] itself has.
 #[derive(Debug, thiserror::Error)]
 pub enum StartError {
@@ -51,16 +51,16 @@ pub enum StartError {
     #[error("failed to instantiate actor from blueprint: {0}")]
     Instantiate(Report),
 
-    /// The given [`Pid`] is already registered; see
+    /// The given [`Name`] is already registered; see
     /// [`zestors_runtime::spawn`].
     #[error(transparent)]
-    DuplicatePid(#[from] DuplicatePidError),
+    DuplicateName(#[from] DuplicateNameError),
 }
 
 /// Returned by [`BlueprintExt::start_rand`]: instantiating the actor
 /// from its blueprint failed. Unlike [`StartError`], there's no
-/// duplicate-pid case, since [`zestors_runtime::spawn_rand`] always
-/// generates a fresh [`Pid`] and so can't fail that way.
+/// duplicate-name case, since [`zestors_runtime::spawn_rand`] always
+/// generates a fresh [`Name`] and so can't fail that way.
 #[derive(Debug, thiserror::Error)]
 #[error("failed to instantiate actor from blueprint: {0}")]
 pub struct StartRandError(pub Report);
@@ -68,25 +68,25 @@ pub struct StartRandError(pub Report);
 /// Convenience methods for instantiating and spawning an [`Blueprint`]
 /// in one step, mirroring [`zestors_runtime::spawn`]/[`zestors_runtime::spawn_rand`].
 pub trait BlueprintExt: Blueprint {
-    /// Instantiates this blueprint's actor and spawns it under `pid`.
+    /// Instantiates this blueprint's actor and spawns it under `name`.
     fn start(
         &self,
-        pid: impl Into<Pid>,
+        name: impl Into<Name>,
     ) -> impl Future<
         Output = Result<
             Child<<Self::Actor as Actor>::Exit, <Self::Actor as Actor>::Interface>,
             StartError,
         >,
     > + Send {
-        let pid = pid.into();
+        let name = name.into();
         async move {
             let actor = self.instantiate().await.map_err(StartError::Instantiate)?;
-            Ok(actor.spawn(pid)?)
+            Ok(actor.spawn(name)?)
         }
     }
 
     /// Instantiates this blueprint's actor and spawns it under a freshly
-    /// generated [`Pid`].
+    /// generated [`Name`].
     fn start_rand(
         &self,
     ) -> impl Future<
@@ -178,7 +178,7 @@ mod _hidden {
     }
 }
 use _hidden::*;
-use zestors_runtime::{Child, Pid};
+use zestors_runtime::{Child, Name};
 
 /// Creates an [`Blueprint`] that instantiates the actor by calling `f`.
 pub fn fn_blueprint<F, A>(f: F) -> FnBlueprint<F, A>

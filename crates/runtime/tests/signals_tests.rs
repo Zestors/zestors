@@ -57,7 +57,10 @@ async fn a_signal_queued_right_after_shutdown_on_an_idle_actor_outlives_the_even
     child.signal_shutdown();
     child.ping().await.unwrap();
 
-    assert!(child.is_dead(), "the ping only resolved because the actor was already gone");
+    assert!(
+        child.is_dead(),
+        "the ping only resolved because the actor was already gone"
+    );
 }
 
 #[tokio::test]
@@ -151,7 +154,10 @@ async fn signals_are_rejected_once_the_actor_is_exiting_but_not_yet_dead() {
     assert!(!child.signal_suspend());
     assert!(!child.signal_resume());
     assert!(!child.signal_shutdown());
-    assert!(child.is_exiting(), "rejected signals must not change the status");
+    assert!(
+        child.is_exiting(),
+        "rejected signals must not change the status"
+    );
 
     child.abort();
 }
@@ -173,17 +179,21 @@ async fn suspend_prevents_processing_until_resumed() {
     child.signal_suspend();
     assert!(common::wait_for_suspended(&child).await);
 
-    let stayed_suspended = tokio::time::timeout(std::time::Duration::from_millis(200), child.call(Ack))
-        .await
-        .is_err();
+    let stayed_suspended =
+        tokio::time::timeout(std::time::Duration::from_millis(200), child.call(Ack))
+            .await
+            .is_err();
     assert!(stayed_suspended, "a suspended actor must not answer a call");
 
     child.signal_resume();
     assert!(common::wait_for_running(&child).await);
 
-    let resumed_promptly = tokio::time::timeout(std::time::Duration::from_secs(2), child.call(Ack))
-        .await;
-    assert!(resumed_promptly.is_ok(), "a resumed actor must process its backlog");
+    let resumed_promptly =
+        tokio::time::timeout(std::time::Duration::from_secs(2), child.call(Ack)).await;
+    assert!(
+        resumed_promptly.is_ok(),
+        "a resumed actor must process its backlog"
+    );
 
     child.signal_shutdown();
 }

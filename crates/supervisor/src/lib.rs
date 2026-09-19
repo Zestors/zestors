@@ -36,7 +36,7 @@
 //!
 //! A [`SupervisorBlueprint`] collects one or more
 //! [`ChildSpec`](zestors_supervision::ChildSpec)s, each pairing a blueprint
-//! with the [`Pid`] it's registered under and the [`RestartMode`] the
+//! with the [`Name`] it's registered under and the [`RestartMode`] the
 //! supervisor should apply to it. Instantiating the blueprint produces a
 //! [`Supervisor`] - an ordinary [`Actor`] like any other, so
 //! [`BlueprintExt::start`]/[`start_rand`](BlueprintExt::start_rand) start it
@@ -78,8 +78,8 @@
 //! # #[tokio::main]
 //! # async fn main() {
 //! let blueprint = Supervisor::blueprint().children([
-//!     Worker.pid("worker-a").unwrap().with_mode(RestartMode::Always),
-//!     Worker.pid("worker-b").unwrap().with_mode(RestartMode::Never),
+//!     Worker.name("worker-a").unwrap().with_mode(RestartMode::Always),
+//!     Worker.name("worker-b").unwrap().with_mode(RestartMode::Never),
 //! ]);
 //! let supervisor = blueprint.start_rand().await.unwrap();
 //!
@@ -146,8 +146,8 @@
 //! # async fn main() {
 //! let node = Node::new(
 //!     Supervisor::blueprint()
-//!         .child(Worker.pid("worker").unwrap())
-//!         .rand_pid(),
+//!         .child(Worker.name("worker").unwrap())
+//!         .rand_name(),
 //! );
 //!
 //! // `Node::run` consumes the `Node`, so keep a handle to the root
@@ -205,14 +205,14 @@ pub mod prelude {
 
 pub mod messages {
     use crate::_prelude::*;
-    use zestors_runtime::errors::DuplicatePidError;
+    use zestors_runtime::errors::DuplicateNameError;
     use zestors_supervision::ChildDescription;
 
     /// Registers a new child under a running supervisor. Fails if the spec's
-    /// [`Pid`] is already registered.
+    /// [`Name`] is already registered.
     #[derive(Message, Debug)]
     #[zestors(interface_path = "zestors_interface")]
-    #[msg(reply = "Result<(), DuplicatePidError>")]
+    #[msg(reply = "Result<(), DuplicateNameError>")]
     pub struct RegisterChild(pub ChildSpec);
 
     /// Removes a child from a running supervisor (stopping it if it's alive),
@@ -220,5 +220,5 @@ pub mod messages {
     #[derive(Message, Debug)]
     #[zestors(interface_path = "zestors_interface")]
     #[msg(reply = "Option<ChildDescription>")]
-    pub struct DeregisterChild(pub Pid);
+    pub struct DeregisterChild(pub Name);
 }

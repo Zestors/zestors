@@ -4,8 +4,8 @@ use super::*;
 
 pub(super) struct OneForOneSupervisor<'a> {
     inner: &'a mut SupervisorInner,
-    initializing: IndexSet<Pid>,
-    exiting: IndexSet<Pid>,
+    initializing: IndexSet<Name>,
+    exiting: IndexSet<Name>,
 }
 
 impl<'a> OneForOneSupervisor<'a> {
@@ -19,12 +19,12 @@ impl<'a> OneForOneSupervisor<'a> {
 }
 
 impl<'a> Strategy for OneForOneSupervisor<'a> {
-    fn parts(&mut self) -> (&mut SupervisorInner, &mut IndexSet<Pid>) {
+    fn parts(&mut self) -> (&mut SupervisorInner, &mut IndexSet<Name>) {
         (self.inner, &mut self.initializing)
     }
 
-    fn handle_exit(&mut self, pid: &Pid, reason: ExitReason) -> ControlFlow<()> {
-        if self.exiting.swap_remove(pid) {
+    fn handle_exit(&mut self, name: &Name, reason: ExitReason) -> ControlFlow<()> {
+        if self.exiting.swap_remove(name) {
             return if self.exiting.is_empty() {
                 ControlFlow::Break(())
             } else {
@@ -32,13 +32,13 @@ impl<'a> Strategy for OneForOneSupervisor<'a> {
             };
         }
 
-        let Some(supervisee) = self.inner.supervisees.get_mut(pid) else {
-            tracing::warn!("Supervisee not found for pid: {}", pid);
+        let Some(supervisee) = self.inner.supervisees.get_mut(name) else {
+            tracing::warn!("Supervisee not found for name: {}", name);
             return ControlFlow::Continue(());
         };
 
         if !reason.requires_restart(supervisee) {
-            self.remove_spec(pid);
+            self.remove_spec(name);
             return ControlFlow::Continue(());
         }
 
@@ -60,8 +60,8 @@ impl<'a> Strategy for OneForOneSupervisor<'a> {
         self.inner.shutdown(&mut self.exiting)
     }
 
-    fn remove_spec(&mut self, pid: &Pid) -> Option<Supervisee> {
+    fn remove_spec(&mut self, name: &Name) -> Option<Supervisee> {
         self.inner
-            .remove_spec(&mut self.initializing, &mut self.exiting, pid)
+            .remove_spec(&mut self.initializing, &mut self.exiting, name)
     }
 }

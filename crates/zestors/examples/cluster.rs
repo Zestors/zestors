@@ -35,7 +35,7 @@ async fn main() -> Result<(), ClusterNodeError> {
         ));
     }
 
-    let node = ClusterNode::new(Supervisor::blueprint().rand_pid(), config);
+    let node = ClusterNode::new(Supervisor::blueprint().rand_name(), config);
 
     let mut events = node.cluster().subscribe();
     tokio::spawn(async move {

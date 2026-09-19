@@ -1,8 +1,8 @@
 use crate::theme::Theme;
 use egui::{CornerRadius, Frame, Margin, RichText, Stroke, Ui};
-use zestors::{runtime::Pid, supervision::messages::Health};
+use zestors::{runtime::Name, supervision::messages::Health};
 
-pub fn render_health_card(ui: &mut Ui, pid: &Pid, health: &Health) {
+pub fn render_health_card(ui: &mut Ui, name: &Name, health: &Health) {
     Frame::canvas(ui.style())
         .fill(Theme::INNER_CARD_BG)
         .stroke(Stroke::new(1.0, Theme::BORDER_COLOR))
@@ -17,7 +17,7 @@ pub fn render_health_card(ui: &mut Ui, pid: &Pid, health: &Health) {
             );
             ui.add_space(4.0);
 
-            egui::Grid::new(ui.make_persistent_id(&format!("{}_debug_grid", pid)))
+            egui::Grid::new(ui.make_persistent_id(&format!("{}_debug_grid", name)))
                 .num_columns(2)
                 .spacing([12.0, 4.0])
                 .show(ui, |ui| {

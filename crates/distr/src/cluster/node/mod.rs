@@ -1,9 +1,9 @@
 mod config;
 mod error;
 
-use super::{Cluster, Member, NodeAddr, backend::LocalNode, generation, membership::Membership};
-use crate::messaging::Remote;
-pub use config::ClusterConfig;
+use super::{Cluster, Member, generation, membership::Membership};
+use crate::{NodeAddr, backend::LocalNode, messaging::Remote};
+pub use config::{ClusterConfig, ClusterTimings, Seed};
 pub use error::ClusterNodeError;
 use std::{net::SocketAddr, time::Duration};
 use zestors_supervision::{ChildSpec, RestartIntensity};
@@ -13,7 +13,8 @@ use zestors_supervisor::{Node, NodeShutdown, SupervisorBlueprint};
 ///
 /// It runs the same root supervisor with the same restart and shutdown
 /// behavior as [`Node`], and additionally takes part in a gossip-based
-/// membership protocol over mutually authenticated QUIC. Observe the cluster
+/// membership protocol over a [backend](crate::backend) (mutually
+/// authenticated QUIC by default). Observe the cluster
 /// through [`ClusterNode::cluster`].
 pub struct ClusterNode {
     node: Node,
@@ -105,7 +106,7 @@ impl ClusterNode {
                     id: config.node_id.clone(),
                     generation,
                 },
-                config.timings.clone(),
+                config.link_timings.clone(),
             )
             .await
             .map_err(ClusterNodeError::Backend)?;
@@ -129,7 +130,7 @@ impl ClusterNode {
 
         messaging.stop();
         membership.leave().await;
-        links.shutdown(config.timings.shutdown_grace).await;
+        links.shutdown().await;
 
         result.map_err(ClusterNodeError::from)
     }

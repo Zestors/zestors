@@ -360,12 +360,12 @@ impl Display for ShutdownAbortError {
     }
 }
 
-/// Returned by [`spawn`]/[`spawn_task`]/[`StrongAddress::create`]: `pid` is
+/// Returned by [`spawn`]/[`spawn_task`]/[`StrongAddress::create`]: `name` is
 /// already registered.
 #[derive(Debug, thiserror::Error, Clone)]
-#[error("Duplicate PID: {pid} already exists in the registry")]
-pub struct DuplicatePidError {
-    pub pid: Pid,
+#[error("Duplicate Name: {name} already exists in the registry")]
+pub struct DuplicateNameError {
+    pub name: Name,
 }
 
 /// Returned by [`Inbox::run_until_shutdown`]/[`TaskBox::run_until_shutdown`]

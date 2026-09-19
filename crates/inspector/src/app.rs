@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 use std::collections::HashSet;
 use tokio::{sync::mpsc, time::Instant};
 use zestors::{
-    runtime::{ActorStatus, ChannelSnapshot, Pid},
+    runtime::{ActorStatus, ChannelSnapshot, Name},
     supervision::ChildConfig,
 };
 
@@ -85,10 +85,10 @@ impl eframe::App for MyApp {
                 .show(ui, |ui| {
                     let ctx = ui.ctx().clone();
                     for tree in &tree {
-                        SupervisionNodeWidget::new(tree, true, &mut |pid| {
+                        SupervisionNodeWidget::new(tree, true, &mut |name| {
                             crate::api::update_channel_snapshots(
                                 self.sender.clone(),
-                                vec![pid.clone()],
+                                vec![name.clone()],
                                 ctx.clone(),
                             );
                         })

@@ -8,7 +8,7 @@
 //! | Module | What it provides |
 //! |---|---|
 //! | [`interface`] | The vocabulary: derive `Message` for each message type and `Interface` for the set of messages an actor accepts. |
-//! | [`runtime`] | The delivery machinery: actors receive through `Inbox`, everyone else sends through `Address`/`StrongAddress`, and actors are looked up by `Pid` in `Registry`. |
+//! | [`runtime`] | The delivery machinery: actors receive through `Inbox`, everyone else sends through `Address`/`StrongAddress`, and actors are looked up by `Name` in `Registry`. |
 //! | [`actor`] | The actors: implement `Handler` (per-message handlers) or `Actor` (the full event loop), then package either in an `Blueprint`. |
 //! | [`supervision`] | The supervisor's vocabulary: `ChildSpec` pairs a blueprint with its `ChildConfig`, and `RestartIntensity` bounds how often a child may restart. |
 //! | [`supervisor`] | The supervision actors: `Supervisor` starts, watches, and restarts children per a `SupervisionStrategy`; `Node` runs a root supervisor as a whole program. |
@@ -75,7 +75,7 @@
 //! The actor body is an `async` function (or closure) that owns an
 //! [`Inbox`](runtime::Inbox) and loops over incoming messages until it
 //! decides to stop. [`spawn_rand`](runtime::spawn_rand) starts it on a
-//! fresh, randomly-generated [`Pid`](runtime::Pid), returning a
+//! fresh, randomly-generated [`Name`](runtime::Name), returning a
 //! [`Child`](runtime::Child) that's both a handle for sending messages and
 //! a future that resolves to the actor's own return value once it exits.
 //!
@@ -306,8 +306,8 @@
 //! # async fn main() {
 //! let node = Node::new(
 //!     Supervisor::blueprint()
-//!         .child(Worker.pid("worker").unwrap())
-//!         .rand_pid(),
+//!         .child(Worker.name("worker").unwrap())
+//!         .rand_name(),
 //! );
 //!
 //! // In a real program, `node.run()` is usually just awaited directly from
@@ -333,7 +333,7 @@
 //!
 //! The [`runtime`], [`interface`], [`actor`], [`supervision`], and
 //! [`supervisor`] crate docs each have further worked examples - a bare
-//! `Inbox<()>` actor, looking an actor up by `Pid` from elsewhere in the
+//! `Inbox<()>` actor, looking an actor up by `Name` from elsewhere in the
 //! process, the lower-level `Envelope`/`Interface` machinery this guide
 //! builds on, and more. Every example in this guide and in those crate docs
 //! compiles and runs as part of this workspace's test suite, so they stay

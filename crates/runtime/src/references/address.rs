@@ -36,14 +36,14 @@ impl<C: Context> Address<C> {
 }
 
 impl<I: Interface> Address<I> {
-    pub(crate) fn new(pid: Pid, strong_count: usize) -> Self {
+    pub(crate) fn new(name: Name, strong_count: usize) -> Self {
         let msg_queue_capacity = match TypeId::of::<I>() == TypeId::of::<Infallible>() {
             true => 1,
             false => MSG_QUEUE_CAPACITY,
         };
 
         let inner: Arc<Channel> = Arc::new(Channel::new(
-            pid,
+            name,
             strong_count,
             ConcurrentQueue::<I>::bounded(msg_queue_capacity),
         ));
@@ -96,7 +96,7 @@ impl<T: Context> Clone for Address<T> {
 impl<C: Context> Debug for Address<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Address")
-            .field("pid", &self._channel().pid())
+            .field("name", &self._channel().name())
             .field("status", &self._channel().status())
             .field("len", &self._channel().msg_len())
             .finish()
@@ -106,12 +106,12 @@ impl<C: Context> Debug for Address<C> {
 impl<C: Context> Eq for Address<C> {}
 impl<C: Context> PartialEq for Address<C> {
     fn eq(&self, other: &Self) -> bool {
-        self._channel().pid() == other._channel().pid()
+        self._channel().name() == other._channel().name()
     }
 }
 impl<C: Context> Hash for Address<C> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self._channel().pid().hash(state);
+        self._channel().name().hash(state);
     }
 }
 

@@ -33,7 +33,7 @@ impl From<ConcurrentInboxError> for StartOnError {
 /// automatically for every [`Blueprint`], and also implemented by the
 /// type-erased [`DynStarter`].
 ///
-/// This is what lets a [`ChildSpec`](crate::ChildSpec) hold on to its [`Pid`] and spawn (or
+/// This is what lets a [`ChildSpec`](crate::ChildSpec) hold on to its [`Name`] and spawn (or
 /// respawn) the same actor under it repeatedly.
 pub trait Start: Into<DynStarter> {
     /// The [`Context`] of the actor this spawns.

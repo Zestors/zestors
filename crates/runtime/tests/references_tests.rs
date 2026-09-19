@@ -6,7 +6,9 @@ use std::time::Duration;
 use zestors_interface::{Envelope, Interface, Message};
 use zestors_runtime::errors::{Cancelled, ConcurrentInboxError, JoinError, ShutdownAbortError};
 use zestors_runtime::prelude::*;
-use zestors_runtime::{ActorStatus, AsDyn as _, Dyn, StrongAddress, spawn, spawn_rand, spawn_task_rand};
+use zestors_runtime::{
+    ActorStatus, AsDyn as _, Dyn, StrongAddress, spawn, spawn_rand, spawn_task_rand,
+};
 
 mod common;
 
@@ -48,7 +50,11 @@ async fn address_does_not_count_toward_strong_count() {
     let weak_before = child.weak_count();
     let _addr1 = child.address().clone();
     let _addr2 = child.address().clone();
-    assert_eq!(child.strong_count(), strong_before, "cloning an Address must not change strong_count");
+    assert_eq!(
+        child.strong_count(),
+        strong_before,
+        "cloning an Address must not change strong_count"
+    );
     assert_eq!(child.weak_count(), weak_before + 2);
 
     child.signal_shutdown();
@@ -56,8 +62,8 @@ async fn address_does_not_count_toward_strong_count() {
 
 #[tokio::test]
 async fn address_can_still_send_after_every_strong_ref_is_dropped() {
-    let pid = common::test_pid("weak_after_strong_gone");
-    let child = spawn(pid, common::simplest_handler).unwrap();
+    let name = common::test_name("weak_after_strong_gone");
+    let child = spawn(name, common::simplest_handler).unwrap();
     let weak = child.address().clone();
 
     child.signal_shutdown();
@@ -75,20 +81,23 @@ async fn address_can_still_send_after_every_strong_ref_is_dropped() {
 
 #[tokio::test]
 async fn strong_address_create_registers_without_spawning() {
-    let pid = common::test_pid("strong_no_spawn");
-    let strong: StrongAddress<()> = StrongAddress::create(pid.clone()).unwrap();
+    let name = common::test_name("strong_no_spawn");
+    let strong: StrongAddress<()> = StrongAddress::create(name.clone()).unwrap();
 
-    assert!(zestors_runtime::Registry::local().contains(&pid));
+    assert!(zestors_runtime::Registry::local().contains(&name));
     // A freshly created channel with nothing spawned on it starts `Exited`.
-    assert_eq!(strong.status(), ActorStatus::Exited(zestors_runtime::ExitStatus::Normal));
+    assert_eq!(
+        strong.status(),
+        ActorStatus::Exited(zestors_runtime::ExitStatus::Normal)
+    );
 
     drop(strong);
-    assert!(!zestors_runtime::Registry::local().contains(&pid));
+    assert!(!zestors_runtime::Registry::local().contains(&name));
 }
 
 #[tokio::test]
 async fn spawning_twice_on_the_same_strong_address_is_rejected() {
-    let strong = StrongAddress::create(common::test_pid("concurrent_inbox")).unwrap();
+    let strong = StrongAddress::create(common::test_name("concurrent_inbox")).unwrap();
     let child = strong.clone().spawn(common::simplest_handler).unwrap();
 
     let result = strong.spawn(common::simplest_handler);
@@ -98,18 +107,18 @@ async fn spawning_twice_on_the_same_strong_address_is_rejected() {
 }
 
 #[tokio::test]
-async fn respawn_reuses_the_pid_and_registry_entry() {
-    let strong = StrongAddress::create(common::test_pid("respawn_reuse")).unwrap();
-    let pid = strong.pid().clone();
+async fn respawn_reuses_the_name_and_registry_entry() {
+    let strong = StrongAddress::create(common::test_name("respawn_reuse")).unwrap();
+    let name = strong.name().clone();
 
     let child1 = strong.clone().spawn(common::simplest_handler).unwrap();
-    assert_eq!(child1.pid(), &pid);
+    assert_eq!(child1.name(), &name);
     child1.signal_shutdown();
     child1.watch_exit().await.unwrap();
 
     let child2 = strong.spawn(common::simplest_handler).unwrap();
-    assert_eq!(child2.pid(), &pid);
-    assert!(zestors_runtime::Registry::local().contains(&pid));
+    assert_eq!(child2.name(), &name);
+    assert!(zestors_runtime::Registry::local().contains(&name));
 
     child2.signal_shutdown();
 }
@@ -142,7 +151,10 @@ async fn manual_init_suppresses_the_automatic_running_transition() {
     let child = spawn_rand(move |mut inbox: Inbox<()>| async move {
         inbox.set_manual_init();
         proceed2.notified().await; // wait for the test to tell us to proceed
-        assert!(inbox.register_initialized(), "the first call must still perform the transition");
+        assert!(
+            inbox.register_initialized(),
+            "the first call must still perform the transition"
+        );
         while inbox.recv().await.is_some() {}
         Ok(())
     });
@@ -150,7 +162,11 @@ async fn manual_init_suppresses_the_automatic_running_transition() {
     // Give the task a chance to run up to `notified().await` and register
     // manual init, without ever calling a `recv*` method.
     tokio::task::yield_now().await;
-    assert_eq!(child.status(), ActorStatus::Initializing, "manual init must suppress the automatic transition");
+    assert_eq!(
+        child.status(),
+        ActorStatus::Initializing,
+        "manual init must suppress the automatic transition"
+    );
 
     proceed.notify_one();
     assert!(common::wait_for_running(&child).await);
@@ -180,7 +196,10 @@ async fn try_recv_finds_a_message_queued_before_the_actor_started_polling() {
     let child = spawn_rand(|mut inbox: Inbox<()>| async move {
         let first = inbox.try_recv();
         assert!(matches!(first, Some(InboxEvent::Message(()))));
-        assert!(inbox.try_recv().is_none(), "nothing should be left after that");
+        assert!(
+            inbox.try_recv().is_none(),
+            "nothing should be left after that"
+        );
         Ok(())
     });
 
@@ -209,7 +228,11 @@ async fn recv_event_stops_but_recv_event_always_keeps_waiting_once_exiting_and_e
     });
     plain.watch_init().await.unwrap();
     plain.signal_shutdown();
-    assert!(tokio::time::timeout(Duration::from_secs(2), plain).await.is_ok());
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), plain)
+            .await
+            .is_ok()
+    );
 
     // `recv_event_always` (`while_exiting: true`) skips that guard, so in
     // the exact same situation it must keep waiting instead of resolving.
@@ -218,7 +241,8 @@ async fn recv_event_stops_but_recv_event_always_keeps_waiting_once_exiting_and_e
             inbox.recv_event_always().await,
             Some(InboxEvent::Signal(Signal::Shutdown))
         ));
-        let second = tokio::time::timeout(Duration::from_millis(200), inbox.recv_event_always()).await;
+        let second =
+            tokio::time::timeout(Duration::from_millis(200), inbox.recv_event_always()).await;
         assert!(
             second.is_err(),
             "recv_event_always must not give up just because the queue emptied out while exiting"
@@ -227,7 +251,11 @@ async fn recv_event_stops_but_recv_event_always_keeps_waiting_once_exiting_and_e
     });
     always.watch_init().await.unwrap();
     always.signal_shutdown();
-    assert!(tokio::time::timeout(Duration::from_secs(3), always).await.is_ok());
+    assert!(
+        tokio::time::timeout(Duration::from_secs(3), always)
+            .await
+            .is_ok()
+    );
 }
 
 #[tokio::test]
@@ -246,7 +274,10 @@ async fn dropping_the_inbox_drains_its_queue() {
     }
 
     let outcome = tokio::time::timeout(Duration::from_secs(2), child.watch_exit()).await;
-    assert!(outcome.is_ok(), "the actor should exit promptly even with unread messages left");
+    assert!(
+        outcome.is_ok(),
+        "the actor should exit promptly even with unread messages left"
+    );
 }
 
 // ============================================================================
@@ -304,9 +335,7 @@ async fn run_until_shutdown_completes_normally_without_a_signal() {
 #[tokio::test]
 async fn run_until_shutdown_cancels_a_pending_future_on_shutdown() {
     let child = spawn_rand(|mut inbox: Inbox<()>| async move {
-        let outcome = inbox
-            .run_until_shutdown(std::future::pending::<()>())
-            .await;
+        let outcome = inbox.run_until_shutdown(std::future::pending::<()>()).await;
         assert!(matches!(outcome, Err(Cancelled)));
         Ok(())
     });
@@ -315,7 +344,10 @@ async fn run_until_shutdown_cancels_a_pending_future_on_shutdown() {
     child.signal_shutdown();
 
     let result = tokio::time::timeout(Duration::from_secs(2), child).await;
-    assert!(result.is_ok(), "run_until_shutdown should have unblocked the actor promptly");
+    assert!(
+        result.is_ok(),
+        "run_until_shutdown should have unblocked the actor promptly"
+    );
 }
 
 #[tokio::test]
@@ -325,9 +357,7 @@ async fn run_until_shutdown_is_cancelled_immediately_if_already_exiting() {
         inbox.register_exiting();
         // If this awaited `fut` at all, the test would hang - it must
         // short-circuit to `Cancelled` before ever polling it.
-        let outcome = inbox
-            .run_until_shutdown(std::future::pending::<()>())
-            .await;
+        let outcome = inbox.run_until_shutdown(std::future::pending::<()>()).await;
         assert!(matches!(outcome, Err(Cancelled)));
         Ok(())
     });
@@ -342,8 +372,8 @@ async fn run_until_shutdown_is_cancelled_immediately_if_already_exiting() {
 
 #[tokio::test]
 async fn dropping_an_attached_child_aborts_it() {
-    let pid = common::test_pid("attached_drop_aborts");
-    let child = spawn(pid.clone(), |mut inbox: Inbox<()>| async move {
+    let name = common::test_name("attached_drop_aborts");
+    let child = spawn(name.clone(), |mut inbox: Inbox<()>| async move {
         std::future::pending::<()>().await;
         while inbox.recv().await.is_some() {}
         Ok(())
@@ -358,8 +388,14 @@ async fn dropping_an_attached_child_aborts_it() {
     drop(child);
 
     let outcome = tokio::time::timeout(Duration::from_secs(2), weak.watch_exit()).await;
-    assert!(outcome.is_ok(), "dropping an attached Child should eventually abort its task");
-    assert_eq!(weak.status(), ActorStatus::Exited(zestors_runtime::ExitStatus::Aborted));
+    assert!(
+        outcome.is_ok(),
+        "dropping an attached Child should eventually abort its task"
+    );
+    assert_eq!(
+        weak.status(),
+        ActorStatus::Exited(zestors_runtime::ExitStatus::Aborted)
+    );
 }
 
 #[tokio::test]
@@ -402,7 +438,10 @@ async fn abort_marks_the_exit_status_as_aborted() {
     child.abort();
     let result = (&mut child).await;
     assert!(matches!(result, Err(JoinError::Aborted)));
-    assert_eq!(child.status(), ActorStatus::Exited(zestors_runtime::ExitStatus::Aborted));
+    assert_eq!(
+        child.status(),
+        ActorStatus::Exited(zestors_runtime::ExitStatus::Aborted)
+    );
 }
 
 #[tokio::test]
@@ -485,7 +524,10 @@ async fn downcast_round_trips_to_the_concrete_interface() {
     let dyn_address = child.address().clone().into_dyn::<(Ping, Pong)>();
 
     let wrong = dyn_address.downcast::<UnrelatedInterface>();
-    assert!(wrong.is_err(), "the channel's concrete interface is PingPongInterface, not UnrelatedInterface");
+    assert!(
+        wrong.is_err(),
+        "the channel's concrete interface is PingPongInterface, not UnrelatedInterface"
+    );
 
     let dyn_address = wrong.unwrap_err();
     let concrete = dyn_address

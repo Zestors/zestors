@@ -2,11 +2,11 @@ use super::debug_card::render_health_card;
 use super::status_badge::render_actor_status_badge;
 use crate::{app::ProcessTree, theme::Theme, utils::format_duration};
 use egui::{CornerRadius, Frame, Margin, RichText, Stroke, Ui, collapsing_header::CollapsingState};
-use zestors::runtime::Pid;
+use zestors::runtime::Name;
 
 pub struct SupervisionNodeWidget<'a, F>
 where
-    F: FnMut(&Pid),
+    F: FnMut(&Name),
 {
     tree: &'a ProcessTree<'a>,
     default_open: bool,
@@ -15,7 +15,7 @@ where
 
 impl<'a, F> SupervisionNodeWidget<'a, F>
 where
-    F: FnMut(&Pid),
+    F: FnMut(&Name),
 {
     pub fn new(tree: &'a ProcessTree<'a>, default_open: bool, on_reload: &'a mut F) -> Self {
         Self {
@@ -28,7 +28,7 @@ where
     pub fn show(mut self, ui: &mut Ui) {
         let process = self.tree.entry;
 
-        let node_id = ui.make_persistent_id(("process", &process.pid));
+        let node_id = ui.make_persistent_id(("process", &process.name));
 
         let is_recently_outdated = process.outdated_since.is_some();
 
@@ -60,15 +60,15 @@ where
         let process = self.tree.entry;
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("PID:").small().color(Theme::LABEL_MUTED));
+            ui.label(RichText::new("Name:").small().color(Theme::LABEL_MUTED));
 
             ui.label(
-                RichText::new(&process.pid)
+                RichText::new(&process.name)
                     .strong()
                     .color(if is_recently_outdated {
                         Theme::LABEL_MUTED
                     } else {
-                        Theme::PID_BLUE
+                        Theme::NAME_BLUE
                     }),
             );
 
@@ -93,7 +93,7 @@ where
         // Snapshot / Debug details
         ui.add_space(8.0);
 
-        let details_id = ui.make_persistent_id(("process-details", &process.pid));
+        let details_id = ui.make_persistent_id(("process-details", &process.name));
 
         let details_state = CollapsingState::load_with_default_open(ui.ctx(), details_id, false);
 
@@ -106,7 +106,7 @@ where
                 if is_open {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("↻").clicked() {
-                            (self.on_reload)(&process.pid);
+                            (self.on_reload)(&process.name);
                         }
                     });
                 }
@@ -117,14 +117,14 @@ where
 
         // Fetch whenever Details is open.
         if is_open {
-            (self.on_reload)(&process.pid);
+            (self.on_reload)(&process.name);
         }
 
         // Children
         if !self.tree.children.is_empty() {
             ui.add_space(8.0);
 
-            let children_id = ui.make_persistent_id(("process-children", &process.pid));
+            let children_id = ui.make_persistent_id(("process-children", &process.name));
 
             CollapsingState::load_with_default_open(ui.ctx(), children_id, true)
                 .show_header(ui, |ui| {
@@ -151,7 +151,7 @@ where
     fn render_config(&self, ui: &mut Ui) {
         let cfg = &self.tree.entry.cfg;
 
-        egui::Grid::new(ui.make_persistent_id(("process-config", &self.tree.entry.pid)))
+        egui::Grid::new(ui.make_persistent_id(("process-config", &self.tree.entry.name)))
             .num_columns(2)
             .spacing([12.0, 6.0])
             .show(ui, |ui| {
@@ -206,7 +206,7 @@ where
                 ui.add_space(8.0);
             }
 
-            render_health_card(ui, &process.pid, debug);
+            render_health_card(ui, &process.name, debug);
         }
     }
 }

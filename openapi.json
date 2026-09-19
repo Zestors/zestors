@@ -19,9 +19,9 @@
             }
           },
           {
-            "name": "pid",
+            "name": "name",
             "in": "query",
-            "description": "The PID from which to start the supervision tree. If not provided, the root supervisor will be used.",
+            "description": "The name from which to start the supervision tree. If not provided, the root supervisor will be used.",
             "required": false,
             "schema": {
               "oneOf": [
@@ -135,7 +135,7 @@
       },
       "ChannelSnapshot": {
         "type": "object",
-        "required": ["pid", "status", "signal_len", "msg_len", "spawns", "exits", "created_at"],
+        "required": ["name", "status", "signal_len", "msg_len", "spawns", "exits", "created_at"],
         "properties": {
           "created_at": {
             "$ref": "#/components/schemas/String"
@@ -173,7 +173,7 @@
             "type": "integer",
             "minimum": 0
           },
-          "pid": {
+          "name": {
             "$ref": "#/components/schemas/String"
           },
           "signal_len": {
@@ -193,12 +193,12 @@
       },
       "ChildDescription": {
         "type": "object",
-        "required": ["pid", "cfg"],
+        "required": ["name", "cfg"],
         "properties": {
           "cfg": {
             "$ref": "#/components/schemas/SuperviseeConfig"
           },
-          "pid": {
+          "name": {
             "$ref": "#/components/schemas/String"
           }
         }

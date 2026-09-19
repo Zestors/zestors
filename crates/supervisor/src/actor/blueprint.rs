@@ -11,7 +11,7 @@ use zestors_supervision::{RestartIntensity, Start};
 /// shorthand) and the `child`/`children`/`strategy`/`intensity`/`source`
 /// builder methods, then spawn it like any other blueprint.
 pub struct SupervisorBlueprint {
-    supervisees: IndexMap<Pid, ChildSpec>,
+    supervisees: IndexMap<Name, ChildSpec>,
     strategy: SupervisionStrategy,
     restart_intensity: Option<RestartIntensity>,
     source: Option<Arc<dyn SupervisorSource>>,
@@ -76,7 +76,8 @@ impl SupervisorBlueprint {
 
     /// Adds a single [`ChildSpec`], type-erasing it.
     pub fn child<T: Start + Sync>(mut self, spec: ChildSpec<T>) -> Self {
-        self.supervisees.insert(spec.pid().clone(), spec.into_dyn());
+        self.supervisees
+            .insert(spec.name().clone(), spec.into_dyn());
         self
     }
 
@@ -84,7 +85,7 @@ impl SupervisorBlueprint {
     pub fn children<T: Start>(mut self, specs: impl IntoIterator<Item = ChildSpec<T>>) -> Self {
         for spec in specs {
             let spec = spec.into_dyn();
-            self.supervisees.insert(spec.pid().clone(), spec);
+            self.supervisees.insert(spec.name().clone(), spec);
         }
         self
     }
@@ -111,7 +112,7 @@ impl SupervisorBlueprint {
 
     /// Adds an already type-erased [`ChildSpec`] by mutable reference.
     pub fn add_dyn_child(&mut self, spec: ChildSpec) {
-        self.supervisees.insert(spec.pid().clone(), spec);
+        self.supervisees.insert(spec.name().clone(), spec);
     }
 
     /// Adds several already type-erased [`ChildSpec`]s by mutable reference.
