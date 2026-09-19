@@ -318,21 +318,24 @@ impl Pair {
         within(a.cluster.wait_for_members(1)).await;
         within(b.cluster.wait_for_members(1)).await;
 
-        // What node-b accepts.
-        b.cluster
-            .register::<Double>()
-            .register::<Note>()
-            .register::<Hang>()
-            .register::<Forget>()
-            .register::<Slow>()
-            .register::<Unwanted>()
-            .register::<Blob>()
-            .register::<Reverse>()
-            .register::<Fetch>()
-            .register::<FetchAndForget>()
-            .register::<FetchAndHang>()
-            .register::<Both>()
-            .register::<BigFetch>();
+        // What both accept: node-b for receiving, node-a for checking the
+        // actors it addresses.
+        for node in [&a, &b] {
+            node.cluster
+                .register::<Double>()
+                .register::<Note>()
+                .register::<Hang>()
+                .register::<Forget>()
+                .register::<Slow>()
+                .register::<Unwanted>()
+                .register::<Blob>()
+                .register::<Reverse>()
+                .register::<Fetch>()
+                .register::<FetchAndForget>()
+                .register::<FetchAndHang>()
+                .register::<Both>()
+                .register::<BigFetch>();
+        }
         Self { a, b }
     }
 
@@ -873,22 +876,24 @@ async fn operations_report_why_they_failed() {
 }
 
 /// The address of an actor on node-b, as node-b itself sees it: a local one.
-fn local_on_b(pair: &Pair, name: &'static str) -> ClusterAddress<WorkerInterface> {
+async fn local_on_b(pair: &Pair, name: &'static str) -> ClusterAddress<WorkerInterface> {
     let address = pair
         .b
         .cluster
-        .cluster_address::<WorkerInterface>(GlobalName::new(name, "node-b"))
+        .address::<WorkerInterface>(GlobalName::new(name, "node-b"))
+        .await
         .unwrap();
     assert!(matches!(address, ClusterAddress::Local(_)));
     address
 }
 
 /// The same actor as seen from node-a: a remote one.
-fn remote_on_b(pair: &Pair, name: &'static str) -> ClusterAddress<WorkerInterface> {
+async fn remote_on_b(pair: &Pair, name: &'static str) -> ClusterAddress<WorkerInterface> {
     let address = pair
         .a
         .cluster
-        .cluster_address::<WorkerInterface>(GlobalName::new(name, "node-b"))
+        .address::<WorkerInterface>(GlobalName::new(name, "node-b"))
+        .await
         .unwrap();
     assert!(matches!(address, ClusterAddress::Remote(_)));
     address
@@ -899,7 +904,7 @@ async fn a_cluster_address_reaches_an_actor_on_this_node() {
     let pair = Pair::start().await;
     let log = Log::default();
     let _worker = worker("cluster-local", log.clone());
-    let local = local_on_b(&pair, "cluster-local");
+    let local = local_on_b(&pair, "cluster-local").await;
 
     assert_eq!(local.call(Double(21)).await.unwrap(), 42);
     for i in 0..100 {
@@ -929,11 +934,11 @@ async fn the_same_code_works_for_every_kind_of_address() {
     let _worker = worker("cluster-generic", Log::default());
 
     assert_eq!(
-        double_via(&local_on_b(&pair, "cluster-generic"), 3).await,
+        double_via(&local_on_b(&pair, "cluster-generic").await, 3).await,
         6
     );
     assert_eq!(
-        double_via(&remote_on_b(&pair, "cluster-generic"), 4).await,
+        double_via(&remote_on_b(&pair, "cluster-generic").await, 4).await,
         8
     );
     assert_eq!(
@@ -951,13 +956,17 @@ async fn a_local_message_is_not_encoded() {
 
     assert_eq!(
         local_on_b(&pair, "cluster-nowire")
+            .await
             .call(NoWire(1))
             .await
             .unwrap(),
         2
     );
     assert!(matches!(
-        remote_on_b(&pair, "cluster-nowire").call(NoWire(1)).await,
+        remote_on_b(&pair, "cluster-nowire")
+            .await
+            .call(NoWire(1))
+            .await,
         Err(RemoteCallError::NotSent(RemoteCastError::Encode { .. }))
     ));
 }
@@ -970,13 +979,23 @@ async fn a_local_actor_is_reached_without_the_node_running() {
     let _worker = worker("cluster-idle", Log::default());
 
     let local = remote
-        .cluster_address::<WorkerInterface>(GlobalName::new("cluster-idle", "node-x"))
+        .address::<WorkerInterface>(GlobalName::new("cluster-idle", "node-x"))
+        .await
         .unwrap();
     assert_eq!(local.call(Double(2)).await.unwrap(), 4);
 
-    let elsewhere = remote
-        .cluster_address::<WorkerInterface>(GlobalName::new("cluster-idle", "node-y"))
-        .unwrap();
+    // Another node has to be asked, which a node that doesn't run can't do.
+    assert!(matches!(
+        remote
+            .address::<WorkerInterface>(GlobalName::new("cluster-idle", "node-y"))
+            .await,
+        Err(AddressError::Remote(RemoteOpError::NotSent(
+            RemoteCastError::NotRunning(_)
+        )))
+    ));
+    let elsewhere = ClusterAddress::from(
+        remote.address_unchecked::<WorkerInterface>(GlobalName::new("cluster-idle", "node-y")),
+    );
     assert!(matches!(
         elsewhere.call(Double(2)).await,
         Err(RemoteCallError::NotSent(RemoteCastError::NotRunning(_)))
@@ -987,7 +1006,7 @@ async fn a_local_actor_is_reached_without_the_node_running() {
 async fn a_local_call_can_time_out_and_a_closed_actor_is_told() {
     let pair = Pair::start().await;
     let local_worker = worker("cluster-timeout", Log::default());
-    let local = local_on_b(&pair, "cluster-timeout");
+    let local = local_on_b(&pair, "cluster-timeout").await;
 
     // No timeout of its own, but a call can have one.
     let started = tokio::time::Instant::now();
@@ -1024,39 +1043,63 @@ async fn a_local_call_can_time_out_and_a_closed_actor_is_told() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn making_an_address_checks_the_actor_on_this_node() {
+async fn making_an_address_checks_the_actor_where_it_is() {
     let pair = Pair::start().await;
     let _worker = worker("cluster-check", Log::default());
     let (a, b) = (&pair.a.cluster, &pair.b.cluster);
 
-    // On this node the actor has to be there, and accept what is asked.
+    // On this node the actor is looked for in its registry.
     assert!(matches!(
-        b.cluster_address::<WorkerInterface>(GlobalName::new("cluster-nobody", "node-b")),
+        b.address::<WorkerInterface>(GlobalName::new("cluster-nobody", "node-b"))
+            .await,
         Err(AddressError::NoSuchActor(_))
     ));
     assert!(matches!(
-        b.cluster_address_dyn::<(Unwanted,)>(GlobalName::new("cluster-check", "node-b")),
+        b.address_dyn::<(Unwanted,)>(GlobalName::new("cluster-check", "node-b"))
+            .await,
         Err(AddressError::TypeMismatch(_))
     ));
     assert!(
-        b.cluster_address_dyn::<(Double, Note)>(GlobalName::new("cluster-check", "node-b"))
+        b.address_dyn::<(Double, Note)>(GlobalName::new("cluster-check", "node-b"))
+            .await
             .is_ok()
     );
 
-    // On another node there is nothing to check, unless a process has one by
-    // that name that doesn't accept it.
-    assert!(
-        a.cluster_address::<WorkerInterface>(GlobalName::new("cluster-nobody", "node-b"))
-            .is_ok()
-    );
+    // On another node, that node is asked.
     assert!(matches!(
-        a.address_dyn::<(Unwanted,)>(GlobalName::new("cluster-check", "node-b")),
+        a.address::<WorkerInterface>(GlobalName::new("cluster-nobody", "node-b"))
+            .await,
+        Err(AddressError::NoSuchActor(_))
+    ));
+    assert!(matches!(
+        a.address_dyn::<(Unwanted,)>(GlobalName::new("cluster-check", "node-b"))
+            .await,
         Err(AddressError::TypeMismatch(_))
     ));
-    assert!(
+    assert!(matches!(
         a.address::<WorkerInterface>(GlobalName::new("cluster-check", "node-b"))
-            .is_ok()
-    );
+            .await,
+        Ok(ClusterAddress::Remote(_))
+    ));
+    assert!(matches!(
+        a.address_dyn::<(Double, Note)>(GlobalName::new("cluster-check", "node-b"))
+            .await,
+        Ok(ClusterAddress::Remote(_))
+    ));
+    // A node that isn't a member can't be asked.
+    assert!(matches!(
+        a.address::<WorkerInterface>(GlobalName::new("cluster-check", "node-z"))
+            .await,
+        Err(AddressError::Remote(RemoteOpError::NotSent(
+            RemoteCastError::NotAMember(_)
+        )))
+    ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_address_can_be_made_unchecked() {
+    let pair = Pair::start().await;
+    let (a, b) = (&pair.a.cluster, &pair.b.cluster);
 
     // Conversions.
     let remote = a.address_unchecked::<WorkerInterface>(GlobalName::new("cluster-check", "node-b"));
@@ -1079,7 +1122,7 @@ async fn a_local_actor_can_be_operated_on_through_a_cluster_address() {
     let pair = Pair::start().await;
     let child = worker("cluster-ops", Log::default());
     child.watch_init().await.unwrap();
-    let local = local_on_b(&pair, "cluster-ops");
+    let local = local_on_b(&pair, "cluster-ops").await;
 
     assert_eq!(local.status().await.unwrap(), ActorStatus::Running);
     local.ping().await.unwrap();
@@ -1112,7 +1155,7 @@ async fn a_local_actor_can_be_operated_on_through_a_cluster_address() {
 
     // The same for the actor seen from the other node, over the network.
     let _other = worker("cluster-ops-remote", Log::default());
-    let remote = remote_on_b(&pair, "cluster-ops-remote");
+    let remote = remote_on_b(&pair, "cluster-ops-remote").await;
     assert!(remote.accepts::<Double>().await.unwrap());
     assert!(remote.members().await.unwrap().contains(&Double::Id));
     assert!(remote.info().await.unwrap().accepts.is_some());

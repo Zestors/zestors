@@ -19,7 +19,7 @@
 //! ```no_run
 //! use serde::{Deserialize, Serialize};
 //! use zestors::{
-//!     distr::{ClusterNode, GlobalName, RemoteAddress},
+//!     distr::{ClusterAddress, ClusterNode, GlobalName},
 //!     interface::{Envelope, Interface, Message},
 //!     prelude::*,
 //! };
@@ -38,10 +38,12 @@
 //! // On the node that runs the actor: accept the message from other nodes.
 //! node.cluster().register::<Double>();
 //!
-//! // On another node: address the actor, and call it.
-//! let counter: RemoteAddress<CounterInterface> = node
+//! // On another node: address the actor, and call it. This looks for the
+//! // actor there, checking that it accepts the messages registered here.
+//! let counter: ClusterAddress<CounterInterface> = node
 //!     .cluster()
-//!     .address(GlobalName::new("counter", "node-b"))?;
+//!     .address(GlobalName::new("counter", "node-b"))
+//!     .await?;
 //! let doubled = counter.call(Double(21)).await?;
 //! # Ok(())
 //! # }
@@ -83,6 +85,7 @@ use dashmap::DashMap;
 use handler::{Handler, Typed};
 use reply::Pending;
 use std::{
+    any::TypeId,
     marker::PhantomData,
     sync::{Arc, RwLock, atomic::AtomicU64},
     time::Duration,
@@ -90,16 +93,7 @@ use std::{
 use tokio_util::sync::{CancellationToken, DropGuard};
 use type_sets::{AsTypeSet, Members};
 use zestors_interface::Interface;
-use zestors_runtime::{Context, Dyn, TypedRegistryError};
-
-/// Whether a lookup in the registry of this process is no reason to refuse an
-/// address: the actor is there and accepts what is asked, or isn't there at all.
-fn check<T>(found: Result<T, TypedRegistryError>) -> Result<(), AddressError> {
-    match found {
-        Ok(_) | Err(TypedRegistryError::NotFound(_)) => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
+use zestors_runtime::{Context, Dyn};
 
 /// What a node needs to message actors on other nodes, kept inside a
 /// [`Cluster`].
@@ -108,6 +102,8 @@ pub(crate) struct MessageHandler {
     /// How many lanes to a peer messages between actors are spread over.
     shards: u8,
     handlers: DashMap<Id, Arc<dyn Handler>>,
+    /// The id each registered message type goes by on the wire.
+    type_ids: DashMap<TypeId, Id>,
     /// Set while the node runs.
     running: RwLock<Option<Started>>,
     next_call: AtomicU64,
@@ -128,6 +124,7 @@ impl MessageHandler {
             call_timeout,
             shards,
             handlers,
+            type_ids: DashMap::new(),
             running: RwLock::new(None),
             next_call: AtomicU64::new(0),
         }
@@ -135,6 +132,12 @@ impl MessageHandler {
 
     fn running(&self) -> Option<Started> {
         self.running.read().expect("Not poisoned").clone()
+    }
+
+    pub(super) fn register<M: RemoteMessage>(&self) {
+        self.handlers
+            .insert(M::Id, Arc::new(Typed::<M>(PhantomData)));
+        self.type_ids.insert(TypeId::of::<M>(), M::Id);
     }
 }
 
@@ -145,81 +148,88 @@ impl Cluster {
     /// to any actor on this node that accepts them. Messages of a type that
     /// isn't registered are answered with [`RemoteError::UnknownMessage`].
     ///
-    /// Only receiving needs it; sending a message doesn't.
+    /// Also what makes [`Cluster::address`] check that an actor on another node
+    /// accepts `M`: it can only tell the other node about the messages that are
+    /// registered here. Sending a message needn't be registered otherwise.
     pub fn register<M: RemoteMessage>(&self) -> &Self {
-        self.messaging()
-            .handlers
-            .insert(M::Id, Arc::new(Typed::<M>(PhantomData)));
+        self.messaging().register::<M>();
         self
     }
 
     /// This node.
-    pub fn node(&self) -> NodeName {
+    pub fn name(&self) -> NodeName {
         self.local_member().name
-    }
-
-    /// The actor `target` on another node, to send messages to. `I` is what it
-    /// accepts, see [`RemoteAddress`].
-    ///
-    /// Fails if an actor with that name is running in this process, and doesn't
-    /// accept `I`. An actor on another node can't be looked at, so it isn't
-    /// checked that it exists, or accepts `I`; that is answered when a message
-    /// is sent. Use [`Cluster::address_unchecked`] to skip the check, or
-    /// [`Cluster::address_dyn`] for a set of messages.
-    pub fn address<I: Interface>(
-        &self,
-        target: GlobalName,
-    ) -> Result<RemoteAddress<I>, AddressError> {
-        check(target.name().typed_address::<I>())?;
-        Ok(RemoteAddress::new(self.clone(), target))
-    }
-
-    /// Like [`Cluster::address`], for the actor to accept a set of messages like
-    /// `Dyn<(Ping, Double)>`.
-    pub fn address_dyn<S>(&self, target: GlobalName) -> Result<RemoteAddress<Dyn<S>>, AddressError>
-    where
-        S: AsTypeSet + Members + 'static,
-    {
-        check(target.name().dyn_address::<S>())?;
-        Ok(RemoteAddress::new(self.clone(), target))
-    }
-
-    /// Like [`Cluster::address`], but without looking whether an actor with that
-    /// name is running in this process.
-    pub fn address_unchecked<C: Context>(&self, target: GlobalName) -> RemoteAddress<C> {
-        RemoteAddress::new(self.clone(), target)
     }
 
     /// The actor `target`, whether it is on this node or another: a
     /// [`ClusterAddress::Local`] if it is on this node, else a
     /// [`ClusterAddress::Remote`]. `I` is what it accepts.
     ///
-    /// For an actor on this node it has to be running, and accept `I`;
-    /// otherwise this fails. For one on another node it is checked as with
-    /// [`Cluster::address`].
-    pub fn cluster_address<I: Interface>(
+    /// The actor is looked up where it is: in the registry of this node, or by
+    /// asking the node it is on. It has to be running, and accept `I`. For an
+    /// actor on another node, that needs the node to be a reachable member,
+    /// and it is only checked to accept the messages in `I` that are
+    /// [registered](Cluster::register) on this node, and on its own node. Use [`Cluster::address_unchecked`] to skip the check, or
+    /// [`Cluster::address_dyn`] for a set of messages.
+    pub async fn address<I: Interface>(
         &self,
         target: GlobalName,
     ) -> Result<ClusterAddress<I>, AddressError> {
-        if *target.node() == self.node() {
+        if *target.node() == self.name() {
             return Ok(ClusterAddress::Local(target.name().typed_address::<I>()?));
         }
-        self.address(target).map(ClusterAddress::Remote)
+        self.resolve(target, <I::Set as Members>::members())
+            .await
+            .map(ClusterAddress::Remote)
     }
 
-    /// Like [`Cluster::cluster_address`], for the actor to accept a set of
-    /// messages like `Dyn<(Ping, Double)>`.
-    pub fn cluster_address_dyn<S>(
+    /// Like [`Cluster::address`], for the actor to accept a set of messages like
+    /// `Dyn<(Ping, Double)>`.
+    pub async fn address_dyn<S>(
         &self,
         target: GlobalName,
     ) -> Result<ClusterAddress<Dyn<S>>, AddressError>
     where
         S: AsTypeSet + Members + 'static,
     {
-        if *target.node() == self.node() {
+        if *target.node() == self.name() {
             return Ok(ClusterAddress::Local(target.name().dyn_address::<S>()?));
         }
-        self.address_dyn(target).map(ClusterAddress::Remote)
+        self.resolve(target, S::members())
+            .await
+            .map(ClusterAddress::Remote)
+    }
+
+    /// Asks the node `target` is on whether the actor is there, and accepts
+    /// the messages of `types`.
+    async fn resolve<C: Context>(
+        &self,
+        target: GlobalName,
+        types: &[TypeId],
+    ) -> Result<RemoteAddress<C>, AddressError> {
+        // A message that isn't registered has no id to tell the other node, and
+        // can't be sent through the address either.
+        let ids: Vec<Id> = types
+            .iter()
+            .filter_map(|ty| self.messaging().type_ids.get(ty).map(|id| *id))
+            .collect();
+        let name = target.name().clone();
+        let address = RemoteAddress::new(self.clone(), target);
+        match address.is_superset_of(&ids).await {
+            Ok(true) => Ok(address),
+            Ok(false) => Err(AddressError::TypeMismatch(name)),
+            Err(RemoteOpError::Reply(RemoteReplyError::Remote(RemoteError::NoSuchActor))) => {
+                Err(AddressError::NoSuchActor(name))
+            }
+            Err(error) => Err(AddressError::Remote(error)),
+        }
+    }
+
+    /// Like [`Cluster::address`], but without looking for the actor, so that it
+    /// isn't async and doesn't need the node to be reachable. What is wrong is
+    /// then answered when a message is sent.
+    pub fn address_unchecked<C: Context>(&self, target: GlobalName) -> RemoteAddress<C> {
+        RemoteAddress::new(self.clone(), target)
     }
 
     /// Starts taking in messages, and sends what is asked to, until the returned

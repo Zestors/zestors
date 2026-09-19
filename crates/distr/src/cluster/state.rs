@@ -10,21 +10,21 @@ use tokio::sync::{broadcast, watch};
 /// What this node knows about the cluster. Kept under one lock so that readers
 /// never see the parts disagree, and so that events can be published with a
 /// change made under it (see the mutators below).
-struct Roster {
+struct MemberList {
     local: Member,
     members: HashMap<NodeName, Member>,
     /// Members in `members` that can't currently be connected to.
     unreachable: HashSet<NodeName>,
 }
 
-struct ClusterView {
-    roster: RwLock<Roster>,
+struct MembershipView {
+    members: RwLock<MemberList>,
     status_sender: watch::Sender<NodeStatus>,
     event_sender: broadcast::Sender<ClusterEvent>,
 }
 
 struct ClusterInner {
-    view: ClusterView,
+    members: MembershipView,
     messaging: MessageHandler,
 }
 
@@ -43,9 +43,9 @@ impl Cluster {
     pub(crate) fn new(local: Member, call_timeout: Duration, shards: u8) -> Self {
         Self {
             inner: Arc::new(ClusterInner {
-                view: ClusterView {
+                members: MembershipView {
                     status_sender: watch::channel(NodeStatus::Starting).0,
-                    roster: RwLock::new(Roster {
+                    members: RwLock::new(MemberList {
                         local,
                         members: HashMap::new(),
                         unreachable: HashSet::new(),
@@ -71,12 +71,17 @@ impl Cluster {
         self.state().local.clone()
     }
 
-    fn state(&self) -> std::sync::RwLockReadGuard<'_, Roster> {
-        self.inner.view.roster.read().expect("Not poisoned")
+    fn state(&self) -> std::sync::RwLockReadGuard<'_, MemberList> {
+        self.inner.members.members.read().expect("Not poisoned")
     }
 
     pub(super) fn set_local(&self, local: Member) {
-        self.inner.view.roster.write().expect("Not poisoned").local = local;
+        self.inner
+            .members
+            .members
+            .write()
+            .expect("Not poisoned")
+            .local = local;
     }
 
     /// The other nodes currently considered up, in no particular order.
@@ -105,7 +110,7 @@ impl Cluster {
     /// `members()` and `subscribe()` separately can miss or double count a change
     /// in between.
     pub fn subscribe(&self) -> broadcast::Receiver<ClusterEvent> {
-        self.inner.view.event_sender.subscribe()
+        self.inner.members.event_sender.subscribe()
     }
 
     /// The current members together with a subscription to every change after
@@ -114,7 +119,7 @@ impl Cluster {
     pub fn subscribe_with_snapshot(&self) -> (ClusterSnapshot, broadcast::Receiver<ClusterEvent>) {
         // Changes are published under the state lock (see the mutators below).
         let state = self.state();
-        let events = self.inner.view.event_sender.subscribe();
+        let events = self.inner.members.event_sender.subscribe();
         let snapshot = ClusterSnapshot {
             members: state.members.values().cloned().collect(),
             unreachable: state.unreachable.clone(),
@@ -154,29 +159,32 @@ impl Cluster {
 
     /// What this node is currently doing.
     pub fn status(&self) -> NodeStatus {
-        *self.inner.view.status_sender.borrow()
+        *self.inner.members.status_sender.borrow()
     }
 
     /// Waits until [`Cluster::status`] is `status`.
     pub async fn wait_for_status(&self, status: NodeStatus) {
-        let mut rx = self.inner.view.status_sender.subscribe();
+        let mut rx = self.inner.members.status_sender.subscribe();
         let _ = rx.wait_for(|current| *current == status).await;
     }
 
     pub(super) fn set_status(&self, status: NodeStatus) {
-        self.inner.view.status_sender.send_if_modified(|current| {
-            // Nothing follows Defunct or Leaving except leaving the cluster.
-            let allowed = match (*current, status) {
-                (NodeStatus::Defunct, _) => false,
-                (NodeStatus::Leaving, next) => next != NodeStatus::Up,
-                _ => true,
-            };
-            let changed = allowed && *current != status;
-            if changed {
-                *current = status;
-            }
-            changed
-        });
+        self.inner
+            .members
+            .status_sender
+            .send_if_modified(|current| {
+                // Nothing follows Defunct or Leaving except leaving the cluster.
+                let allowed = match (*current, status) {
+                    (NodeStatus::Defunct, _) => false,
+                    (NodeStatus::Leaving, next) => next != NodeStatus::Up,
+                    _ => true,
+                };
+                let changed = allowed && *current != status;
+                if changed {
+                    *current = status;
+                }
+                changed
+            });
     }
 }
 
@@ -196,8 +204,8 @@ impl std::fmt::Debug for Cluster {
 impl Cluster {
     pub(super) fn contains(&self, member: &Member) -> bool {
         self.inner
-            .view
-            .roster
+            .members
+            .members
             .read()
             .expect("Not poisoned")
             .members
@@ -205,12 +213,12 @@ impl Cluster {
             == Some(member)
     }
 
-    fn write_members(&self) -> std::sync::RwLockWriteGuard<'_, Roster> {
-        self.inner.view.roster.write().expect("Not poisoned")
+    fn write_members(&self) -> std::sync::RwLockWriteGuard<'_, MemberList> {
+        self.inner.members.members.write().expect("Not poisoned")
     }
 
     fn publish(&self, event: ClusterEvent) {
-        let _ = self.inner.view.event_sender.send(event);
+        let _ = self.inner.members.event_sender.send(event);
     }
 
     pub(super) fn member_up(&self, member: Member) {

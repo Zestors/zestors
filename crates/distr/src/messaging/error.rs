@@ -116,15 +116,19 @@ pub enum RemoteOpError {
 }
 
 /// An address for an actor couldn't be made.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum AddressError {
-    /// No actor with this name is running on this node.
-    #[error("No actor named {0} on this node")]
+    /// No actor with this name is running on its node.
+    #[error("No actor named {0} on its node")]
     NoSuchActor(Name),
-    /// The actor on this node doesn't accept what the address is for.
+    /// The actor doesn't accept what the address is for, or its node hasn't
+    /// registered it.
     #[error("The actor named {0} doesn't accept what the address is for")]
     TypeMismatch(Name),
+    /// The node of the actor couldn't be asked.
+    #[error("Failed to ask the node of the actor: {0}")]
+    Remote(#[from] RemoteOpError),
 }
 
 impl From<TypedRegistryError> for AddressError {

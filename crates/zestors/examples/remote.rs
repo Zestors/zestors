@@ -52,7 +52,14 @@ async fn main() {
     let caller = node("caller", b_addr, Some(("host", a_addr)));
 
     // The host accepts these messages from other nodes, and runs an actor that handles it.
-    host.cluster().register::<Greet>().register::<CountLetters>();
+    host.cluster()
+        .register::<Greet>()
+        .register::<CountLetters>();
+    // The caller registers them too, so that it can tell the host which messages it means.
+    caller
+        .cluster()
+        .register::<Greet>()
+        .register::<CountLetters>();
     let _greeter = spawn(
         Name::new_static("greeter"),
         |mut inbox: Inbox<GreeterInterface>| async move {
@@ -79,19 +86,21 @@ async fn main() {
         host.shutdown_handle(),
         caller.shutdown_handle(),
     );
-    let greeter = caller
-        .cluster()
-        .address::<GreeterInterface>(GlobalName::new("greeter", "host"))
-        .unwrap();
-    // An address that works the same for an actor on this node: the host's own
-    // view of its greeter is delivered locally, without leaving the process.
-    let local_greeter = host_remote
-        .cluster_address::<GreeterInterface>(GlobalName::new("greeter", "host"))
-        .unwrap();
     let (host_task, caller_task) = (tokio::spawn(host.run()), tokio::spawn(caller.run()));
 
-    // Wait until the caller knows the host, then call across.
+    // Addressing an actor on another node asks that node, so wait until the caller knows the host.
     caller_cluster.wait_for_members(1).await;
+    let greeter = caller_cluster
+        .address::<GreeterInterface>(GlobalName::new("greeter", "host"))
+        .await
+        .unwrap();
+    // The same for an actor on this node: the host's own view of its greeter is
+    // delivered locally, without leaving the process.
+    let local_greeter = host_remote
+        .address::<GreeterInterface>(GlobalName::new("greeter", "host"))
+        .await
+        .unwrap();
+
     let greeting = greeter.call(Greet("world".into())).await.unwrap();
     println!("{greeting}");
     println!(

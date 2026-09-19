@@ -15,7 +15,7 @@ use zestors_runtime::{
 /// be operated on: [`Local`](ClusterAddress::Local) if it is on this node, and
 /// [`Remote`](ClusterAddress::Remote) if it is on another.
 ///
-/// Made with [`Cluster::cluster_address`](crate::Cluster::cluster_address), or
+/// Made with [`Cluster::address`](crate::Cluster::address), or
 /// from an [`Address`] or a [`RemoteAddress`]. Messages are sent with
 /// [`RemoteAccepts`](super::RemoteAccepts), and the actor is operated on with
 /// [`RemoteActorOps`](super::RemoteActorOps), exactly as with a
