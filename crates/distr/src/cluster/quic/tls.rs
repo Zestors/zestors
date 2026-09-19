@@ -1,3 +1,5 @@
+use crate::NodeId;
+use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::rustls::{
     self, ClientConfig, DigitallySignedStruct, RootCertStore, ServerConfig, SignatureScheme,
     client::danger::{HandshakeSignatureValid, ServerCertVerifier},
@@ -5,10 +7,12 @@ use quinn::rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime, pem::PemObject},
     server::WebPkiClientVerifier,
 };
-use std::sync::Arc;
+use std::{io, sync::Arc};
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// The ALPN protocol id all cluster connections use.
-pub(crate) const ALPN: &[u8] = b"zestors/1";
+const ALPN: &[u8] = b"zestors/1";
 
 /// Errors that can occur while building a [`Tls`] configuration.
 #[derive(Debug, thiserror::Error)]
@@ -37,10 +41,10 @@ pub enum TlsError {
 /// certificate from the CA is trusted.
 #[derive(Clone)]
 pub struct Tls {
-    pub(crate) server: Arc<ServerConfig>,
-    pub(crate) client: Arc<ClientConfig>,
+    server: Arc<ServerConfig>,
+    client: Arc<ClientConfig>,
     /// Whether peers must prove, with their certificate, the node name they claim.
-    pub(crate) verify_names: bool,
+    verify_names: bool,
 }
 
 impl Tls {
@@ -121,6 +125,50 @@ impl Tls {
             client: Arc::new(client),
             verify_names: false,
         })
+    }
+}
+
+impl Tls {
+    /// The QUIC server and client configurations that use this identity.
+    pub(super) fn quic_configs(
+        &self,
+        transport: Arc<quinn::TransportConfig>,
+    ) -> io::Result<(quinn::ServerConfig, quinn::ClientConfig)> {
+        let invalid = |e| io::Error::new(io::ErrorKind::InvalidInput, e);
+
+        let server_crypto = QuicServerConfig::try_from(self.server.clone()).map_err(invalid)?;
+        let mut server = quinn::ServerConfig::with_crypto(Arc::new(server_crypto));
+        server.transport_config(transport.clone());
+
+        let client_crypto = QuicClientConfig::try_from(self.client.clone()).map_err(invalid)?;
+        let mut client = quinn::ClientConfig::new(Arc::new(client_crypto));
+        client.transport_config(transport);
+
+        Ok((server, client))
+    }
+
+    /// Checks that the certificate `conn`'s peer presented is valid for the node
+    /// name it claims. Mutual TLS only proves the peer holds *some* certificate
+    /// from the cluster CA; without this any member could impersonate any other.
+    /// Accepts everything if this identity doesn't verify peers.
+    pub(super) fn verify_peer(
+        &self,
+        conn: &quinn::Connection,
+        claimed: &NodeId,
+    ) -> Result<(), BoxError> {
+        if !self.verify_names {
+            return Ok(());
+        }
+        let identity = conn
+            .peer_identity()
+            .ok_or("peer presented no certificate")?;
+        let chain = identity
+            .downcast::<Vec<CertificateDer<'static>>>()
+            .map_err(|_| "unexpected peer identity type")?;
+        let end_entity = chain.first().ok_or("empty certificate chain")?;
+        let name = ServerName::try_from(claimed.as_str())?;
+        webpki::EndEntityCert::try_from(end_entity)?.verify_is_valid_for_subject_name(&name)?;
+        Ok(())
     }
 }
 

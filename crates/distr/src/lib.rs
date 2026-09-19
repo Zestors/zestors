@@ -22,23 +22,10 @@ pub use stable_id::*;
 mod global_pid;
 pub use global_pid::*;
 
-mod tls;
-pub use tls::*;
-
-mod generation;
-
-mod net;
-
-mod quic;
-
-#[cfg(test)]
-mod sim;
-
-mod membership;
-pub use membership::Member;
-
 mod cluster;
-pub use cluster::*;
-
-mod cluster_node;
-pub use cluster_node::*;
+#[cfg(feature = "sim")]
+pub use cluster::sim;
+pub use cluster::{
+    Cluster, ClusterConfig, ClusterEvent, ClusterNode, ClusterNodeError, ClusterSnapshot,
+    ClusterTimings, Member, NodeStatus, Seed, Tls, TlsError,
+};

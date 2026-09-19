@@ -21,7 +21,7 @@ static LAST: AtomicU64 = AtomicU64::new(0);
 /// A generation for a node starting now, higher than any earlier one from this
 /// process and, if `store` is given, than the one recorded there. The result is
 /// recorded in `store` before it is returned.
-pub(crate) fn next(store: Option<&Path>) -> io::Result<u64> {
+pub(super) fn next(store: Option<&Path>) -> io::Result<u64> {
     let stored = match store {
         Some(path) => read(path)?,
         None => 0,

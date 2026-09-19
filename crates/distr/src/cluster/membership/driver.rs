@@ -1,132 +1,23 @@
+use super::Command;
 use crate::{
-    Cluster, ClusterEvent, ClusterTimings, NodeId, NodeStatus,
-    net::{Event, Frame, Incoming, Net},
+    ClusterTimings, Member, NodeId, NodeStatus,
+    cluster::{
+        Cluster,
+        net::{Event, Frame, Incoming, Net},
+    },
 };
 use foca::{
-    AccumulatingRuntime, Config, Foca, Identity, NoCustomBroadcast, OwnedNotification,
-    PostcardCodec, Timer,
+    AccumulatingRuntime, Config, Foca, NoCustomBroadcast, OwnedNotification, PostcardCodec, Timer,
 };
 use rand::rngs::StdRng;
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 use tokio::{
-    sync::{mpsc, oneshot},
-    task::JoinHandle,
+    sync::mpsc,
     time::{MissedTickBehavior, interval},
 };
 use tokio_util::time::{DelayQueue, delay_queue};
 
-/// A node in the cluster, as known to the membership protocol.
-///
-/// A node is identified by its [`NodeId`] alone; `addr` is only where it can
-/// currently be reached and may change between restarts. The `generation`
-/// distinguishes successive incarnations of the same node, so a restarted node
-/// replaces its previous incarnation (like Erlang's `creation`, but carried by
-/// the node rather than by pids).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Member {
-    /// The node's name; must be a DNS name matching its TLS certificate.
-    pub node: NodeId,
-    /// The address peers currently reach the node on.
-    pub addr: SocketAddr,
-    /// Increases every time the node restarts.
-    pub generation: u64,
-}
-
-impl Identity for Member {
-    type Addr = NodeId;
-
-    fn renew(&self) -> Option<Self> {
-        Some(Member {
-            generation: self.generation + 1,
-            ..self.clone()
-        })
-    }
-
-    fn addr(&self) -> NodeId {
-        self.node.clone()
-    }
-
-    fn win_addr_conflict(&self, adversary: &Self) -> bool {
-        self.generation > adversary.generation
-    }
-}
-
-enum Command {
-    Announce(Member),
-    Leave(oneshot::Sender<()>),
-}
-
-/// Handle to the task running the membership protocol.
-pub(crate) struct Membership {
-    commands: mpsc::Sender<Command>,
-    task: JoinHandle<()>,
-    leave_grace: Duration,
-}
-
-impl Membership {
-    /// Starts the membership protocol for `cluster`'s local node.
-    pub(crate) fn start(
-        cluster: Cluster,
-        config: Config,
-        seeds: Vec<Member>,
-        timings: ClusterTimings,
-        transport: Arc<dyn Net>,
-        events: mpsc::Receiver<Event>,
-        rng: StdRng,
-    ) -> Self {
-        let leave_grace = timings.leave_grace;
-        let (commands, command_rx) = mpsc::channel(16);
-        let task = tokio::spawn(
-            Driver {
-                foca: Foca::new(
-                    cluster.local(),
-                    config,
-                    rng,
-                    PostcardCodec,
-                ),
-                cluster,
-                transport,
-                seeds,
-                timings,
-                leaving: false,
-                timers: DelayQueue::new(),
-                pending_down: DelayQueue::new(),
-                pending_keys: HashMap::new(),
-                runtime: AccumulatingRuntime::new(),
-            }
-            .run(events, command_rx),
-        );
-        Self {
-            commands,
-            task,
-            leave_grace,
-        }
-    }
-
-    /// Asks the node at `seed` to let us join the cluster.
-    pub(crate) async fn announce(&self, seed: Member) {
-        let _ = self.commands.send(Command::Announce(seed)).await;
-    }
-
-    /// Tells the cluster this node is leaving, then stops the protocol.
-    pub(crate) async fn leave(mut self) {
-        let (tx, rx) = oneshot::channel();
-        if self.commands.send(Command::Leave(tx)).await.is_ok() {
-            let _ = tokio::time::timeout(self.leave_grace, rx).await;
-        }
-        let _ = (&mut self.task).await;
-    }
-}
-
-impl Drop for Membership {
-    /// Dropping the handle stops the protocol without saying goodbye.
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-struct Driver {
+pub(super) struct Driver {
     foca: Foca<Member, PostcardCodec, StdRng, NoCustomBroadcast>,
     runtime: AccumulatingRuntime<Member>,
     cluster: Cluster,
@@ -144,7 +35,29 @@ struct Driver {
 }
 
 impl Driver {
-    async fn run(
+    pub(super) fn new(
+        cluster: Cluster,
+        config: Config,
+        rng: StdRng,
+        transport: Arc<dyn Net>,
+        seeds: Vec<Member>,
+        timings: ClusterTimings,
+    ) -> Self {
+        Self {
+            foca: Foca::new(cluster.local(), config, rng, PostcardCodec),
+            cluster,
+            transport,
+            seeds,
+            timings,
+            leaving: false,
+            timers: DelayQueue::new(),
+            pending_down: DelayQueue::new(),
+            pending_keys: HashMap::new(),
+            runtime: AccumulatingRuntime::new(),
+        }
+    }
+
+    pub(super) async fn run(
         mut self,
         mut events: mpsc::Receiver<Event>,
         mut commands: mpsc::Receiver<Command>,
@@ -304,92 +217,6 @@ impl Driver {
             }
             #[allow(unreachable_patterns)]
             _ => {}
-        }
-    }
-}
-
-/// Membership changes are published while holding the state lock, so that
-/// [`Cluster::subscribe_with_snapshot`], which subscribes under the same lock,
-/// sees each change either in its snapshot or as an event, never both or neither.
-impl Cluster {
-    fn contains(&self, member: &Member) -> bool {
-        self.shared
-            .state
-            .read()
-            .expect("Not poisoned")
-            .members
-            .get(&member.node)
-            == Some(member)
-    }
-
-    fn write(&self) -> std::sync::RwLockWriteGuard<'_, crate::cluster::State> {
-        self.shared.state.write().expect("Not poisoned")
-    }
-
-    fn publish(&self, event: ClusterEvent) {
-        let _ = self.shared.events.send(event);
-    }
-
-    fn member_up(&self, member: Member) {
-        let mut state = self.write();
-        let previous = state.members.insert(member.node.clone(), member.clone());
-        if previous.as_ref() != Some(&member) {
-            state.unreachable.remove(&member.node);
-            self.publish(ClusterEvent::Up(member));
-        }
-    }
-
-    /// This node can't connect to `node`. Returns the member if that is news.
-    fn member_unreachable(&self, node: &NodeId) -> Option<Member> {
-        let mut state = self.write();
-        let member = state.members.get(node)?.clone();
-        state.unreachable.insert(node.clone()).then(|| {
-            self.publish(ClusterEvent::Unreachable(member.clone()));
-            member
-        })
-    }
-
-    /// This node can connect to `node` again. Returns the member if it had been
-    /// reported unreachable.
-    fn member_reachable(&self, node: &NodeId) -> Option<Member> {
-        let mut state = self.write();
-        let member = state.members.get(node)?.clone();
-        state.unreachable.remove(node).then(|| {
-            self.publish(ClusterEvent::Reachable(member.clone()));
-            member
-        })
-    }
-
-    /// The node said goodbye. Returns it if it was known in that generation.
-    fn member_left(&self, node: &NodeId, generation: u64) -> Option<Member> {
-        let mut state = self.write();
-        if state.members.get(node)?.generation != generation {
-            return None;
-        }
-        let member = state.members.remove(node)?;
-        state.unreachable.remove(node);
-        self.publish(ClusterEvent::Left(member.clone()));
-        Some(member)
-    }
-
-    /// The node was declared down without saying goodbye.
-    fn member_failed(&self, member: &Member) {
-        let mut state = self.write();
-        if state.members.get(&member.node) == Some(member) {
-            state.members.remove(&member.node);
-            state.unreachable.remove(&member.node);
-            self.publish(ClusterEvent::Failed(member.clone()));
-        }
-    }
-
-    /// A restarted node replaced its previous incarnation.
-    fn member_renamed(&self, before: &Member, after: Member) {
-        let mut state = self.write();
-        if state.members.get(&before.node) == Some(before) {
-            state.members.insert(after.node.clone(), after.clone());
-            state.unreachable.remove(&after.node);
-            self.publish(ClusterEvent::Failed(before.clone()));
-            self.publish(ClusterEvent::Up(after));
         }
     }
 }

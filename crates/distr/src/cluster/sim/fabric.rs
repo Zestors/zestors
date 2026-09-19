@@ -1,12 +1,11 @@
-//! An in-memory network for testing the membership layer without sockets.
+//! The in-memory network behind [`SimNetwork`](super::SimNetwork).
 //!
 //! A [`Fabric`] is a network that any number of simulated nodes are bound to.
 //! Frames travel between them as spawned tasks that sleep for the link's
 //! latency, so under `#[tokio::test(start_paused = true)]` a whole cluster runs
-//! on virtual time: seconds of failure detection take no real time, and a run
-//! repeats exactly when the seeds are the same.
+//! on virtual time.
 //!
-//! The fabric mirrors what [`Transport`](crate::quic::Transport) promises and
+//! The fabric mirrors what [`Transport`](crate::cluster::quic) promises and
 //! nothing more: best-effort delivery, dialing by address with the node name
 //! checked, and [`Event::Unreachable`] / [`Event::Reachable`] after repeated
 //! failures. It adds what real networks do to tests: latency, and partitions.
@@ -14,7 +13,7 @@
 
 use crate::{
     Member, NodeId,
-    net::{Event, Frame, Incoming, Net},
+    cluster::net::{Event, Frame, Incoming, Net},
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use std::{
@@ -25,14 +24,12 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-mod tests;
-
 /// How many sends in a row must fail before a peer is reported unreachable.
 const UNREACHABLE_AFTER: u32 = 3;
 
 /// A simulated network.
 #[derive(Clone)]
-pub(crate) struct Fabric {
+pub(super) struct Fabric {
     inner: Arc<FabricInner>,
 }
 
@@ -60,7 +57,7 @@ struct Listener {
 
 impl Fabric {
     /// A network whose random choices are decided by `seed`.
-    pub(crate) fn new(seed: u64) -> Self {
+    pub(super) fn new(seed: u64) -> Self {
         Self {
             inner: Arc::new(FabricInner {
                 state: Mutex::new(State {
@@ -76,14 +73,14 @@ impl Fabric {
     }
 
     /// Every frame takes `latency` plus up to `jitter` to arrive.
-    pub(crate) fn set_latency(&self, latency: Duration, jitter: Duration) {
+    pub(super) fn set_latency(&self, latency: Duration, jitter: Duration) {
         let mut state = self.state();
         state.latency = latency;
         state.jitter = jitter;
     }
 
     /// Cuts the links between every node in `a` and every node in `b`.
-    pub(crate) fn partition(&self, a: &[&str], b: &[&str]) {
+    pub(super) fn partition(&self, a: &[&str], b: &[&str]) {
         let mut state = self.state();
         for &x in a {
             for &y in b {
@@ -94,12 +91,12 @@ impl Fabric {
     }
 
     /// Restores every link.
-    pub(crate) fn heal(&self) {
+    pub(super) fn heal(&self) {
         self.state().partitions.clear();
     }
 
     /// Starts `node` listening on `addr`, replacing whatever listened there.
-    pub(crate) fn bind(
+    pub(super) fn bind(
         &self,
         node: &str,
         addr: SocketAddr,
@@ -143,7 +140,7 @@ struct PeerHealth {
 
 /// One node's handle to the [`Fabric`]. Dropping it takes the node off the
 /// network, like a crash.
-pub(crate) struct SimNet {
+pub(super) struct SimNet {
     fabric: Fabric,
     local: NodeId,
     addr: SocketAddr,

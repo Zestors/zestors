@@ -3,14 +3,14 @@
 //! [`Net`] is everything the membership protocol needs from a transport: hand
 //! it a frame for a peer, and tell it when a peer is gone. What comes back is
 //! the stream of [`Event`]s handed out when the transport is created. The real
-//! implementation is [`Transport`](crate::quic::Transport) over QUIC; tests use
+//! implementation is [`Transport`](super::quic) over QUIC; tests use
 //! an in-memory fabric, see `sim`.
 
 use crate::{Member, NodeId};
 use bytes::Bytes;
 
 /// Carries [`Frame`]s to other nodes on behalf of the membership layer.
-pub(crate) trait Net: Send + Sync + 'static {
+pub(super) trait Net: Send + Sync + 'static {
     /// Queues `frame` for delivery to `to`.
     ///
     /// Never blocks. Delivery is best-effort: the message is dropped if the
@@ -25,7 +25,7 @@ pub(crate) trait Net: Send + Sync + 'static {
 
 /// A message between two nodes.
 #[derive(Debug, Clone)]
-pub(crate) enum Frame {
+pub(super) enum Frame {
     /// Opaque membership protocol bytes.
     Gossip(Bytes),
     /// The sender is shutting down cleanly and is not going to come back.
@@ -34,7 +34,7 @@ pub(crate) enum Frame {
 
 /// Something the transport reports to the membership layer.
 #[derive(Debug)]
-pub(crate) enum Event {
+pub(super) enum Event {
     /// A message from a peer.
     Received(Incoming),
     /// Repeated attempts to connect to the peer have failed. It is retried with
@@ -47,9 +47,8 @@ pub(crate) enum Event {
 /// A [`Frame`] received from a peer whose identity was established when the
 /// connection was set up.
 #[derive(Debug)]
-pub(crate) struct Incoming {
-    pub(crate) from: NodeId,
-    pub(crate) generation: u64,
-    pub(crate) frame: Frame,
+pub(super) struct Incoming {
+    pub(super) from: NodeId,
+    pub(super) generation: u64,
+    pub(super) frame: Frame,
 }
-

@@ -272,7 +272,10 @@ async fn generation_store_keeps_generations_growing() {
 
     let generation = cluster.local().generation;
     assert!(generation > future);
-    assert_eq!(std::fs::read_to_string(&store).unwrap(), generation.to_string());
+    assert_eq!(
+        std::fs::read_to_string(&store).unwrap(),
+        generation.to_string()
+    );
 
     shutdown.shutdown();
     handle.await.unwrap().unwrap();

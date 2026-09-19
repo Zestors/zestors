@@ -32,6 +32,10 @@ rustls-webpki.workspace = true
 zestors.workspace = true
 tracing-subscriber.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+# Enables the `sim` feature for this crate's own tests.
+zestors-distr = { path = ".", features = ["sim"] }
 
 [features]
 _ra = []
+# In-process simulated clusters for tests, see `sim`.
+sim = []

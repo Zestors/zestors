@@ -1,15 +1,14 @@
 //! Membership scenarios on a simulated network and virtual time.
 //!
 //! These run in milliseconds of real time however long the scenario is, and
-//! can cut the network, which the QUIC tests in `tests/cluster.rs` can't.
+//! can cut the network, which the QUIC tests in `cluster.rs` can't.
 
-use super::Fabric;
-use crate::{
-    Cluster, ClusterConfig, ClusterEvent, Member, NodeId, Seed, Tls, cluster_node::join,
-    membership::Membership,
-};
-use std::{future::Future, net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
+use std::{future::Future, net::SocketAddr, num::NonZeroU32, time::Duration};
 use tokio::sync::broadcast;
+use zestors_distr::{
+    ClusterEvent, NodeId,
+    sim::{SimNetwork, SimNode},
+};
 
 fn addr(n: u8) -> SocketAddr {
     SocketAddr::from(([10, 0, 0, n], 7000))
@@ -30,71 +29,10 @@ fn fast_foca_config() -> foca::Config {
     config
 }
 
-struct Sim {
-    fabric: Fabric,
-    seed: u64,
-    generation: u64,
-    foca: foca::Config,
-}
-
-struct SimNode {
-    cluster: Cluster,
-    /// `None` once the node has crashed or left.
-    membership: Option<Membership>,
-}
-
-impl Sim {
-    fn new(seed: u64) -> Self {
-        Self {
-            fabric: Fabric::new(seed),
-            seed,
-            generation: 0,
-            foca: fast_foca_config(),
-        }
-    }
-
-    /// Starts node `name` at `addr`, seeded with `seeds`.
-    async fn start(
-        &mut self,
-        name: &str,
-        addr: SocketAddr,
-        seeds: &[(&str, SocketAddr)],
-    ) -> SimNode {
-        self.generation += 1;
-        let mut config = ClusterConfig::new(name, addr, Tls::insecure_dev().unwrap())
-            .foca_config(self.foca.clone())
-            .rng_seed(self.seed.wrapping_add(self.generation));
-        for &(seed, seed_addr) in seeds {
-            config = config.seed(Seed::new(seed, seed_addr));
-        }
-
-        let local = Member {
-            node: NodeId::new(name),
-            addr,
-            generation: self.generation,
-        };
-        let cluster = Cluster::new(local.clone());
-        let (net, events) = self.fabric.bind(name, addr, self.generation);
-        let membership = join(&cluster, &config, local, Arc::new(net), events).await;
-        SimNode {
-            cluster,
-            membership: Some(membership),
-        }
-    }
-}
-
-impl SimNode {
-    /// Leaves the cluster after announcing it.
-    async fn leave(&mut self) {
-        self.membership.take().expect("Running").leave().await;
-    }
-
-    /// Vanishes without a word.
-    async fn crash(&mut self) {
-        self.membership = None;
-        // Lets the aborted membership task drop, taking the node off the network.
-        tokio::task::yield_now().await;
-    }
+fn new_network(seed: u64) -> SimNetwork {
+    let mut sim = SimNetwork::new(seed);
+    *sim.foca_config_mut() = fast_foca_config();
+    sim
 }
 
 /// Fails the test if `future` takes unreasonably long in virtual time.
@@ -129,7 +67,7 @@ async fn departure_of(rx: &mut broadcast::Receiver<ClusterEvent>, node: &str) ->
 
 #[tokio::test(start_paused = true)]
 async fn nodes_discover_each_other_and_notice_departures() {
-    let mut sim = Sim::new(1);
+    let mut sim = new_network(1);
     let mut a = sim.start("node-a", addr(1), &[]).await;
     let mut b = sim.start("node-b", addr(2), &[("node-a", addr(1))]).await;
     let mut c = sim.start("node-c", addr(3), &[("node-a", addr(1))]).await;
@@ -176,8 +114,8 @@ async fn nodes_discover_each_other_and_notice_departures() {
 /// long before the (here deliberately slow) failure detector declares it down.
 #[tokio::test(start_paused = true)]
 async fn crashed_node_is_unreachable_before_it_is_failed() {
-    let mut sim = Sim::new(2);
-    sim.foca.suspect_to_down_after = Duration::from_secs(4);
+    let mut sim = new_network(2);
+    sim.foca_config_mut().suspect_to_down_after = Duration::from_secs(4);
     let a = sim.start("node-a", addr(1), &[]).await;
     let mut b = sim.start("node-b", addr(2), &[("node-a", addr(1))]).await;
     let b_id = NodeId::new("node-b");
@@ -209,7 +147,7 @@ async fn crashed_node_is_unreachable_before_it_is_failed() {
 
 #[tokio::test(start_paused = true)]
 async fn snapshot_and_events_line_up() {
-    let mut sim = Sim::new(3);
+    let mut sim = new_network(3);
     let a = sim.start("node-a", addr(1), &[]).await;
 
     let (snapshot, mut events) = a.cluster.subscribe_with_snapshot();
@@ -248,7 +186,7 @@ async fn snapshot_and_events_line_up() {
 /// without anyone restarting.
 #[tokio::test(start_paused = true)]
 async fn partitioned_cluster_heals() {
-    let mut sim = Sim::new(4);
+    let mut sim = new_network(4);
     let a = sim.start("node-a", addr(1), &[]).await;
     let b = sim.start("node-b", addr(2), &[("node-a", addr(1))]).await;
     let c = sim.start("node-c", addr(3), &[("node-a", addr(1))]).await;
@@ -256,12 +194,12 @@ async fn partitioned_cluster_heals() {
         members_of(node, 2).await;
     }
 
-    sim.fabric.partition(&["node-a"], &["node-b", "node-c"]);
+    sim.partition(&["node-a"], &["node-b", "node-c"]);
     members_of(&a, 0).await;
     members_of(&b, 1).await;
     members_of(&c, 1).await;
 
-    sim.fabric.heal();
+    sim.heal();
     for node in [&a, &b, &c] {
         members_of(node, 2).await;
     }
@@ -271,9 +209,8 @@ async fn partitioned_cluster_heals() {
 #[tokio::test(start_paused = true)]
 async fn runs_are_reproducible() {
     async fn run(seed: u64) -> Vec<ClusterEvent> {
-        let mut sim = Sim::new(seed);
-        sim.fabric
-            .set_latency(Duration::from_millis(5), Duration::from_millis(20));
+        let mut sim = new_network(seed);
+        sim.set_latency(Duration::from_millis(5), Duration::from_millis(20));
         let a = sim.start("node-a", addr(1), &[]).await;
         let mut events = a.cluster.subscribe();
         let _b = sim.start("node-b", addr(2), &[("node-a", addr(1))]).await;
