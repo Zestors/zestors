@@ -2,7 +2,6 @@
 
 use super::{
     Decode, Remote, RemoteAccepts, RemoteCallOptions, RemoteCastError, RemoteMessage, RemoteReply,
-    SHARDS,
     context::{Exports, Wire},
     reply::RemoteKind,
     wire::Frame,
@@ -233,7 +232,7 @@ impl<C: Context> RemoteAddress<C> {
             &member.addr,
             Protocol::ACTORS,
             Delivery::Ordered,
-            shard_of(self.target.name()),
+            shard_of(self.target.name(), shared.shards),
         );
         Ok((
             Prepared {
@@ -249,8 +248,8 @@ impl<C: Context> RemoteAddress<C> {
 /// Which of a peer's lanes carries messages for `name`. The same one every time,
 /// so that messages to one actor stay in order, while different actors mostly
 /// don't wait for each other.
-fn shard_of(name: &Name) -> u8 {
+fn shard_of(name: &Name, shards: u8) -> u8 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     name.hash(&mut hasher);
-    (hasher.finish() % SHARDS as u64) as u8
+    (hasher.finish() % shards as u64) as u8
 }

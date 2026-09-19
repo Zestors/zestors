@@ -5,7 +5,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::{
     net::SocketAddr,
-    num::NonZeroU32,
+    num::{NonZeroU8, NonZeroU32},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -233,9 +233,20 @@ struct Node {
 }
 
 fn node(net: &SimNetwork, name: &str, n: u8, seed: Option<u8>) -> ClusterNode {
+    node_with_lanes(net, name, n, seed, 4)
+}
+
+fn node_with_lanes(
+    net: &SimNetwork,
+    name: &str,
+    n: u8,
+    seed: Option<u8>,
+    lanes: u8,
+) -> ClusterNode {
     let mut config = ClusterConfig::new(name, net.backend(addr(n)))
         .foca_config(fast_foca())
-        .call_timeout(Duration::from_secs(10));
+        .call_timeout(Duration::from_secs(10))
+        .lanes(NonZeroU8::new(lanes).unwrap());
     if let Some(seed) = seed {
         config = config.seed(Seed::new(
             format!("node-{}", (b'a' + seed - 1) as char),
@@ -276,8 +287,13 @@ impl Pair {
     }
 
     async fn start_on(net: SimNetwork) -> Self {
-        let a = Node::run(node(&net, "node-a", 1, None));
-        let b = Node::run(node(&net, "node-b", 2, Some(1)));
+        Self::start_with_lanes(net, 4, 4).await
+    }
+
+    /// With `a_lanes` and `b_lanes` lanes to a peer on node-a and node-b.
+    async fn start_with_lanes(net: SimNetwork, a_lanes: u8, b_lanes: u8) -> Self {
+        let a = Node::run(node_with_lanes(&net, "node-a", 1, None, a_lanes));
+        let b = Node::run(node_with_lanes(&net, "node-b", 2, Some(1), b_lanes));
         within(a.cluster.wait_for_members(1)).await;
         within(b.cluster.wait_for_members(1)).await;
 
@@ -351,6 +367,41 @@ async fn messages_to_one_actor_arrive_in_order() {
     // A call is behind all of them, on the same pipe.
     assert_eq!(worker.call(Double(1)).await.unwrap(), 2);
     assert_eq!(log.notes(), (0..1_000).collect::<Vec<_>>());
+}
+
+/// However many lanes each node uses, calls are answered and the messages to
+/// one actor stay in order. The nodes don't need to agree on the number.
+#[tokio::test(start_paused = true)]
+async fn the_number_of_lanes_can_be_chosen() {
+    for (a_lanes, b_lanes) in [(1, 1), (8, 8), (1, 4), (4, 1), (255, 2)] {
+        let net = SimNetwork::new(1);
+        net.set_latency(Duration::from_millis(5), Duration::from_millis(50));
+        let pair = Pair::start_with_lanes(net, a_lanes, b_lanes).await;
+        let names = [
+            "lanes-0", "lanes-1", "lanes-2", "lanes-3", "lanes-4", "lanes-5",
+        ];
+        let logs: Vec<Log> = names.iter().map(|_| Log::default()).collect();
+        let _workers: Vec<_> = names
+            .iter()
+            .zip(&logs)
+            .map(|(name, log)| worker(name, log.clone()))
+            .collect();
+
+        for name in names {
+            let worker = pair.on_b::<WorkerInterface>(name);
+            for i in 0..100 {
+                worker.cast(Note(i)).await.unwrap();
+            }
+            assert_eq!(worker.call(Double(3)).await.unwrap(), 6);
+        }
+        for log in logs {
+            assert_eq!(
+                log.notes(),
+                (0..100).collect::<Vec<_>>(),
+                "{a_lanes}/{b_lanes}"
+            );
+        }
+    }
 }
 
 #[tokio::test(start_paused = true)]

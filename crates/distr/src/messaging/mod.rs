@@ -80,9 +80,6 @@ use std::{
 use tokio_util::sync::{CancellationToken, DropGuard};
 use zestors_runtime::Context;
 
-/// How many lanes to a peer messages between actors are spread over.
-const SHARDS: u8 = 4;
-
 /// A node's messaging between actors: registers what it accepts, and makes
 /// [`RemoteAddress`]es to send with. Get it from
 /// [`ClusterNode::remote`](crate::ClusterNode::remote).
@@ -97,6 +94,8 @@ pub struct Remote {
 struct Shared {
     cluster: Cluster,
     call_timeout: Duration,
+    /// How many lanes to a peer messages between actors are spread over.
+    shards: u8,
     handlers: DashMap<Id, Arc<dyn Handler>>,
     /// Set while the node runs.
     running: RwLock<Option<Started>>,
@@ -117,11 +116,12 @@ impl Shared {
 }
 
 impl Remote {
-    pub(super) fn new(cluster: Cluster, call_timeout: Duration) -> Self {
+    pub(super) fn new(cluster: Cluster, call_timeout: Duration, shards: u8) -> Self {
         Self {
             shared: Arc::new(Shared {
                 cluster,
                 call_timeout,
+                shards,
                 handlers: DashMap::new(),
                 running: RwLock::new(None),
                 next_call: AtomicU64::new(0),

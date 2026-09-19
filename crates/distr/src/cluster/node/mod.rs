@@ -40,7 +40,7 @@ impl ClusterNode {
                 .unwrap_or_else(|| NodeAddr::from(SocketAddr::from(([0, 0, 0, 0], 0)))),
             generation: 0,
         });
-        let remote = Remote::new(cluster.clone(), config.call_timeout);
+        let remote = Remote::new(cluster.clone(), config.call_timeout, config.lanes.get());
         Self {
             node,
             config,

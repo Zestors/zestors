@@ -2,8 +2,7 @@
 //! local actors, and answered.
 
 use super::{
-    RemoteError, SHARDS, Shared, Started, context::Wire, handler::ReplyFuture, reply::Pending,
-    wire::Frame,
+    RemoteError, Shared, Started, context::Wire, handler::ReplyFuture, reply::Pending, wire::Frame,
 };
 use crate::{
     ClusterEvent, Id, NodeId,
@@ -255,7 +254,7 @@ fn reply_lane(
         &member.addr,
         Protocol::ACTORS,
         Delivery::Ordered,
-        (call_id % SHARDS as u64) as u8,
+        (call_id % shared.shards as u64) as u8,
     ))
 }
 

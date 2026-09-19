@@ -2,7 +2,11 @@ use crate::{
     LinkTimings, NodeAddr, NodeId, backend::Backend, cluster::membership::Options, link::Starter,
 };
 use rand::{SeedableRng, rngs::StdRng};
-use std::{num::NonZeroU32, path::PathBuf, time::Duration};
+use std::{
+    num::{NonZeroU8, NonZeroU32},
+    path::PathBuf,
+    time::Duration,
+};
 
 /// How a [`ClusterNode`](crate::ClusterNode) joins and behaves in a cluster.
 pub struct ClusterConfig {
@@ -17,6 +21,7 @@ pub struct ClusterConfig {
     pub(super) rng_seed: Option<u64>,
     pub(super) generation_store: Option<PathBuf>,
     pub(super) call_timeout: Duration,
+    pub(super) lanes: NonZeroU8,
 }
 
 impl ClusterConfig {
@@ -35,6 +40,7 @@ impl ClusterConfig {
             rng_seed: None,
             generation_store: None,
             call_timeout: Duration::from_secs(30),
+            lanes: NonZeroU8::new(4).unwrap(),
         }
     }
 
@@ -88,6 +94,19 @@ impl ClusterConfig {
     /// [`RemoteAccepts::call`](crate::RemoteAccepts::call).
     pub fn call_timeout(mut self, timeout: Duration) -> Self {
         self.call_timeout = timeout;
+        self
+    }
+
+    /// How many lanes messages between actors are spread over to each peer, 4
+    /// by default. Each lane is a stream of its own, and an actor always uses
+    /// the same one, so its messages stay in order. Actors on different lanes
+    /// don't hold each other up, for example behind a large message: more lanes
+    /// mean fewer actors share one, at the cost of more streams; with 1, all
+    /// messages to a peer are in order.
+    ///
+    /// Nodes don't need to agree on this, each decides for what it sends.
+    pub fn lanes(mut self, lanes: NonZeroU8) -> Self {
+        self.lanes = lanes;
         self
     }
 
