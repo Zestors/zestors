@@ -2,7 +2,8 @@
 //! local actors, and answered.
 
 use super::{
-    RemoteError, SHARDS, Shared, Started, handler::ReplyFuture, reply::Pending, wire::Frame,
+    RemoteError, SHARDS, Shared, Started, context::Wire, handler::ReplyFuture, reply::Pending,
+    wire::Frame,
 };
 use crate::{
     ClusterEvent, Id, NodeId,
@@ -66,10 +67,14 @@ struct Route {
 
 /// A message for a local actor, and where its reply goes.
 struct Work {
+    /// The node that sent it.
+    from: NodeId,
     msg: Id,
+    /// The requests in the message, see [`RemoteRequest`](super::RemoteRequest).
+    requests: Vec<u64>,
     payload: Bytes,
-    /// The node that made the call, and its number, if the message is one.
-    reply_to: Option<(NodeId, u64)>,
+    /// The number of the call, if the message is one, which `from` awaits the reply to.
+    call_id: Option<u64>,
 }
 
 /// Runs while the node does: takes in what other nodes send, and notices when
@@ -83,7 +88,7 @@ pub(super) async fn serve(
 ) {
     let mut router = Router {
         shared,
-        links: running.links,
+        started: running.clone(),
         routes: HashMap::new(),
     };
     let pending = running.pending;
@@ -122,7 +127,7 @@ pub(super) async fn serve(
 /// mailbox in the order they arrived.
 struct Router {
     shared: Arc<Shared>,
-    links: Links,
+    started: Started,
     routes: HashMap<Name, Route>,
 }
 
@@ -137,26 +142,32 @@ impl Router {
             Frame::Cast {
                 target,
                 msg,
+                requests,
                 payload,
             } => self.route(
                 target,
                 Work {
+                    from: incoming.from,
                     msg,
+                    requests,
                     payload,
-                    reply_to: None,
+                    call_id: None,
                 },
             ),
             Frame::Call {
                 call_id,
                 target,
                 msg,
+                requests,
                 payload,
             } => self.route(
                 target,
                 Work {
+                    from: incoming.from,
                     msg,
+                    requests,
                     payload,
-                    reply_to: Some((incoming.from, call_id)),
+                    call_id: Some(call_id),
                 },
             ),
         }
@@ -199,7 +210,7 @@ impl Router {
         );
         tokio::spawn(actor_task(
             self.shared.clone(),
-            self.links.clone(),
+            self.started.clone(),
             target,
             tasks_queue,
             queued,
@@ -208,20 +219,23 @@ impl Router {
 
     /// Says no to a message without waiting.
     fn refuse(&self, work: Work, error: RemoteError) {
-        let Some((node, call_id)) = work.reply_to else {
+        let answers = work.call_id.into_iter().chain(work.requests);
+        if work.call_id.is_none() {
             tracing::warn!("Dropping a message for an actor with too much waiting: {error}");
-            return;
-        };
-        let Some(lane) = reply_lane(&self.shared, &self.links, &node, call_id) else {
-            return;
-        };
-        let _ = lane.try_send(
-            Frame::Reply {
-                call_id,
-                result: Err(error),
-            }
-            .encode(),
-        );
+        }
+        for call_id in answers {
+            let Some(lane) = reply_lane(&self.shared, &self.started.links, &work.from, call_id)
+            else {
+                return;
+            };
+            let _ = lane.try_send(
+                Frame::Reply {
+                    call_id,
+                    result: Err(error.clone()),
+                }
+                .encode(),
+            );
+        }
     }
 }
 
@@ -246,7 +260,7 @@ fn reply_lane(
 }
 
 /// Sends the reply to a call.
-async fn reply(
+pub(super) async fn reply(
     shared: &Shared,
     links: &Links,
     node: &NodeId,
@@ -270,7 +284,7 @@ async fn reply(
 /// Delivers the messages for one actor, one after the other.
 async fn actor_task(
     shared: Arc<Shared>,
-    links: Links,
+    started: Started,
     name: Name,
     mut queue: mpsc::UnboundedReceiver<Work>,
     queued: Arc<Queued>,
@@ -288,28 +302,33 @@ async fn actor_task(
 
         queued.release(work.payload.len());
         let Work {
+            from,
             msg,
+            requests,
             payload,
-            reply_to,
+            call_id,
         } = work;
-        match (
-            deliver(&shared, &name, msg, payload, reply_to.is_some()).await,
-            reply_to,
-        ) {
-            (Ok(Some(waiting)), Some((node, call_id))) => {
+        let wire = Wire::new(shared.clone(), started.clone(), from.clone());
+        match deliver(&shared, wire, &name, msg, payload, call_id.is_some()).await {
+            Ok(Some(waiting)) => {
                 // Waiting for the actor to answer mustn't hold up the next message.
-                let (shared, links) = (shared.clone(), links.clone());
+                let (shared, links) = (shared.clone(), started.links.clone());
                 tokio::spawn(async move {
                     let result = waiting.await;
-                    reply(&shared, &links, &node, call_id, result).await;
+                    if let Some(call_id) = call_id {
+                        reply(&shared, &links, &from, call_id, result).await;
+                    }
                 });
             }
-            (Ok(_), _) => {}
-            (Err(error), Some((node, call_id))) => {
-                reply(&shared, &links, &node, call_id, Err(error)).await;
-            }
-            (Err(error), None) => {
-                tracing::debug!(%name, "Could not deliver a message that expected no reply: {error}");
+            Ok(None) => {}
+            Err(error) => {
+                if call_id.is_none() {
+                    tracing::debug!(%name, "Could not deliver a message that expected no reply: {error}");
+                }
+                // Whoever waits for an answer to this message learns it isn't coming.
+                for id in call_id.into_iter().chain(requests) {
+                    reply(&shared, &started.links, &from, id, Err(error.clone())).await;
+                }
             }
         }
     }
@@ -317,6 +336,7 @@ async fn actor_task(
 
 async fn deliver(
     shared: &Shared,
+    wire: Wire,
     name: &Name,
     msg: Id,
     payload: Bytes,
@@ -328,7 +348,7 @@ async fn deliver(
         .map(|handler| handler.clone())
         .ok_or(RemoteError::UnknownMessage)?;
     let address = name.address().ok_or(RemoteError::NoSuchActor)?;
-    handler.deliver(address, payload, reply).await
+    handler.deliver(wire, address, payload, reply).await
 }
 
 #[cfg(test)]

@@ -12,6 +12,8 @@
 //! [`Decode`], which every serde type is, and can be by hand for anything else.
 //! [`Message`](zestors_interface::Message) itself is unchanged.
 //!
+//! A reply channel can be part of a message too: see [`RemoteRequest`].
+//!
 //! ```no_run
 //! use serde::{Deserialize, Serialize};
 //! use zestors::{
@@ -45,11 +47,13 @@
 
 mod accepts;
 mod codec;
+mod context;
 mod error;
 mod handler;
 mod message;
 mod receive;
 mod reply;
+mod request;
 mod send;
 mod wire;
 
@@ -58,6 +62,7 @@ pub use codec::{Decode, DecodeError, Encode, EncodeError};
 pub use error::{RemoteCallError, RemoteCastError, RemoteError, RemoteReplyError};
 pub use message::RemoteMessage;
 pub use reply::{RemoteReceipt, RemoteReply};
+pub use request::RemoteRequest;
 pub use send::RemoteAddress;
 
 use crate::{

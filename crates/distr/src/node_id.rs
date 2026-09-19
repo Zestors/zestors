@@ -6,7 +6,7 @@ use std::fmt::Display;
 ///
 /// Like Erlang's node atom, a `NodeId` names a node rather than locating it:
 /// how a name maps to a network address is resolved by the connection layer, so
-/// nodes can move without invalidating any [`GlobalPid`](crate::GlobalPid).
+/// nodes can move without invalidating any [`GlobalName`](crate::GlobalName).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct NodeId(SmolStr);
 

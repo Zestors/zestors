@@ -2,7 +2,10 @@
 
 use super::{
     Decode, Remote, RemoteAccepts, RemoteCallOptions, RemoteCastError, RemoteMessage, RemoteReply,
-    SHARDS, reply::RemoteKind, wire::Frame,
+    SHARDS,
+    context::{Exports, Wire},
+    reply::RemoteKind,
+    wire::Frame,
 };
 use crate::{
     GlobalName,
@@ -75,7 +78,10 @@ where
             Err(refusal) => return Err(refusal.with(msg)),
         };
         match prepared.lane.send(prepared.frame).await {
-            Ok(()) => Ok(M::remote_receipt(waiting)),
+            Ok(()) => {
+                prepared.exports.commit();
+                Ok(M::remote_receipt(waiting))
+            }
             Err(_) => Err(RemoteCastError::Unreachable(msg)),
         }
     }
@@ -90,7 +96,10 @@ where
             Err(refusal) => return Err(refusal.with(msg)),
         };
         match prepared.lane.try_send(prepared.frame) {
-            Ok(()) => Ok(M::remote_receipt(waiting)),
+            Ok(()) => {
+                prepared.exports.commit();
+                Ok(M::remote_receipt(waiting))
+            }
             Err(mpsc::error::TrySendError::Full(_)) => Err(RemoteCastError::Full(msg)),
             Err(mpsc::error::TrySendError::Closed(_)) => Err(RemoteCastError::Unreachable(msg)),
         }
@@ -125,6 +134,7 @@ type Sending<M> = (Prepared, Option<RemoteReply<<M as Message>::Output>>);
 struct Prepared {
     lane: mpsc::Sender<Bytes>,
     frame: Bytes,
+    exports: Exports,
 }
 
 impl<C: Context> RemoteAddress<C> {
@@ -169,7 +179,15 @@ impl<C: Context> RemoteAddress<C> {
             return Err(Refusal::Unreachable);
         }
 
-        let payload = msg.encode().map_err(Refusal::Encode)?;
+        let wire = Wire::new(
+            self.remote.shared.clone(),
+            running.clone(),
+            member.node.clone(),
+        );
+        let payload = wire.scope(|| msg.encode());
+        // Forgets the requests in the message again if it isn't sent.
+        let exports = wire.exports();
+        let payload = payload.map_err(Refusal::Encode)?;
         let (target, id) = (self.target.name().clone(), M::Id);
         let call_id = <M::Receipt as RemoteKind>::REPLIES
             .then(|| shared.next_call.fetch_add(1, Ordering::Relaxed));
@@ -178,11 +196,13 @@ impl<C: Context> RemoteAddress<C> {
                 call_id,
                 target,
                 msg: id,
+                requests: exports.ids(),
                 payload,
             },
             None => Frame::Cast {
                 target,
                 msg: id,
+                requests: exports.ids(),
                 payload,
             },
         }
@@ -215,7 +235,14 @@ impl<C: Context> RemoteAddress<C> {
             Delivery::Ordered,
             shard_of(self.target.name()),
         );
-        Ok((Prepared { lane, frame }, waiting))
+        Ok((
+            Prepared {
+                lane,
+                frame,
+                exports,
+            },
+            waiting,
+        ))
     }
 }
 

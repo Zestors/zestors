@@ -36,7 +36,6 @@ impl<T: Send + 'static> RemoteReceipt for RemoteReply<T> {
 }
 
 /// A reply that is being waited for.
-#[doc(hidden)]
 pub struct RemoteReply<T> {
     rx: oneshot::Receiver<Result<Bytes, RemoteReplyError>>,
     _guard: PendingGuard,
@@ -59,7 +58,6 @@ impl<T> RemoteReply<T> {
 /// How the [`Receipt`](zestors_interface::Receipt) of a message, `()` or
 /// [`Reply<T>`](zestors_interface::Reply), is sent and received remotely. The
 /// two are all there are.
-#[doc(hidden)]
 pub trait RemoteKind: zestors_interface::Receipt {
     type Remote: RemoteReceipt<Output = Self::Output>;
 
@@ -111,7 +109,7 @@ struct PendingCall {
 }
 
 impl Pending {
-    fn insert(
+    pub(super) fn insert(
         &self,
         call_id: u64,
         node: NodeId,
@@ -142,7 +140,7 @@ impl Pending {
         }
     }
 
-    fn remove(&self, call_id: u64) {
+    pub(super) fn remove(&self, call_id: u64) {
         self.calls.remove(&call_id);
     }
 

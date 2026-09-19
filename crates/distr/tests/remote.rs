@@ -19,8 +19,8 @@ use zestors::{
 use zestors_distr::{
     Cluster, ClusterConfig, ClusterNode, ClusterNodeError, Decode, DecodeError, Encode,
     EncodeError, GlobalName, Remote, RemoteAccepts, RemoteAddress, RemoteCallError,
-    RemoteCallOptions, RemoteCastError, RemoteError, RemoteReceipt as _, RemoteReplyError, Seed,
-    StableId, sim::SimNetwork,
+    RemoteCallOptions, RemoteCastError, RemoteError, RemoteReceipt as _, RemoteReplyError,
+    RemoteRequest, Seed, StableId, sim::SimNetwork,
 };
 
 // Messages. All but `Reverse` cross the network with serde.
@@ -99,8 +99,52 @@ impl Decode for Reversed {
     }
 }
 
+/// A reply channel in the message: the actor answers it with `n + 1`.
+#[derive(Message, StableId, Serialize, Deserialize, Debug)]
+#[msg(id = "6b0e3f0e-6c2a-4c9b-8f57-0d7a5f8d0a0a")]
+struct Fetch {
+    n: u32,
+    reply: RemoteRequest<u32>,
+}
+
+/// The actor drops the request in this one.
+#[derive(Message, StableId, Serialize, Deserialize, Debug)]
+#[msg(id = "6b0e3f0e-6c2a-4c9b-8f57-0d7a5f8d0a0b")]
+struct FetchAndForget {
+    reply: RemoteRequest<u32>,
+}
+
+/// The actor keeps the request without answering it.
+#[derive(Message, StableId, Serialize, Deserialize, Debug)]
+#[msg(id = "6b0e3f0e-6c2a-4c9b-8f57-0d7a5f8d0a0c")]
+struct FetchAndHang {
+    reply: RemoteRequest<u32>,
+}
+
+/// Has a reply of its own as well as a request: the actor answers the call
+/// with `n` and the request with `n + 100`.
+#[derive(Message, StableId, Serialize, Deserialize, Debug)]
+#[msg(reply = u32, id = "6b0e3f0e-6c2a-4c9b-8f57-0d7a5f8d0a0d")]
+struct Both {
+    n: u32,
+    reply: RemoteRequest<u32>,
+}
+
+/// Too large to send, with a request.
+#[derive(Message, StableId, Serialize, Deserialize, Debug)]
+#[msg(id = "6b0e3f0e-6c2a-4c9b-8f57-0d7a5f8d0a0e")]
+struct BigFetch {
+    blob: Vec<u8>,
+    reply: RemoteRequest<u32>,
+}
+
 #[derive(Interface, Debug)]
 enum WorkerInterface {
+    Fetch(Envelope<Fetch>),
+    FetchAndForget(Envelope<FetchAndForget>),
+    FetchAndHang(Envelope<FetchAndHang>),
+    Both(Envelope<Both>),
+    BigFetch(Envelope<BigFetch>),
     Double(Envelope<Double>),
     Note(Envelope<Note>),
     Hang(Envelope<Hang>),
@@ -126,8 +170,25 @@ fn worker(name: &'static str, log: Log) -> zestors::runtime::Child<(), WorkerInt
         Name::new_static(name),
         |mut inbox: Inbox<WorkerInterface>| async move {
             let mut hung = Vec::new();
+            let mut hung_requests = Vec::new();
             while let Some(msg) = inbox.recv().await {
                 match msg {
+                    WorkerInterface::Fetch(envelope) => {
+                        let Fetch { n, reply } = envelope.msg;
+                        let _ = reply.reply(n + 1);
+                    }
+                    WorkerInterface::FetchAndForget(envelope) => {
+                        envelope.msg.reply.no_reply();
+                    }
+                    WorkerInterface::FetchAndHang(envelope) => {
+                        hung_requests.push(envelope.msg.reply);
+                    }
+                    WorkerInterface::Both(envelope) => {
+                        let Envelope { msg, req } = envelope;
+                        let _ = msg.reply.reply(msg.n + 100);
+                        let _ = req.reply(msg.n);
+                    }
+                    WorkerInterface::BigFetch(envelope) => envelope.msg.reply.no_reply(),
                     WorkerInterface::Double(envelope) => {
                         let n = envelope.msg.0;
                         let _ = envelope.reply(n * 2);
@@ -229,7 +290,12 @@ impl Pair {
             .register::<Slow>()
             .register::<Unwanted>()
             .register::<Blob>()
-            .register::<Reverse>();
+            .register::<Reverse>()
+            .register::<Fetch>()
+            .register::<FetchAndForget>()
+            .register::<FetchAndHang>()
+            .register::<Both>()
+            .register::<BigFetch>();
         Self { a, b }
     }
 
@@ -515,4 +581,99 @@ async fn casting_gives_the_messages_receipt() {
     assert_eq!(second.wait().await.unwrap(), 40);
     assert_eq!(first.wait().await.unwrap(), 20);
     assert_eq!(log.notes(), [1, 2]);
+}
+
+// Requests inside messages.
+
+#[tokio::test(start_paused = true)]
+async fn a_request_in_a_message_is_answered_across_nodes() {
+    let pair = Pair::start().await;
+    let _worker = worker("request-answer", Log::default());
+    let worker = pair.on_b::<WorkerInterface>("request-answer");
+
+    for n in [1, 41] {
+        let (reply, answer) = RemoteRequest::new();
+        worker.cast(Fetch { n, reply }).await.unwrap();
+        assert_eq!(within(answer).await.unwrap(), n + 1);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_call_can_carry_a_request_as_well() {
+    let pair = Pair::start().await;
+    let _worker = worker("request-both", Log::default());
+
+    let (reply, answer) = RemoteRequest::new();
+    let call = pair
+        .on_b::<WorkerInterface>("request-both")
+        .call(Both { n: 5, reply })
+        .await
+        .unwrap();
+    assert_eq!(call, 5);
+    assert_eq!(within(answer).await.unwrap(), 105);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_request_the_actor_drops_fails_its_reply() {
+    let pair = Pair::start().await;
+    let _worker = worker("request-drop", Log::default());
+
+    let (reply, answer) = RemoteRequest::new();
+    pair.on_b::<WorkerInterface>("request-drop")
+        .cast(FetchAndForget { reply })
+        .await
+        .unwrap();
+    assert!(within(answer).await.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_request_for_an_actor_that_is_not_there_fails_its_reply() {
+    let pair = Pair::start().await;
+
+    let (reply, answer) = RemoteRequest::new();
+    pair.on_b::<WorkerInterface>("request-nobody")
+        .cast(FetchAndForget { reply })
+        .await
+        .unwrap();
+    assert!(within(answer).await.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_request_fails_when_the_node_holding_it_is_lost() {
+    let pair = Pair::start().await;
+    let _worker = worker("request-lost", Log::default());
+
+    let (reply, answer) = RemoteRequest::new();
+    pair.on_b::<WorkerInterface>("request-lost")
+        .cast(FetchAndHang { reply })
+        .await
+        .unwrap();
+    // It is with the actor now, and waits there until the node goes away.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    pair.b.task.abort();
+    assert!(within(answer).await.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_request_in_a_message_that_is_not_sent_fails_its_reply() {
+    let pair = Pair::start().await;
+
+    let (reply, answer) = RemoteRequest::new();
+    let Err(RemoteCastError::TooLarge { .. }) = pair
+        .on_b::<Dyn<(BigFetch,)>>("any")
+        .cast(BigFetch {
+            blob: vec![0; 5 * 1024 * 1024],
+            reply,
+        })
+        .await
+    else {
+        panic!("Expected the message back")
+    };
+    assert!(within(answer).await.is_err());
+}
+
+#[test]
+fn a_request_is_only_serialized_as_part_of_a_sent_message() {
+    let (request, _reply) = RemoteRequest::<u32>::new();
+    assert!(postcard::to_allocvec(&request).is_err());
 }

@@ -20,6 +20,9 @@ pub(super) enum Frame {
     Cast {
         target: Name,
         msg: Id,
+        /// The requests in the message, see [`RemoteRequest`](super::RemoteRequest).
+        /// Named here so that a message that isn't delivered can fail them.
+        requests: Vec<u64>,
         payload: Bytes,
     },
     /// A message that is answered by a [`Frame::Reply`] with the same `call_id`.
@@ -27,6 +30,9 @@ pub(super) enum Frame {
         call_id: u64,
         target: Name,
         msg: Id,
+        /// The requests in the message, see [`RemoteRequest`](super::RemoteRequest).
+        /// Named here so that a message that isn't delivered can fail them.
+        requests: Vec<u64>,
         payload: Bytes,
     },
     Reply {
@@ -42,21 +48,23 @@ impl Frame {
             Frame::Cast {
                 target,
                 msg,
+                requests,
                 payload,
             } => {
                 buf.put_u8(KIND_CAST);
-                put_target(&mut buf, target, msg);
+                put_target(&mut buf, target, msg, requests);
                 buf.put_slice(payload);
             }
             Frame::Call {
                 call_id,
                 target,
                 msg,
+                requests,
                 payload,
             } => {
                 buf.put_u8(KIND_CALL);
                 buf.put_u64(*call_id);
-                put_target(&mut buf, target, msg);
+                put_target(&mut buf, target, msg, requests);
                 buf.put_slice(payload);
             }
             Frame::Reply { call_id, result } => {
@@ -80,20 +88,22 @@ impl Frame {
     pub(super) fn decode(mut bytes: Bytes) -> Option<Self> {
         match get_u8(&mut bytes)? {
             KIND_CAST => {
-                let (target, msg) = get_target(&mut bytes)?;
+                let (target, msg, requests) = get_target(&mut bytes)?;
                 Some(Frame::Cast {
                     target,
                     msg,
+                    requests,
                     payload: bytes,
                 })
             }
             KIND_CALL => {
                 let call_id = get_u64(&mut bytes)?;
-                let (target, msg) = get_target(&mut bytes)?;
+                let (target, msg, requests) = get_target(&mut bytes)?;
                 Some(Frame::Call {
                     call_id,
                     target,
                     msg,
+                    requests,
                     payload: bytes,
                 })
             }
@@ -111,15 +121,20 @@ impl Frame {
     }
 }
 
-/// Who a message is for, and what it is: the name (length-prefixed) and the message id.
-fn put_target(buf: &mut BytesMut, target: &Name, msg: &Id) {
+/// Who a message is for, and what it is: the name (length-prefixed), the message
+/// id, and the ids of the requests in it (count-prefixed).
+fn put_target(buf: &mut BytesMut, target: &Name, msg: &Id, requests: &[u64]) {
     let name = String::from(target);
     buf.put_u16(name.len() as u16);
     buf.put_slice(name.as_bytes());
     buf.put_u128(msg.as_uuid().as_u128());
+    buf.put_u16(requests.len() as u16);
+    for request in requests {
+        buf.put_u64(*request);
+    }
 }
 
-fn get_target(bytes: &mut Bytes) -> Option<(Name, Id)> {
+fn get_target(bytes: &mut Bytes) -> Option<(Name, Id, Vec<u64>)> {
     let len = get_u16(bytes)? as usize;
     if bytes.remaining() < len {
         return None;
@@ -128,7 +143,13 @@ fn get_target(bytes: &mut Bytes) -> Option<(Name, Id)> {
     if bytes.remaining() < 16 {
         return None;
     }
-    Some((Name::new(name), Id::from_u128(bytes.get_u128())))
+    let id = Id::from_u128(bytes.get_u128());
+    let count = get_u16(bytes)? as usize;
+    if bytes.remaining() < count * 8 {
+        return None;
+    }
+    let requests = (0..count).map(|_| bytes.get_u64()).collect();
+    Some((Name::new(name), id, requests))
 }
 
 const E_UNKNOWN_MESSAGE: u8 = 1;
@@ -202,12 +223,14 @@ mod tests {
         round_trips(Frame::Cast {
             target: target.clone(),
             msg,
+            requests: vec![3, 4],
             payload: Bytes::from_static(b"payload"),
         });
         round_trips(Frame::Call {
             call_id: 42,
             target,
             msg,
+            requests: Vec::new(),
             payload: Bytes::new(),
         });
         round_trips(Frame::Reply {
@@ -245,6 +268,7 @@ mod tests {
             call_id: 7,
             target: Name::new("counter"),
             msg: Id::from_u128(1),
+            requests: vec![3],
             payload: Bytes::new(),
         }
         .encode();

@@ -21,7 +21,6 @@ pub trait RemoteMessage:
 
     /// The [`RemoteReceipt`](Self::RemoteReceipt), given what to wait on if
     /// there is a reply.
-    #[doc(hidden)]
     fn remote_receipt(waiting: Option<RemoteReply<Self::Output>>) -> Self::RemoteReceipt;
 }
 

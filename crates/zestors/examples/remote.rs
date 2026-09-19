@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::Duration};
 use zestors::{
-    distr::{ClusterConfig, ClusterNode, GlobalName, Seed, Tls},
+    distr::{ClusterConfig, ClusterNode, GlobalName, RemoteAccepts, RemoteRequest, Seed, Tls},
     interface::{Envelope, Interface, Message},
     prelude::*,
     runtime::{Inbox, Name, spawn},
@@ -17,9 +17,19 @@ use zestors::{
 #[msg(reply = String, id = "3e4c1b7a-0d51-4f0e-9b6f-2a7c5d8e9f10")]
 struct Greet(String);
 
+/// A reply channel can be part of a message too: the answer is sent back to
+/// whoever holds the other end, on the other node.
+#[derive(Message, StableId, Serialize, Deserialize, Debug)]
+#[msg(id = "8d2f6a10-5b7e-4c39-a1d4-6e0b9c3f7a21")]
+struct CountLetters {
+    text: String,
+    reply: RemoteRequest<usize>,
+}
+
 #[derive(Interface, Debug)]
 enum GreeterInterface {
     Greet(Envelope<Greet>),
+    CountLetters(Envelope<CountLetters>),
 }
 
 fn node(name: &str, addr: SocketAddr, seed: Option<(&str, SocketAddr)>) -> ClusterNode {
@@ -40,14 +50,22 @@ async fn main() {
     let host = node("host", a_addr, None);
     let caller = node("caller", b_addr, Some(("host", a_addr)));
 
-    // The host accepts `Greet` from other nodes, and runs an actor that handles it.
-    host.remote().register::<Greet>();
+    // The host accepts these messages from other nodes, and runs an actor that handles it.
+    host.remote().register::<Greet>().register::<CountLetters>();
     let _greeter = spawn(
         Name::new_static("greeter"),
         |mut inbox: Inbox<GreeterInterface>| async move {
-            while let Some(GreeterInterface::Greet(envelope)) = inbox.recv().await {
-                let greeting = format!("Hello, {}!", envelope.msg.0);
-                let _ = envelope.reply(greeting);
+            while let Some(msg) = inbox.recv().await {
+                match msg {
+                    GreeterInterface::Greet(envelope) => {
+                        let greeting = format!("Hello, {}!", envelope.msg.0);
+                        let _ = envelope.reply(greeting);
+                    }
+                    GreeterInterface::CountLetters(envelope) => {
+                        let CountLetters { text, reply } = envelope.msg;
+                        let _ = reply.reply(text.chars().count());
+                    }
+                }
             }
             Ok(())
         },
@@ -68,6 +86,17 @@ async fn main() {
     caller_cluster.wait_for_members(1).await;
     let greeting = greeter.call(Greet("world".into())).await.unwrap();
     println!("{greeting}");
+
+    // A message with a reply channel in it: keep the `Reply`, send the request.
+    let (reply, count) = RemoteRequest::new();
+    greeter
+        .cast(CountLetters {
+            text: "world".into(),
+            reply,
+        })
+        .await
+        .unwrap();
+    println!("{} letters", count.await.unwrap());
 
     host_shutdown.shutdown();
     caller_shutdown.shutdown();

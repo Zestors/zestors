@@ -14,7 +14,7 @@ pub mod prelude {
     pub use crate::Tls;
     pub use crate::{
         Cluster, ClusterConfig, ClusterEvent, ClusterNode, ClusterNodeError, ClusterSnapshot,
-        NodeStatus, Remote, RemoteAccepts, RemoteAddress, RemoteMessage, Seed,
+        NodeStatus, Remote, RemoteAccepts, RemoteAddress, RemoteMessage, RemoteRequest, Seed,
     };
 }
 
@@ -46,5 +46,5 @@ pub use link::LinkTimings;
 pub use messaging::{
     Decode, DecodeError, Encode, EncodeError, Remote, RemoteAccepts, RemoteAddress,
     RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError, RemoteMessage, RemoteReceipt,
-    RemoteReply, RemoteReplyError,
+    RemoteReply, RemoteReplyError, RemoteRequest,
 };
