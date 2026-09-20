@@ -60,6 +60,7 @@ mod dispatch;
 mod error;
 mod frame;
 mod message;
+mod monitors;
 mod node;
 mod ops;
 mod pending;
@@ -77,16 +78,16 @@ pub use address::{
 pub use auto_register::{IfNot, IfRemote, Probe, Registration};
 pub use codec::{Decode, DecodeError, Encode, EncodeError};
 pub use error::{
-    AddressError, CastFailure, RemoteCallError, RemoteCastError, RemoteError, RemoteOpError,
-    RemoteReplyError,
+    AddressError, CastFailure, ClusterCallError, ClusterCastError, ClusterOpError,
+    ClusterReplyError, RemoteError,
 };
 pub use message::{RemoteMessage, RemoteSet};
-pub use ops::{ClusterActorOps, RemoteInfo};
-pub use reply::{RemoteReceipt, RemoteReply};
+pub use ops::{ActorInfo, ClusterActorOps};
+pub use reply::{ClusterReceipt, ClusterReply};
 pub use request::RemoteRequest;
 
 #[doc(hidden)]
 pub use dispatch::Handlers;
 pub(crate) use node::CommunicationView;
 use node::Started;
-pub use send::{RemoteAccepts, RemoteCallOptions};
+pub use send::{ClusterAccepts, ClusterCallOptions};

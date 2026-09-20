@@ -95,7 +95,7 @@ pub trait Accepts<M: Message>: Sync {
     /// Equivalent to calling [`Accepts::cast`] and then [`Receipt::wait`] on the
     /// result, so it shares `cast`'s backpressure and closed-channel behavior.
     /// The output is therefore [`Message::Output`] (the reply) rather than
-    /// [`Message::Receipt`] (the handle used to await it).
+    /// [`MessageKind::Receipt`](zestors_interface::MessageKind::Receipt) (the handle used to await it).
     ///
     /// Returns [`CallError::Closed`] if the channel was closed at the time of
     /// sending, or [`CallError::NoResponse`] if no reply was ever received

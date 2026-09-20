@@ -1,6 +1,6 @@
 //! The calls that have been sent to other nodes and are waiting for a reply.
 
-use super::{DecodeError, RemoteError, RemoteReply, RemoteReplyError, reply::Source};
+use super::{ClusterReply, ClusterReplyError, DecodeError, RemoteError, reply::Source};
 use crate::NodeName;
 use bytes::Bytes;
 use dashmap::DashMap;
@@ -28,7 +28,7 @@ pub(super) struct Pending {
 struct PendingCall {
     /// The node the call went to, and the only one that may answer it.
     node: NodeName,
-    reply: oneshot::Sender<Result<Bytes, RemoteReplyError>>,
+    reply: oneshot::Sender<Result<Bytes, ClusterReplyError>>,
 }
 
 impl Pending {
@@ -36,23 +36,26 @@ impl Pending {
         &self,
         call_id: u64,
         node: NodeName,
-        reply: oneshot::Sender<Result<Bytes, RemoteReplyError>>,
+        reply: oneshot::Sender<Result<Bytes, ClusterReplyError>>,
     ) {
         self.calls.insert(call_id, PendingCall { node, reply });
     }
 
     /// Starts waiting for `node` to answer the call `call_id`. The call is
-    /// forgotten when the [`RemoteReply`] is dropped, however that happens.
+    /// forgotten when the [`ClusterReply`] is dropped, however that happens.
+    ///
+    /// `timeout` of `None` waits for as long as it takes, which a monitor does:
+    /// losing the node still ends it, through [`Pending::fail_node`].
     pub(super) fn expect<T>(
         self: &Arc<Self>,
         call_id: u64,
         node: NodeName,
-        timeout: Duration,
+        timeout: Option<Duration>,
         decode: fn(Bytes) -> Result<T, DecodeError>,
-    ) -> RemoteReply<T> {
+    ) -> ClusterReply<T> {
         let (tx, rx) = oneshot::channel();
         self.insert(call_id, node, tx);
-        RemoteReply(Source::Remote {
+        ClusterReply(Source::Remote {
             rx,
             _guard: PendingGuard {
                 pending: self.clone(),
@@ -76,7 +79,7 @@ impl Pending {
     ) {
         match self.calls.remove_if(&call_id, |_, call| call.node == *node) {
             Some((_, call)) => {
-                let _ = call.reply.send(result.map_err(RemoteReplyError::Remote));
+                let _ = call.reply.send(result.map_err(ClusterReplyError::Remote));
             }
             None if self.calls.contains_key(&call_id) => tracing::warn!(
                 %node,
@@ -101,7 +104,7 @@ impl Pending {
             .collect();
         for id in failed {
             if let Some((_, call)) = self.calls.remove_if(&id, |_, call| call.node == *node) {
-                let _ = call.reply.send(Err(RemoteReplyError::Disconnected));
+                let _ = call.reply.send(Err(ClusterReplyError::Disconnected));
             }
         }
     }
@@ -111,7 +114,7 @@ impl Pending {
         let all: Vec<u64> = self.calls.iter().map(|call| *call.key()).collect();
         for id in all {
             if let Some((_, call)) = self.calls.remove(&id) {
-                let _ = call.reply.send(Err(RemoteReplyError::Disconnected));
+                let _ = call.reply.send(Err(ClusterReplyError::Disconnected));
             }
         }
     }
@@ -130,7 +133,7 @@ mod tests {
         pending: &Pending,
         id: u64,
         node: &str,
-    ) -> oneshot::Receiver<Result<Bytes, RemoteReplyError>> {
+    ) -> oneshot::Receiver<Result<Bytes, ClusterReplyError>> {
         let (tx, rx) = oneshot::channel();
         pending.insert(id, NodeName::new(node), tx);
         rx
@@ -161,13 +164,13 @@ mod tests {
         pending.fail_node(&NodeName::new("node-a"));
         assert!(matches!(
             lost.await.unwrap(),
-            Err(RemoteReplyError::Disconnected)
+            Err(ClusterReplyError::Disconnected)
         ));
         assert_eq!(pending.len(), 1);
         pending.fail_all();
         assert!(matches!(
             kept.await.unwrap(),
-            Err(RemoteReplyError::Disconnected)
+            Err(ClusterReplyError::Disconnected)
         ));
         assert_eq!(pending.len(), 0);
     }

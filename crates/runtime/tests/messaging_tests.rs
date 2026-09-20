@@ -63,10 +63,10 @@ enum NeverRepliesInterface {
 #[tokio::test]
 async fn cast_wakes_a_receiver_already_parked_in_recv() {
     let child = spawn_rand(counter_handler);
-    // `watch_init` only resolves once the handler's first `recv` has run,
+    // `monitor_init` only resolves once the handler's first `recv` has run,
     // so by this point the actor is guaranteed to already be parked,
     // waiting on the (currently empty) queue.
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     let delivered = tokio::time::timeout(Duration::from_secs(2), child.cast(Bump)).await;
     assert!(
@@ -84,7 +84,7 @@ async fn cast_wakes_a_receiver_already_parked_in_recv() {
 #[tokio::test]
 async fn casting_is_fifo_so_a_trailing_call_is_a_processing_barrier() {
     let child = spawn_rand(counter_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     for _ in 0..200 {
         child.cast(Bump).await.unwrap();
@@ -101,7 +101,7 @@ async fn casting_is_fifo_so_a_trailing_call_is_a_processing_barrier() {
 #[tokio::test]
 async fn try_cast_succeeds_on_a_running_actor() {
     let child = spawn_rand(counter_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     assert!(child.try_cast(Bump).is_ok());
 
@@ -112,7 +112,7 @@ async fn try_cast_succeeds_on_a_running_actor() {
 async fn cast_and_try_cast_fail_once_the_actor_is_dead() {
     let child = spawn_rand(counter_handler);
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
 
     assert!(matches!(child.cast(Bump).await, Err(_)));
     assert!(matches!(
@@ -155,7 +155,7 @@ async fn cast_fails_while_exiting_unless_told_to_ignore_it() {
 #[tokio::test]
 async fn call_returns_the_actors_reply() {
     let child = spawn_rand(counter_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     child.cast(Bump).await.unwrap();
     child.cast(Bump).await.unwrap();
@@ -168,7 +168,7 @@ async fn call_returns_the_actors_reply() {
 async fn call_fails_closed_on_a_dead_actor() {
     let child = spawn_rand(counter_handler);
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
 
     assert!(matches!(
         child.call(GetCount).await,
@@ -186,7 +186,7 @@ async fn call_reports_no_response_if_the_request_is_dropped_unanswered() {
         }
         Ok(())
     });
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     let result = child.call(NeverReplied).await;
     assert!(matches!(result, Err(CallError::NoResponse)));
@@ -279,7 +279,7 @@ async fn cast_waits_out_backpressure_instead_of_failing() {
 #[tokio::test]
 async fn cast_dyn_and_call_dyn_work_for_an_accepted_message() {
     let child = spawn_rand(counter_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     child.cast_dyn(Bump).await.unwrap();
     let count = child.call_dyn(GetCount).await.unwrap();
@@ -291,7 +291,7 @@ async fn cast_dyn_and_call_dyn_work_for_an_accepted_message() {
 #[tokio::test]
 async fn dyn_sends_reject_a_message_type_the_interface_does_not_accept() {
     let child = spawn_rand(counter_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     // `u8` is a `Message` (see zestors-interface's blanket impls) but is not
     // one of `CounterInterface`'s variants.
@@ -314,7 +314,7 @@ async fn dyn_sends_reject_a_message_type_the_interface_does_not_accept() {
 #[tokio::test]
 async fn members_accepts_and_is_interface_reflect_the_concrete_type() {
     let child = spawn_rand(counter_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     assert!(child.accepts::<Bump>());
     assert!(child.accepts::<GetCount>());

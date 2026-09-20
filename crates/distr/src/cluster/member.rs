@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// A node in the cluster, as known to the membership protocol.
 ///
-/// A node is identified by its [`NodeId`] alone; `addr` is only where it can
+/// A node is identified by its [`NodeName`] alone; `addr` is only where it can
 /// currently be reached and may change between restarts. The `generation`
 /// distinguishes successive incarnations of the same node, so a restarted node
 /// replaces its previous incarnation (like Erlang's `creation`, but carried by

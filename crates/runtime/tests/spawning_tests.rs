@@ -36,7 +36,7 @@ async fn spawn_task_cannot_receive_messages_but_can_receive_signals() {
         task_box.wait_shutdown().await;
         Ok::<_, rootcause::Report>("done")
     });
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     child.signal_shutdown();
     let result = tokio::time::timeout(std::time::Duration::from_secs(2), child).await;
@@ -99,7 +99,7 @@ async fn respawning_reuses_the_same_channel_and_name() {
 
     let child1 = strong.clone().spawn(common::simplest_handler).unwrap();
     child1.signal_shutdown();
-    child1.watch_exit().await.unwrap();
+    child1.monitor_exit().await.unwrap();
 
     let child2 = strong.spawn(common::simplest_handler).unwrap();
     assert_eq!(child2.name(), &name);
@@ -170,10 +170,10 @@ async fn spawn_error_result_maps_to_unhandled_error_exit_status() {
         inbox.recv().await;
         Err(rootcause::report!("spawn function failed"))
     });
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
     let _ = child.cast(()).await;
 
-    let outcome = child.watch_exit().await;
+    let outcome = child.monitor_exit().await;
     assert_eq!(
         outcome,
         Err(zestors_runtime::errors::ExitError::UnhandledError)
@@ -193,7 +193,7 @@ async fn created_at_is_stable_across_respawns_while_last_spawned_at_updates() {
     let first_spawned_at = child1.last_spawned_at().unwrap();
     assert_eq!(child1.created_at(), created_at);
     child1.signal_shutdown();
-    child1.watch_exit().await.unwrap();
+    child1.monitor_exit().await.unwrap();
 
     let child2 = strong.spawn(common::simplest_handler).unwrap();
     let second_spawned_at = child2.last_spawned_at().unwrap();

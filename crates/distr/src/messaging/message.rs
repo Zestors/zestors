@@ -2,7 +2,7 @@
 
 use super::{
     Decode, Encode,
-    reply::{RemoteReceipt, RemoteReply},
+    reply::{ClusterReceipt, ClusterReply},
 };
 use crate::{MessageId, StableId};
 use std::time::Duration;
@@ -18,16 +18,17 @@ pub trait RemoteMessage:
     Message<Output: Encode + Decode, Kind: RemoteMessageKind<Self::Output>> + StableId + Encode + Decode
 {
     /// What sending the message gives back to wait on, like
-    /// [`Message::Receipt`]: `()` if it expects no reply, else a
-    /// [`RemoteReply`](super::RemoteReply).
-    type RemoteReceipt: RemoteReceipt<Output = Self::Output>;
+    /// [`MessageKind::Receipt`](zestors_interface::MessageKind::Receipt): `()` if
+    /// it expects no reply, else a
+    /// [`ClusterReply`](super::ClusterReply).
+    type ClusterReceipt: ClusterReceipt<Output = Self::Output>;
 
-    /// The [`RemoteReceipt`](Self::RemoteReceipt), given what to wait on if
+    /// The [`ClusterReceipt`](Self::ClusterReceipt), given what to wait on if
     /// there is a reply.
-    fn remote_receipt(waiting: Option<RemoteReply<Self::Output>>) -> Self::RemoteReceipt;
+    fn remote_receipt(waiting: Option<ClusterReply<Self::Output>>) -> Self::ClusterReceipt;
 
     /// What to wait on for a message sent to an actor on this node.
-    fn local_receipt(receipt: ReceiptOf<Self>, timeout: Option<Duration>) -> Self::RemoteReceipt;
+    fn local_receipt(receipt: ReceiptOf<Self>, timeout: Option<Duration>) -> Self::ClusterReceipt;
 }
 
 impl<M> RemoteMessage for M
@@ -37,13 +38,13 @@ where
         + Encode
         + Decode,
 {
-    type RemoteReceipt = <Self::Kind as RemoteMessageKind<M::Output>>::RemoteReceipt;
+    type ClusterReceipt = <Self::Kind as RemoteMessageKind<M::Output>>::ClusterReceipt;
 
-    fn remote_receipt(waiting: Option<RemoteReply<M::Output>>) -> Self::RemoteReceipt {
+    fn remote_receipt(waiting: Option<ClusterReply<M::Output>>) -> Self::ClusterReceipt {
         <Self::Kind as RemoteMessageKind<M::Output>>::remote(waiting)
     }
 
-    fn local_receipt(receipt: ReceiptOf<M>, timeout: Option<Duration>) -> Self::RemoteReceipt {
+    fn local_receipt(receipt: ReceiptOf<M>, timeout: Option<Duration>) -> Self::ClusterReceipt {
         <Self::Kind as RemoteMessageKind<M::Output>>::local(receipt, timeout)
     }
 }
@@ -52,37 +53,37 @@ where
 /// [`Reply<T>`](zestors_interface::Reply), is sent and received remotely. The
 /// two are all there are.
 pub trait RemoteMessageKind<T>: MessageKind<T> {
-    type RemoteReceipt: RemoteReceipt<Output = T>;
+    type ClusterReceipt: ClusterReceipt<Output = T>;
 
     /// Whether the message gets a reply.
     const REPLIES: bool;
 
     /// The remote receipt, given what to wait on if there is a reply.
-    fn remote(waiting: Option<RemoteReply<T>>) -> Self::RemoteReceipt;
+    fn remote(waiting: Option<ClusterReply<T>>) -> Self::ClusterReceipt;
 
     /// What is waited on for a message sent to an actor on this node.
-    fn local(receipt: Self::Receipt, timeout: Option<Duration>) -> Self::RemoteReceipt;
+    fn local(receipt: Self::Receipt, timeout: Option<Duration>) -> Self::ClusterReceipt;
 }
 
 impl RemoteMessageKind<()> for Cast {
-    type RemoteReceipt = ();
+    type ClusterReceipt = ();
     const REPLIES: bool = false;
 
-    fn remote(_: Option<RemoteReply<()>>) {}
+    fn remote(_: Option<ClusterReply<()>>) {}
 
     fn local(_: (), _: Option<Duration>) {}
 }
 
 impl<T: Send + 'static> RemoteMessageKind<T> for Call {
-    type RemoteReceipt = RemoteReply<T>;
+    type ClusterReceipt = ClusterReply<T>;
     const REPLIES: bool = true;
 
-    fn remote(waiting: Option<RemoteReply<T>>) -> RemoteReply<T> {
+    fn remote(waiting: Option<ClusterReply<T>>) -> ClusterReply<T> {
         waiting.expect("A message with a reply is sent as a call")
     }
 
-    fn local(receipt: Self::Receipt, timeout: Option<Duration>) -> RemoteReply<T> {
-        RemoteReply::local(receipt, timeout)
+    fn local(receipt: Self::Receipt, timeout: Option<Duration>) -> ClusterReply<T> {
+        ClusterReply::local(receipt, timeout)
     }
 }
 

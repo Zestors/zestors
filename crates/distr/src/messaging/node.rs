@@ -2,8 +2,9 @@
 //! addresses it makes, and the state it has while it runs.
 
 use super::{
-    AddressError, ClusterActorOps as _, ClusterAddress, LocalAddress, RemoteAddress, RemoteError,
-    RemoteOpError, RemoteReplyError, RemoteSet, dispatch::Handlers, pending::Pending, receive,
+    AddressError, ClusterActorOps as _, ClusterAddress, ClusterOpError, ClusterReplyError,
+    LocalAddress, RemoteAddress, RemoteError, RemoteSet, dispatch::Handlers, monitors::Monitors,
+    pending::Pending, receive,
 };
 use crate::{
     Cluster, GlobalName, MessageId,
@@ -33,6 +34,8 @@ pub(crate) struct CommunicationView {
     /// answered by a [`Frame::Reply`](super::frame::Frame::Reply) and looked up
     /// in the one [`Pending`] table: two counters would collide there.
     pub(super) next_call: AtomicU64,
+    /// The monitors other nodes hold on actors here.
+    pub(super) monitors: Monitors,
 }
 
 /// What is there once the node runs.
@@ -50,6 +53,7 @@ impl CommunicationView {
             handlers,
             running: RwLock::new(None),
             next_call: AtomicU64::new(0),
+            monitors: Monitors::default(),
         }
     }
 
@@ -61,6 +65,13 @@ impl CommunicationView {
 /// Messaging between actors: registers what this node accepts, and makes
 /// [`RemoteAddress`]es to send with.
 impl Cluster {
+    /// How many monitors other nodes are holding on actors here. For tests that
+    /// check a monitor is let go of.
+    #[doc(hidden)]
+    pub fn monitors_held(&self) -> usize {
+        self.messaging().monitors.len()
+    }
+
     /// The ids `address` accepts, among the messages this node was built with,
     /// sorted. The one answer to that question, so that a node says the same
     /// about an actor whether it is asked from here or over the network.
@@ -141,7 +152,7 @@ impl Cluster {
         match address.is_superset_of(ids).await {
             Ok(true) => Ok(address),
             Ok(false) => Err(AddressError::TypeMismatch(name)),
-            Err(RemoteOpError::Reply(RemoteReplyError::Remote(RemoteError::NoSuchActor))) => {
+            Err(ClusterOpError::Reply(ClusterReplyError::Remote(RemoteError::NoSuchActor))) => {
                 Err(AddressError::NoSuchActor(name))
             }
             Err(error) => Err(AddressError::Remote(error)),

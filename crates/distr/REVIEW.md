@@ -9,36 +9,37 @@ is green at 41 suites.
 
 ---
 
-## 1. The `Remote*` prefix no longer means anything
+## 1. The `Remote*` prefix — resolved
 
-This is the biggest legibility problem in the public API, and it is recent.
+**Done.** The prefix used to split the API along no line at all: the crate began as
+"actors on other nodes", then local actors became first-class (`LocalAddress`,
+`ClusterAddress`, `ClusterActorOps`) and only the traits got renamed.
 
-The crate used to be about actors on *other* nodes, so everything was `Remote*`. Since
-then, actors on *this* node became first-class: `LocalAddress`, `ClusterAddress`,
-`ClusterActorRef`, `ClusterActorOps`. The traits that span both were renamed to
-`Cluster*`. The rest were not, so the prefix now splits the API along no line at all.
+The rule now applied: **`Remote*` means crossing the network is the reason the type
+exists.** Everything reachable from a purely local send is `Cluster*`.
 
-**Genuinely remote-only** — the prefix is correct:
-- `RemoteAddress` — an actor on another node.
-- `RemoteError` — what the *remote node* reported; it travels on the wire
-  (`frame.rs` encodes it).
-- `RemoteMessage`, `RemoteSet` — "can cross a network", a property of the type.
+| was                 | is                   |
+| ------------------- | -------------------- |
+| `RemoteAccepts`     | `ClusterAccepts`     |
+| `RemoteCallOptions` | `ClusterCallOptions` |
+| `RemoteReceipt`     | `ClusterReceipt`     |
+| `RemoteReply`       | `ClusterReply`       |
+| `RemoteOpError`     | `ClusterOpError`     |
+| `RemoteCallError`   | `ClusterCallError`   |
+| `RemoteCastError`   | `ClusterCastError`   |
+| `RemoteReplyError`  | `ClusterReplyError`  |
+| `RemoteInfo`        | `ActorInfo`          |
 
-**Applies equally to a local actor** — the prefix is now misleading:
-- `RemoteAccepts` — blanket-implemented for every `ClusterActorRef`, which includes
-  `LocalAddress` ([send.rs:292](src/messaging/send.rs#L292)).
-- `RemoteInfo` — returned by `ClusterActorOps::info()` for local actors too.
-- `RemoteReply`, `RemoteReceipt` — `RemoteReply` has a `Source::Local` variant.
-- `RemoteOpError`, `RemoteCallError`, `RemoteCastError`, `CastFailure`,
-  `RemoteCallOptions` — all reachable from a purely local send.
-- `RemoteRequest` — a reply channel inside a message; works locally.
+Kept, because remoteness is the property that makes them exist: `RemoteAddress`,
+`RemoteError` (it is literally what the peer put on the wire), `RemoteMessage`,
+`RemoteSet`, `RemoteMessageKind`, `RemoteRequest`. `CastFailure` was already unprefixed.
 
-**Suggested rule**, if this gets cleaned up: the prefix answers *"does this concept still
-exist when the actor is on this node?"* If yes, it is `Cluster*` or unprefixed; if no, it
-is `Remote*`. That would rename roughly nine public types. It is a large but purely
-mechanical break, and it is much cheaper now than after the crate has users.
+`ActorInfo` breaks the `Cluster*` pattern deliberately — `ClusterInfo` would read as
+information *about the cluster*, which it is not, and nothing else is called `ActorInfo`.
 
-Do not do this piecemeal — half-renamed is worse than either end state.
+Two knock-on names were checked and left alone because they are still accurate:
+`RemoteMessage::remote_receipt` / `local_receipt` build the receipt for a remote vs a
+local send, and `RemoteAddress::cast_remote` is the remote path.
 
 ## 2. `Cluster` is one type implemented in two files
 
@@ -105,24 +106,40 @@ and it is what lets `Handlers` be a plain `IndexMap` with no locking
 
 ## 5. Open issues, roughly by value
 
-### High — no cross-node monitors
-This is the framework's largest gap against OTP, which it is modelled on. OTP builds
-distribution on `erlang:monitor(process, {Name, Node})` → `{'DOWN', Ref, process, Pid,
-Reason}`, with `noconnection` when the node goes; `gen_server:call`, supervisors and
-`global` all sit on that one primitive. There is no equivalent here. Consequences:
+### Resolved — cross-node monitors
+**Done.** `ClusterActorOps` now has the same `monitor_*` family as `ActorOps`, working for an
+actor on another node as well as one here: `monitor_any`, `monitor_exit`, `monitor_running`,
+`monitor_accepts_messages`, `monitor_init`.
 
-- A supervisor cannot supervise a child on another node — supervision stops at the process
-  boundary.
-- `RemoteAddress` cannot offer `watch_exit`, which `ActorOps` has locally, so
-  `ClusterAddress` can never be fully location-transparent.
-- Callers must pick a timeout instead of learning the truth; a node that is up but wedged
-  holds every call for the full `call_timeout`.
+A closure cannot cross a network, so the primitive is `monitor_any(&[ActorStatusKind])` —
+*wait until the status is one of these* — with `ActorStatusKind` being the payload-free
+discriminant of `ActorStatus` (`crates/runtime/src/status.rs`). The matched `ActorStatus`
+comes back whole, so `Exited` keeps its `ExitStatus`.
 
-**Shape that fits the existing code:** a `MonitorOp`/`DemonitorOp` beside the built-ins in
-[ops.rs](src/messaging/ops.rs); a `Monitors` table beside `Pending` in
-[pending.rs](src/messaging/pending.rs), keyed in the same id space and failed on the same
-`fail_node` path; and `ClusterActorOps::monitor()` resolving locally via the existing
-`ActorOps::watch_exit`.
+On the wire it is `MonitorOp`/`DemonitorOp` in [ops.rs](src/messaging/ops.rs), sent **without a
+deadline** — `ClusterReply::Source::Remote` and `Pending::expect` now take
+`Option<Duration>`, mirroring the local side, which always did. Losing the node still ends
+the monitor with `Disconnected`, which is OTP's `noconnection`.
+
+**Three ways a monitor ends, and all three are needed** (`src/messaging/monitors.rs`):
+1. the actor reaches a monitored status;
+2. the monitoring side drops the future — a `Demonitor` guard sends `DemonitorOp`, which rides the
+   same ordered lane as its `MonitorOp` (both keyed on the target actor), so it cannot
+   overtake it;
+3. **the monitoring node dies** — nothing announces this, so the holder sweeps per peer via
+   `Monitors::drop_node`, next to the existing `Pending::fail_node` in
+   [receive.rs](src/messaging/receive.rs). Note the two are mirror images: `fail_node` ends
+   calls *this* node made *to* the peer, the sweep ends monitors the *peer* asked *of* this
+   node.
+
+Without (3) a monitor would outlive its monitoring node for good, and a restarted node's `monitor_id`
+— minted from `next_call`, which restarts at zero — would collide with the stale entry.
+
+Six tests in `tests/remote.rs` cover it, including that a monitor outlives `call_timeout` and
+that both cleanup paths actually empty the registry.
+
+**What this unblocks:** a supervisor supervising a child on another node, which was the
+reason the gap mattered.
 
 ### Medium — a remote cast can be dropped and the sender never told
 [receive.rs:340](src/messaging/receive.rs#L340). When the per-actor queue bound is hit a
@@ -132,7 +149,7 @@ backpressure.
 
 This is the one place where the documented "at most once" quietly becomes "sometimes zero,
 and you will not know". OTP blocks the sender instead (`busy_dist_port`). Minimum: say so
-in the `RemoteAccepts` docs. Better: apply backpressure to the peer's lane rather than
+in the `ClusterAccepts` docs. Better: apply backpressure to the peer's lane rather than
 dropping.
 
 ### Medium — local and remote calls have different timeout rules
@@ -211,7 +228,7 @@ Pinned by `the_narrow_operations_agree_with_a_full_info` in `tests/remote.rs`: e
 op gives exactly what the matching `info()` field would, for an accepted message, a
 registered-but-unaccepted one, and an unregistered one.
 
-Still open, related: `RemoteInfo` is public and `ChannelState` deliberately is not — a caller
+Still open, related: `ActorInfo` is public and `ChannelState` deliberately is not — a caller
 reads it one field at a time. If it is ever made public, it is a `Cluster*`/unprefixed name
 under §1's rule, not a `Remote*` one.
 
@@ -224,7 +241,10 @@ under §1's rule, not a `Remote*` one.
   would delete that capability and the whole distr suite with it. `Registry` gets away with
   it because a registry is genuinely process-wide and needs no configuration; a `Cluster`
   needs `local_name`, `call_timeout` and `shards` before it can exist.
-- `cargo test --workspace` takes ~105s; `cluster.rs` is slow. Do not kill it early.
+- **Run the suite with `cargo nextest run --workspace`** (3-4s), not `cargo test --workspace`
+  (27s). nextest does not run doctests, so `cargo test --workspace --doc` is the other half.
+  See `CLAUDE.md` at the repo root. The old note here said this suite takes ~105s — that was
+  compilation, not the tests, which are seconds.
 - Check **both** `--features auto-register` and without: `auto_register.rs` is gated but the
   macro it feeds is always compiled.
 - `cargo run -p zestors --example remote` is a good end-to-end smoke test; it should print

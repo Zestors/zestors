@@ -3,7 +3,7 @@
 //! This crate holds the spec/config/snapshot types and query messages that
 //! describe *what* a supervisor supervises and *how* it may be restarted; the
 //! `Supervisor` actor that actually starts,
-//! watches, and restarts children lives in the `zestors-supervisor` crate.
+//! monitors, and restarts children lives in the `zestors-supervisor` crate.
 //!
 //! - [`ChildSpec`] pairs a child's blueprint with the [`ChildConfig`]
 //!   (restart mode/intensity, timeouts) a supervisor applies to it, and owns
@@ -80,7 +80,7 @@
 //! ```
 //!
 //! A [`ChildSpec`] on its own is just a recipe plus a reserved [`Name`]; it
-//! doesn't watch the child or restart it. That behavior belongs to the
+//! doesn't monitor the child or restart it. That behavior belongs to the
 //! `Supervisor` actor in `zestors-supervisor`, which holds a set of specs and
 //! calls `start`/`restart` on them according to a `SupervisionStrategy`.
 

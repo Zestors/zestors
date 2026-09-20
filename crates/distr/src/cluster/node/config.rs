@@ -113,7 +113,7 @@ impl ClusterConfig {
 
     /// How long a call to an actor on another node waits for its reply before
     /// giving up, 30 seconds by default. See
-    /// [`RemoteAccepts::call`](crate::RemoteAccepts::call).
+    /// [`ClusterAccepts::call`](crate::ClusterAccepts::call).
     pub fn call_timeout(mut self, timeout: Duration) -> Self {
         self.call_timeout = timeout;
         self

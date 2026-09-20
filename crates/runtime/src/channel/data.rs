@@ -136,7 +136,7 @@ impl Channel {
         }
     }
 
-    pub(crate) async fn watch<T>(
+    pub(crate) async fn monitor<T>(
         &self,
         mut check_for: impl FnMut(ActorStatus) -> Option<T> + Send,
     ) -> T {

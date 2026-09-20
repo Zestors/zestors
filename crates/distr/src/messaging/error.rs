@@ -39,7 +39,7 @@ pub enum RemoteError {
 }
 
 /// Why a message couldn't be sent, without the message itself. See
-/// [`RemoteCastError`], which pairs it with the message that was not sent.
+/// [`ClusterCastError`], which pairs it with the message that was not sent.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CastFailure {
@@ -59,7 +59,7 @@ pub enum CastFailure {
     #[error("Failed to encode the message: {0}")]
     Encode(EncodeError),
     /// The messages waiting to be sent to the node are too many; see
-    /// [`RemoteAccepts::try_cast`](super::RemoteAccepts::try_cast).
+    /// [`ClusterAccepts::try_cast`](super::ClusterAccepts::try_cast).
     #[error("Too many messages are waiting to be sent to the node")]
     Full,
     /// The actor is on this node and is not taking messages any more.
@@ -72,8 +72,8 @@ pub enum CastFailure {
 
 impl CastFailure {
     /// Pairs this with the message that was not sent.
-    pub(super) fn with<M>(self, msg: M) -> RemoteCastError<M> {
-        RemoteCastError { msg, reason: self }
+    pub(super) fn with<M>(self, msg: M) -> ClusterCastError<M> {
+        ClusterCastError { msg, reason: self }
     }
 }
 
@@ -81,24 +81,25 @@ impl CastFailure {
 /// [`msg`](Self::msg), and [`reason`](Self::reason) says why.
 #[derive(Debug, thiserror::Error)]
 #[error("{reason}")]
-pub struct RemoteCastError<M> {
+pub struct ClusterCastError<M> {
     /// The message that was not sent.
     pub msg: M,
     /// Why it was not sent.
     pub reason: CastFailure,
 }
 
-impl<M> RemoteCastError<M> {
+impl<M> ClusterCastError<M> {
     /// The message that was not sent.
     pub fn into_inner(self) -> M {
         self.msg
     }
 }
 
-/// A message was sent to a remote actor, but no reply came.
+/// A message was sent, but no reply came. An actor on this node can fail this
+/// way too: it may drop the request, or outlast the call's timeout.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum RemoteReplyError {
+pub enum ClusterReplyError {
     /// The node answered with an error.
     #[error("The node could not deliver the message: {0}")]
     Remote(#[from] RemoteError),
@@ -115,16 +116,16 @@ pub enum RemoteReplyError {
 }
 
 /// An operation on a remote actor failed, see
-/// [`RemoteActorOps`](super::RemoteActorOps).
+/// [`ClusterActorOps`](super::ClusterActorOps).
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum RemoteOpError {
+pub enum ClusterOpError {
     /// The request couldn't be sent.
     #[error(transparent)]
     NotSent(#[from] CastFailure),
     /// The request was sent, but no answer came.
     #[error(transparent)]
-    Reply(#[from] RemoteReplyError),
+    Reply(#[from] ClusterReplyError),
 }
 
 /// An address for an actor couldn't be made.
@@ -140,7 +141,7 @@ pub enum AddressError {
     TypeMismatch(Name),
     /// The node of the actor couldn't be asked.
     #[error("Failed to ask the node of the actor: {0}")]
-    Remote(#[from] RemoteOpError),
+    Remote(#[from] ClusterOpError),
 }
 
 impl From<TypedRegistryError> for AddressError {
@@ -152,13 +153,13 @@ impl From<TypedRegistryError> for AddressError {
     }
 }
 
-/// A call to a remote actor failed.
+/// A call failed, wherever the actor is.
 #[derive(Debug, thiserror::Error)]
-pub enum RemoteCallError<M> {
+pub enum ClusterCallError<M> {
     /// The message was not sent, and is given back.
     #[error(transparent)]
-    NotSent(#[from] RemoteCastError<M>),
+    NotSent(#[from] ClusterCastError<M>),
     /// The message was sent, but no reply came.
     #[error(transparent)]
-    Reply(RemoteReplyError),
+    Reply(ClusterReplyError),
 }

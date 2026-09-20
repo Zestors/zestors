@@ -1,6 +1,6 @@
 //! Operations on an actor, as opposed to messages for it: signalling it,
 //! checking that it is alive, and asking about its state. They are what
-//! [`RemoteActorOps`](super::RemoteActorOps) sends.
+//! [`ClusterActorOps`](super::ClusterActorOps) sends.
 //!
 //! They are messages like any other on the wire, with ids of their own, and
 //! every node handles them without them being registered. Unlike messages,
@@ -10,17 +10,20 @@
 //! for the mailbox.
 
 use super::{
-    ClusterActorRef, ClusterAddressRef, RemoteError, RemoteMessage, RemoteOpError,
-    RemoteReplyError,
+    ClusterActorRef, ClusterAddressRef, ClusterOpError, ClusterReplyError, RemoteError,
+    RemoteMessage,
     dispatch::{Builtin, Handler, Operation},
 };
-use crate::{Cluster, MessageId, StableId};
+use crate::{Cluster, MessageId, NodeName, StableId};
 use indexmap::IndexMap;
 use jiff::Zoned;
 use serde::{Deserialize, Serialize};
 use std::{future::Future, marker::PhantomData, sync::Arc};
 use zestors_interface::Message;
-use zestors_runtime::{ActorStatus, Address, AsDyn, ChannelSnapshot, Name, Signal, prelude::*};
+use zestors_runtime::{
+    ActorStatus, ActorStatusKind, Address, AsDyn, ChannelSnapshot, ExitStatus, Name, Signal,
+    errors::ExitError, prelude::*,
+};
 
 /// Sends a [`Signal`] to the actor. Answered with whether it was accepted:
 /// `false` if the actor was already exiting or dead.
@@ -37,20 +40,44 @@ pub(super) struct PingOp;
 
 /// Asks about the state of the actor.
 #[derive(Message, StableId, Serialize, Deserialize, Debug)]
-#[msg(reply = RemoteInfo, id = "b5c3f7a0-5f0e-4b0f-9f7e-2f6c1f0a0003", no_auto_register)]
+#[msg(reply = ActorInfo, id = "b5c3f7a0-5f0e-4b0f-9f7e-2f6c1f0a0003", no_auto_register)]
 #[zestors(interface_path = "zestors_interface", distr_path = "crate")]
 pub(super) struct InfoOp;
 
-/// The state of an actor on another node, at one instant.
+/// Waits until the actor's status is one of `kinds`, and answers with it.
+///
+/// Unlike the others this outlives its message: it is answered whenever the
+/// actor gets there, which may be never. It is sent without a deadline, and
+/// called off with [`DemonitorOp`].
+#[derive(Message, StableId, Serialize, Deserialize, Debug)]
+#[msg(reply = ActorStatus, id = "b5c3f7a0-5f0e-4b0f-9f7e-2f6c1f0a0006", no_auto_register)]
+#[zestors(interface_path = "zestors_interface", distr_path = "crate")]
+pub(super) struct MonitorOp {
+    /// Names the monitor so it can be called off. Minted by the monitoring node, so
+    /// it is only unique together with that node's name.
+    pub(super) monitor_id: u64,
+    pub(super) kinds: Vec<ActorStatusKind>,
+}
+
+/// Calls off a [`MonitorOp`], so that the node holding it can forget it. Expects
+/// no reply: by the time this is sent, nobody is listening for one.
+#[derive(Message, StableId, Serialize, Deserialize, Debug)]
+#[msg(id = "b5c3f7a0-5f0e-4b0f-9f7e-2f6c1f0a0007", no_auto_register)]
+#[zestors(interface_path = "zestors_interface", distr_path = "crate")]
+pub(super) struct DemonitorOp {
+    pub(super) monitor_id: u64,
+}
+
+/// The state of an actor at one instant, wherever it is.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RemoteInfo {
+pub struct ActorInfo {
     /// The actor's status, queue lengths and spawn and exit history. The
     /// timestamps are the clock of the node the actor is on.
     pub snapshot: ChannelSnapshot,
     /// Whether the actor's mailbox is full, so that sending to it waits.
     pub reached_backpressure: bool,
     /// The ids of the message types that the actor accepts and that its node
-    /// has registered with [`Cluster::register`](crate::Cluster::register),
+    /// has registered with [`ClusterConfig::register`](crate::ClusterConfig::register),
     /// sorted. A message the node hasn't registered is not listed, wherever the
     /// actor is: the node has no id to name it by.
     pub accepts: Vec<MessageId>,
@@ -64,10 +91,10 @@ pub struct RemoteInfo {
 #[zestors(interface_path = "zestors_interface", distr_path = "crate")]
 pub(super) struct StateOp;
 
-/// The cheap half of a [`RemoteInfo`]: what the actor's channel says about
+/// The cheap half of a [`ActorInfo`]: what the actor's channel says about
 /// itself right now. Not public: it is read one field at a time through
 /// [`ClusterActorOps`], and a caller that wants several at one instant asks
-/// for a [`RemoteInfo`].
+/// for a [`ActorInfo`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct ChannelState {
     pub(super) status: ActorStatus,
@@ -89,6 +116,7 @@ impl Operation for SignalOp {
         self,
         address: Address,
         _: Cluster,
+        _: NodeName,
     ) -> super::dispatch::BoxFuture<Result<bool, RemoteError>> {
         Box::pin(async move { Ok(address.signal(self.0)) })
     }
@@ -99,6 +127,7 @@ impl Operation for PingOp {
         self,
         address: Address,
         _: Cluster,
+        _: NodeName,
     ) -> super::dispatch::BoxFuture<Result<(), RemoteError>> {
         Box::pin(async move { address.ping().await.map_err(|_| RemoteError::NoReply) })
     }
@@ -109,9 +138,10 @@ impl Operation for InfoOp {
         self,
         address: Address,
         cluster: Cluster,
-    ) -> super::dispatch::BoxFuture<Result<RemoteInfo, RemoteError>> {
+        _: NodeName,
+    ) -> super::dispatch::BoxFuture<Result<ActorInfo, RemoteError>> {
         Box::pin(async move {
-            Ok(RemoteInfo {
+            Ok(ActorInfo {
                 snapshot: address.snapshot(),
                 reached_backpressure: address.reached_backpressure(),
                 accepts: cluster.accepted_ids(&address),
@@ -125,6 +155,7 @@ impl Operation for StateOp {
         self,
         address: Address,
         _: Cluster,
+        _: NodeName,
     ) -> super::dispatch::BoxFuture<Result<ChannelState, RemoteError>> {
         Box::pin(async move {
             Ok(ChannelState {
@@ -142,8 +173,46 @@ impl Operation for AcceptsOp {
         self,
         address: Address,
         cluster: Cluster,
+        _: NodeName,
     ) -> super::dispatch::BoxFuture<Result<bool, RemoteError>> {
         Box::pin(async move { Ok(cluster.accepts_ids(&address, &self.0)) })
+    }
+}
+
+impl Operation for MonitorOp {
+    fn run(
+        self,
+        address: Address,
+        cluster: Cluster,
+        peer: NodeName,
+    ) -> super::dispatch::BoxFuture<Result<ActorStatus, RemoteError>> {
+        Box::pin(async move {
+            let monitors = &cluster.messaging().monitors;
+            let cancelled = monitors.begin(peer.clone(), self.monitor_id);
+            let reached = tokio::select! {
+                status = address.monitor_any(&self.kinds) => Ok(status),
+                // The monitoring_node is gone. Nothing is listening for this reply, so
+                // what it says doesn't matter.
+                _ = cancelled.cancelled() => Err(RemoteError::NoReply),
+            };
+            monitors.end(&peer, self.monitor_id);
+            reached
+        })
+    }
+}
+
+impl Operation for DemonitorOp {
+    fn run(
+        self,
+        _: Address,
+        cluster: Cluster,
+        peer: NodeName,
+    ) -> super::dispatch::BoxFuture<Result<(), RemoteError>> {
+        Box::pin(async move {
+            // A miss is normal: the monitor may have been answered already.
+            cluster.messaging().monitors.cancel(&peer, self.monitor_id);
+            Ok(())
+        })
     }
 }
 
@@ -152,31 +221,36 @@ pub(super) fn register(handlers: &mut IndexMap<MessageId, Arc<dyn Handler>>) {
     handlers.insert(SignalOp::Id, Arc::new(Builtin::<SignalOp>(PhantomData)));
     handlers.insert(PingOp::Id, Arc::new(Builtin::<PingOp>(PhantomData)));
     handlers.insert(InfoOp::Id, Arc::new(Builtin::<InfoOp>(PhantomData)));
+    handlers.insert(MonitorOp::Id, Arc::new(Builtin::<MonitorOp>(PhantomData)));
+    handlers.insert(
+        DemonitorOp::Id,
+        Arc::new(Builtin::<DemonitorOp>(PhantomData)),
+    );
     handlers.insert(StateOp::Id, Arc::new(Builtin::<StateOp>(PhantomData)));
     handlers.insert(AcceptsOp::Id, Arc::new(Builtin::<AcceptsOp>(PhantomData)));
 }
 
 /// Operations on actors on other nodes: the counterpart of
-/// [`ActorOps`](zestors_runtime::ActorOps) for a [`RemoteAddress`] or a
+/// [`ActorOps`](zestors_runtime::ActorOps) for a [`RemoteAddress`](super::RemoteAddress) or a
 /// [`ClusterAddress`](super::ClusterAddress). This trait is sealed, and is
-/// implemented automatically for any type that implements [`RemoteActorRef`].
+/// implemented automatically for any type that implements [`ClusterActorRef`].
 ///
 /// Everything here asks the node the actor is on, so it is async and can fail.
 /// If the actor is on this node, which a [`ClusterAddress`](super::ClusterAddress)
 /// can be for, the answer is read from it directly and the future is ready at
 /// once. Each method that reads the actor's state asks again; to read several
-/// things consistently, get a [`RemoteInfo`] with [`RemoteActorOps::info`] and
+/// things consistently, get a [`ActorInfo`] with [`ClusterActorOps::info`] and
 /// read them from that.
 ///
 /// Sending messages is done with
-/// [`RemoteAccepts`](super::RemoteAccepts), and waiting for an actor's status to
+/// [`ClusterAccepts`](super::ClusterAccepts), and waiting for an actor's status to
 /// change isn't supported yet.
 ///
 /// The operations aren't queued behind the messages waiting for the actor.
 pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
     /// Sends the given [`Signal`] to the actor. Returns `false` if the actor
     /// was already exiting or dead.
-    fn signal(&self, signal: Signal) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
+    fn signal(&self, signal: Signal) -> impl Future<Output = Result<bool, ClusterOpError>> + Send {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => Ok(local.address().signal(signal)),
@@ -187,30 +261,30 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
 
     /// Sends a [`Signal::Shutdown`] to the actor. Returns `false` if it was
     /// already exiting or dead.
-    fn signal_shutdown(&self) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
+    fn signal_shutdown(&self) -> impl Future<Output = Result<bool, ClusterOpError>> + Send {
         self.signal(Signal::Shutdown)
     }
 
     /// Sends a [`Signal::Suspend`] to the actor. Returns `false` if it was
     /// already exiting or dead.
-    fn signal_suspend(&self) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
+    fn signal_suspend(&self) -> impl Future<Output = Result<bool, ClusterOpError>> + Send {
         self.signal(Signal::Suspend)
     }
 
     /// Sends a [`Signal::Resume`] to the actor. Returns `false` if it was
     /// already exiting or dead.
-    fn signal_resume(&self) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
+    fn signal_resume(&self) -> impl Future<Output = Result<bool, ClusterOpError>> + Send {
         self.signal(Signal::Resume)
     }
 
     /// Waits until the actor has processed a signal. As signals are processed
     /// before the messages queued, this confirms that the actor is alive and
     /// its event loop has caught up with its signals.
-    fn ping(&self) -> impl Future<Output = Result<(), RemoteOpError>> + Send {
+    fn ping(&self) -> impl Future<Output = Result<(), ClusterOpError>> + Send {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => local.address().ping().await.map_err(|_| {
-                    RemoteOpError::Reply(RemoteReplyError::Remote(RemoteError::NoReply))
+                    ClusterOpError::Reply(ClusterReplyError::Remote(RemoteError::NoReply))
                 }),
                 ClusterAddressRef::Remote(address) => address.call_op(PingOp).await,
             }
@@ -220,12 +294,12 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
     /// Asks about the actor's state, everything at one instant. This is the
     /// only operation that carries the actor's history and accepts list; the
     /// methods below that read one field ask for that field alone.
-    fn info(&self) -> impl Future<Output = Result<RemoteInfo, RemoteOpError>> + Send {
+    fn info(&self) -> impl Future<Output = Result<ActorInfo, ClusterOpError>> + Send {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => {
                     let address = local.address();
-                    Ok(RemoteInfo {
+                    Ok(ActorInfo {
                         snapshot: address.snapshot(),
                         reached_backpressure: address.reached_backpressure(),
                         accepts: local.cluster().accepted_ids(address.as_dyn()),
@@ -238,7 +312,7 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
 
     /// Captures a [`ChannelSnapshot`] of the actor. Its timestamps are from the
     /// clock of the actor's node.
-    fn snapshot(&self) -> impl Future<Output = Result<ChannelSnapshot, RemoteOpError>> + Send {
+    fn snapshot(&self) -> impl Future<Output = Result<ChannelSnapshot, ClusterOpError>> + Send {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => Ok(local.address().snapshot()),
@@ -248,7 +322,7 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
     }
 
     /// The actor's current [`ActorStatus`].
-    fn status(&self) -> impl Future<Output = Result<ActorStatus, RemoteOpError>> + Send {
+    fn status(&self) -> impl Future<Output = Result<ActorStatus, ClusterOpError>> + Send {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => Ok(local.address().status()),
@@ -258,17 +332,17 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
     }
 
     /// Whether the actor's status is [`ActorStatus::Exiting`].
-    fn is_exiting(&self) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
+    fn is_exiting(&self) -> impl Future<Output = Result<bool, ClusterOpError>> + Send {
         async move { Ok(self.status().await?.is_exiting()) }
     }
 
     /// Whether the actor's status is [`ActorStatus::Exited`].
-    fn is_dead(&self) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
+    fn is_dead(&self) -> impl Future<Output = Result<bool, ClusterOpError>> + Send {
         async move { Ok(self.status().await?.is_dead()) }
     }
 
     /// The number of messages currently queued for the actor.
-    fn msg_len(&self) -> impl Future<Output = Result<usize, RemoteOpError>> + Send {
+    fn msg_len(&self) -> impl Future<Output = Result<usize, ClusterOpError>> + Send {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => Ok(local.address().msg_len()),
@@ -278,12 +352,12 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
     }
 
     /// Whether no messages are currently queued for the actor.
-    fn msg_is_empty(&self) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
+    fn msg_is_empty(&self) -> impl Future<Output = Result<bool, ClusterOpError>> + Send {
         async move { Ok(self.msg_len().await? == 0) }
     }
 
     /// The number of signals currently queued for the actor.
-    fn signal_len(&self) -> impl Future<Output = Result<usize, RemoteOpError>> + Send {
+    fn signal_len(&self) -> impl Future<Output = Result<usize, ClusterOpError>> + Send {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => Ok(local.address().signal_len()),
@@ -295,12 +369,12 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
     }
 
     /// Whether no signals are currently queued for the actor.
-    fn signal_is_empty(&self) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
+    fn signal_is_empty(&self) -> impl Future<Output = Result<bool, ClusterOpError>> + Send {
         async move { Ok(self.signal_len().await? == 0) }
     }
 
     /// Whether the actor's mailbox is full, so that sending to it waits.
-    fn reached_backpressure(&self) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
+    fn reached_backpressure(&self) -> impl Future<Output = Result<bool, ClusterOpError>> + Send {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => Ok(local.address().reached_backpressure()),
@@ -313,7 +387,9 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
 
     /// When the actor was last spawned, on the clock of its node, or `None` if
     /// it never was.
-    fn last_spawned_at(&self) -> impl Future<Output = Result<Option<Zoned>, RemoteOpError>> + Send {
+    fn last_spawned_at(
+        &self,
+    ) -> impl Future<Output = Result<Option<Zoned>, ClusterOpError>> + Send {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => {
@@ -327,8 +403,8 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
     }
 
     /// The ids of the message types the actor accepts and that its node has
-    /// registered, see [`RemoteInfo::accepts`].
-    fn members(&self) -> impl Future<Output = Result<Vec<MessageId>, RemoteOpError>> + Send {
+    /// registered, see [`ActorInfo::accepts`].
+    fn members(&self) -> impl Future<Output = Result<Vec<MessageId>, ClusterOpError>> + Send {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => {
@@ -343,7 +419,7 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
     /// `false` also if its node hasn't registered it.
     fn accepts<M: RemoteMessage>(
         &self,
-    ) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
+    ) -> impl Future<Output = Result<bool, ClusterOpError>> + Send {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => Ok(local.address().accepts::<M>()),
@@ -353,11 +429,11 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
     }
 
     /// Whether the actor accepts messages with the id `id`, see
-    /// [`RemoteActorOps::accepts`].
+    /// [`ClusterActorOps::accepts`].
     fn accepts_id(
         &self,
         id: MessageId,
-    ) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
+    ) -> impl Future<Output = Result<bool, ClusterOpError>> + Send {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => {
@@ -373,7 +449,7 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
     fn is_superset_of<'a>(
         &'a self,
         ids: &'a [MessageId],
-    ) -> impl Future<Output = Result<bool, RemoteOpError>> + Send + 'a {
+    ) -> impl Future<Output = Result<bool, ClusterOpError>> + Send + 'a {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => {
@@ -382,6 +458,88 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
                 ClusterAddressRef::Remote(address) => {
                     address.call_op(AcceptsOp(ids.to_vec())).await
                 }
+            }
+        }
+    }
+
+    /// Waits until the actor's status is one of `kinds`, and returns it — with
+    /// the exit reason, if it exited. The counterpart of
+    /// [`ActorOps::monitor_any`](zestors_runtime::ActorOps::monitor_any).
+    ///
+    /// The status the actor is already in counts, so this can return at once.
+    /// For an actor on another node the monitor is held there until it is
+    /// reached, with no deadline; losing the node ends it with
+    /// [`ClusterReplyError::Disconnected`], which is the only answer there is.
+    ///
+    /// Never returns if `kinds` is empty, or if the actor never reaches any of
+    /// them and its node stays up; include [`ActorStatusKind::Exited`] to be
+    /// sure of an answer.
+    fn monitor_any(
+        &self,
+        kinds: &[ActorStatusKind],
+    ) -> impl Future<Output = Result<ActorStatus, ClusterOpError>> + Send {
+        async move {
+            match self.as_ref() {
+                ClusterAddressRef::Local(local) => Ok(local.address().monitor_any(kinds).await),
+                ClusterAddressRef::Remote(address) => address.watch_remote(kinds).await,
+            }
+        }
+    }
+
+    /// Waits until the actor has exited, and reports how.
+    fn monitor_exit(
+        &self,
+    ) -> impl Future<Output = Result<Result<(), ExitError>, ClusterOpError>> + Send {
+        async move {
+            match self.monitor_any(&[ActorStatusKind::Exited]).await? {
+                ActorStatus::Exited(exit) => Ok(exit.into_result()),
+                status => unreachable!("Watched for an exit, got {status:?}"),
+            }
+        }
+    }
+
+    /// Waits until the actor is running.
+    fn monitor_running(&self) -> impl Future<Output = Result<(), ClusterOpError>> + Send {
+        async move {
+            self.monitor_any(&[ActorStatusKind::Running]).await?;
+            Ok(())
+        }
+    }
+
+    /// Waits until the actor takes signals and messages, see
+    /// [`ActorStatus::accepts_messages`]. Never returns for an actor that exits
+    /// without ever accepting one.
+    fn monitor_accepts_messages(&self) -> impl Future<Output = Result<(), ClusterOpError>> + Send {
+        async move {
+            self.monitor_any(&[
+                ActorStatusKind::Initializing,
+                ActorStatusKind::Running,
+                ActorStatusKind::Suspended,
+            ])
+            .await?;
+            Ok(())
+        }
+    }
+
+    /// Waits until the actor is running, or `Err` with how it exited if it got
+    /// there first.
+    ///
+    /// Not quite [`ActorOps::monitor_init`](zestors_runtime::ActorOps::monitor_init):
+    /// that one also checks whether the actor was ever spawned, to tell a
+    /// channel that was made but never run from one that really exited. That
+    /// check can't be asked of another node, so a never-spawned actor reads as
+    /// exited here. Reaching one by name makes that a corner rather than the
+    /// usual case.
+    fn monitor_init(
+        &self,
+    ) -> impl Future<Output = Result<Result<(), ExitStatus>, ClusterOpError>> + Send {
+        async move {
+            match self
+                .monitor_any(&[ActorStatusKind::Running, ActorStatusKind::Exited])
+                .await?
+            {
+                ActorStatus::Exited(exit) => Ok(Err(exit)),
+                _ => Ok(Ok(())),
             }
         }
     }

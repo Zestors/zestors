@@ -37,6 +37,7 @@ tracing-subscriber.workspace = true
 zestors-distr-quic.workspace = true
 rcgen.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+futures.workspace = true
 # Enables the `sim` feature for this crate's own tests.
 zestors-distr = { path = ".", features = ["sim", "auto-register"] }
 

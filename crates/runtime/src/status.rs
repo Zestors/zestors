@@ -61,6 +61,46 @@ impl ActorStatus {
     pub fn is_initializing(&self) -> bool {
         matches!(self, ActorStatus::Initializing)
     }
+
+    /// Which of the statuses this is, without the exit reason.
+    pub fn kind(&self) -> ActorStatusKind {
+        match self {
+            ActorStatus::Exited(_) => ActorStatusKind::Exited,
+            ActorStatus::Initializing => ActorStatusKind::Initializing,
+            ActorStatus::Running => ActorStatusKind::Running,
+            ActorStatus::Suspended => ActorStatusKind::Suspended,
+            ActorStatus::Exiting => ActorStatusKind::Exiting,
+        }
+    }
+}
+
+/// Which [`ActorStatus`] an actor is in, without the exit reason that
+/// [`ActorStatus::Exited`] carries.
+///
+/// This is what [`ActorOps::monitor_any`](crate::ActorOps::monitor_any) waits for. A
+/// status to wait for has to be named before it happens, so it can't carry the
+/// reason it happened; the reason comes back in the [`ActorStatus`] that is
+/// returned. It is also what a monitor on an actor on another node sends, which a
+/// closure could not be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ActorStatusKind {
+    /// See [`ActorStatus::Exited`].
+    Exited,
+    /// See [`ActorStatus::Initializing`].
+    Initializing,
+    /// See [`ActorStatus::Running`].
+    Running,
+    /// See [`ActorStatus::Suspended`].
+    Suspended,
+    /// See [`ActorStatus::Exiting`].
+    Exiting,
+}
+
+impl ActorStatusKind {
+    /// Whether `status` is this one, whatever reason it carries.
+    pub fn matches(&self, status: &ActorStatus) -> bool {
+        status.kind() == *self
+    }
 }
 
 /// The final outcome of an actor's most recently completed run, carried by

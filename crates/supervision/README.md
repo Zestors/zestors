@@ -5,7 +5,7 @@
 
 Shared building blocks for [`zestors`](https://crates.io/crates/zestors)
 supervision trees, in the OTP sense: `ChildSpec`, `ChildConfig`, and
-`RestartIntensity`. The `Supervisor` actor that actually starts, watches,
+`RestartIntensity`. The `Supervisor` actor that actually starts, monitors,
 and restarts children lives in
 [`zestors-supervisor`](https://crates.io/crates/zestors-supervisor).
 

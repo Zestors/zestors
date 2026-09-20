@@ -41,9 +41,9 @@
 //!     Ok::<_, rootcause::Report>(count)
 //! });
 //!
-//! // `watch_init` waits for the actor's first `recv`, so it's guaranteed
+//! // `monitor_init` waits for the actor's first `recv`, so it's guaranteed
 //! // to be running by the time we start sending it messages.
-//! child.watch_init().await.unwrap();
+//! child.monitor_init().await.unwrap();
 //! for _ in 0..3 {
 //!     child.cast(()).await.unwrap();
 //! }

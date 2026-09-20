@@ -1,11 +1,12 @@
-//! The sending side: [`RemoteAccepts`], and how a message is put on its way,
+//! The sending side: [`ClusterAccepts`], and how a message is put on its way,
 //! to an actor on another node or on this one.
 
 use super::{
-    CastFailure, ClusterActorRef, ClusterAddressRef, Decode, RemoteAddress, RemoteCallError,
-    RemoteCastError, RemoteMessage, RemoteOpError, RemoteReceipt, RemoteReply,
+    CastFailure, ClusterActorRef, ClusterAddressRef, ClusterCallError, ClusterCastError,
+    ClusterOpError, ClusterReceipt, ClusterReply, Decode, RemoteAddress, RemoteMessage,
     frame::Frame,
     message::RemoteMessageKind,
+    ops::{DemonitorOp, MonitorOp},
     receive::Session,
     wire::{Exports, Wire},
 };
@@ -21,12 +22,48 @@ use tokio::sync::mpsc;
 use type_sets::Contains;
 use zestors_interface::Message;
 use zestors_runtime::{
-    ActorOps as _, Address, CallOptions, Context, Name,
+    ActorOps as _, ActorStatus, ActorStatusKind, Address, CallOptions, Context, Name,
     errors::{CastDynError, TryCastDynError},
 };
 
+/// Tells the actor's node to forget a monitor, if this is dropped while one is
+/// still live there.
+///
+/// The [`DemonitorOp`] goes to the same actor as the [`MonitorOp`] did, so it takes
+/// the same lane — see [`shard_of`] — and cannot overtake it. Were it to, the
+/// monitor would never be called off.
+struct Demonitor<'a, C: Context> {
+    /// `None` once the monitor has been answered.
+    address: Option<&'a RemoteAddress<C>>,
+    monitor_id: u64,
+}
+
+impl<C: Context> Drop for Demonitor<'_, C> {
+    fn drop(&mut self) {
+        let Some(address) = self.address else {
+            return;
+        };
+        let (address, monitor_id) = (address.clone(), self.monitor_id);
+        tokio::spawn(async move {
+            // Nothing to report it to: the caller has already gone.
+            let _ = address
+                .cast_remote(DemonitorOp { monitor_id }, Default::default())
+                .await;
+        });
+    }
+}
+
+/// How long a reply is waited for.
+#[derive(Clone, Copy)]
+enum Deadline {
+    /// The one the call options, the address or the node ask for.
+    Default,
+    /// However long it takes. Losing the node still ends the wait.
+    Never,
+}
+
 /// A message ready to be sent, and what to wait on for its reply, if it has one.
-type Sending<M> = (Prepared, Option<RemoteReply<<M as Message>::Output>>);
+type Sending<M> = (Prepared, Option<ClusterReply<<M as Message>::Output>>);
 
 /// A message, encoded and ready to go into the lane to its node.
 struct Prepared {
@@ -40,9 +77,9 @@ impl<C: Context> RemoteAddress<C> {
     pub(super) async fn cast_remote<M: RemoteMessage>(
         &self,
         msg: M,
-        options: RemoteCallOptions,
-    ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
-        let (prepared, waiting) = match self.prepare(&msg, options) {
+        options: ClusterCallOptions,
+    ) -> Result<M::ClusterReceipt, ClusterCastError<M>> {
+        let (prepared, waiting) = match self.prepare(&msg, options, Deadline::Default) {
             Ok(prepared) => prepared,
             Err(reason) => return Err(reason.with(msg)),
         };
@@ -59,9 +96,9 @@ impl<C: Context> RemoteAddress<C> {
     pub(super) fn try_cast_remote<M: RemoteMessage>(
         &self,
         msg: M,
-        options: RemoteCallOptions,
-    ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
-        let (prepared, waiting) = match self.prepare(&msg, options) {
+        options: ClusterCallOptions,
+    ) -> Result<M::ClusterReceipt, ClusterCastError<M>> {
+        let (prepared, waiting) = match self.prepare(&msg, options, Deadline::Default) {
             Ok(prepared) => prepared,
             Err(reason) => return Err(reason.with(msg)),
         };
@@ -80,8 +117,56 @@ impl<C: Context> RemoteAddress<C> {
     pub(super) async fn call_op<M: RemoteMessage>(
         &self,
         msg: M,
-    ) -> Result<M::Output, RemoteOpError> {
-        let (prepared, waiting) = match self.prepare(&msg, Default::default()) {
+    ) -> Result<M::Output, ClusterOpError> {
+        self.call_op_with(msg, Deadline::Default).await
+    }
+
+    /// Monitors the actor until its status is one of `kinds`.
+    ///
+    /// The monitor lives on the actor's node until then, so it has to be called
+    /// off if this future is dropped — see [`Demonitor`]. It is sent with no
+    /// deadline; the node going away is what ends it otherwise.
+    pub(super) async fn watch_remote(
+        &self,
+        kinds: &[ActorStatusKind],
+    ) -> Result<ActorStatus, ClusterOpError> {
+        let monitor_id = self
+            .cluster
+            .messaging()
+            .next_call
+            .fetch_add(1, Ordering::Relaxed);
+        // Armed before the monitor is sent: dropping this future at any point
+        // from here on tells the other node to forget it.
+        let mut demonitor = Demonitor {
+            address: Some(self),
+            monitor_id,
+        };
+        let reached = self
+            .call_op_untimed(MonitorOp {
+                monitor_id,
+                kinds: kinds.to_vec(),
+            })
+            .await;
+        // Answered, so there is nothing left there to call off.
+        demonitor.address = None;
+        reached
+    }
+
+    /// Like [`RemoteAddress::call_op`], for an operation that is answered when
+    /// it is answered: a monitor waits for as long as the actor takes.
+    pub(super) async fn call_op_untimed<M: RemoteMessage>(
+        &self,
+        msg: M,
+    ) -> Result<M::Output, ClusterOpError> {
+        self.call_op_with(msg, Deadline::Never).await
+    }
+
+    async fn call_op_with<M: RemoteMessage>(
+        &self,
+        msg: M,
+        deadline: Deadline,
+    ) -> Result<M::Output, ClusterOpError> {
+        let (prepared, waiting) = match self.prepare(&msg, Default::default(), deadline) {
             Ok(prepared) => prepared,
             Err(reason) => return Err(reason.into()),
         };
@@ -98,7 +183,8 @@ impl<C: Context> RemoteAddress<C> {
     fn prepare<M: RemoteMessage>(
         &self,
         msg: &M,
-        options: RemoteCallOptions,
+        options: ClusterCallOptions,
+        deadline: Deadline,
     ) -> Result<Sending<M>, CastFailure> {
         let cluster = &self.cluster;
         let messaging = cluster.messaging();
@@ -136,10 +222,15 @@ impl<C: Context> RemoteAddress<C> {
         }
 
         let waiting = call_id.map(|call_id| {
-            let timeout = options
-                .timeout
-                .or(self.timeout)
-                .unwrap_or(messaging.call_timeout);
+            let timeout = match deadline {
+                Deadline::Default => Some(
+                    options
+                        .timeout
+                        .or(self.timeout)
+                        .unwrap_or(messaging.call_timeout),
+                ),
+                Deadline::Never => None,
+            };
             running.pending.expect(
                 call_id,
                 member.name.clone(),
@@ -175,43 +266,46 @@ fn shard_of(name: &Name, shards: u8) -> u8 {
     (hasher.finish() % shards as u64) as u8
 }
 
-/// Options for a single message sent with [`RemoteAccepts`], the remote
+/// Options for a single message sent with [`ClusterAccepts`], the remote
 /// counterpart of [`CallOptions`](zestors_runtime::CallOptions).
 ///
 /// ```
-/// # use zestors_distr::RemoteCallOptions;
+/// # use zestors_distr::ClusterCallOptions;
 /// # use std::time::Duration;
-/// let options = RemoteCallOptions::new().timeout(Duration::from_secs(2));
+/// let options = ClusterCallOptions::new().timeout(Duration::from_secs(2));
 /// assert_eq!(options.timeout, Some(Duration::from_secs(2)));
 /// ```
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RemoteCallOptions {
+pub struct ClusterCallOptions {
     /// How long to wait for the reply, instead of the address's or the node's
     /// default.
     pub timeout: Option<Duration>,
 }
 
-impl RemoteCallOptions {
-    /// Creates a new [`RemoteCallOptions`] with nothing set.
+impl ClusterCallOptions {
+    /// Creates a new [`ClusterCallOptions`] with nothing set.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Sets [`RemoteCallOptions::timeout`].
+    /// Sets [`ClusterCallOptions::timeout`].
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 }
 
-/// Message-sending operations for a reference to a remote actor: the remote
-/// counterpart of [`Accepts`](zestors_runtime::Accepts), and it works the same
-/// way.
+/// Message-sending operations for a reference to an actor anywhere in the
+/// cluster: the counterpart of [`Accepts`](zestors_runtime::Accepts), and it
+/// works the same way.
 ///
-/// It is implemented for a [`RemoteAddress<C>`](super::RemoteAddress) for every [`RemoteMessage`] that
-/// `C` accepts, so only messages the actor is expected to take can be sent.
-/// Sending returns the message's [`RemoteMessage::RemoteReceipt`]: `()` for a
-/// message that expects no reply, and a [`RemoteReply`](super::RemoteReply) to wait for the reply
+/// It is implemented for every [`ClusterActorRef`](super::ClusterActorRef) — so
+/// [`RemoteAddress`](super::RemoteAddress), [`LocalAddress`](super::LocalAddress)
+/// and [`ClusterAddress`](super::ClusterAddress) alike — for every
+/// [`RemoteMessage`] that `C` accepts, so only messages the actor is expected to
+/// take can be sent.
+/// Sending returns the message's [`RemoteMessage::ClusterReceipt`]: `()` for a
+/// message that expects no reply, and a [`ClusterReply`](super::ClusterReply) to wait for the reply
 /// of one that does. [`call`](Self::call) sends and waits for it.
 ///
 /// There are two ways to send:
@@ -223,73 +317,74 @@ impl RemoteCallOptions {
 ///
 /// Returning means that the message is queued for sending, not that it arrived
 /// or was accepted; for that, wait for the reply. Unlike a local message, one
-/// can fail on the way: see [`RemoteReplyError`](super::RemoteReplyError). A message that got no answer
+/// can fail on the way: see [`ClusterReplyError`](super::ClusterReplyError). A message that got no answer
 /// is not sent again; delivery is at most once.
-pub trait RemoteAccepts<M: RemoteMessage>: Sync {
+pub trait ClusterAccepts<M: RemoteMessage>: Sync {
     /// Sends a message, waiting for room to send it if many messages are
     /// queued for the node.
     ///
-    /// Equivalent to [`RemoteAccepts::cast_with`] with the default
-    /// [`RemoteCallOptions`].
+    /// Equivalent to [`ClusterAccepts::cast_with`] with the default
+    /// [`ClusterCallOptions`].
     fn cast(
         &self,
         msg: M,
-    ) -> impl Future<Output = Result<M::RemoteReceipt, RemoteCastError<M>>> + Send {
+    ) -> impl Future<Output = Result<M::ClusterReceipt, ClusterCastError<M>>> + Send {
         self.cast_with(msg, Default::default())
     }
 
-    /// Same as [`RemoteAccepts::cast`], with explicit [`RemoteCallOptions`].
+    /// Same as [`ClusterAccepts::cast`], with explicit [`ClusterCallOptions`].
     fn cast_with(
         &self,
         msg: M,
-        options: RemoteCallOptions,
-    ) -> impl Future<Output = Result<M::RemoteReceipt, RemoteCastError<M>>> + Send;
+        options: ClusterCallOptions,
+    ) -> impl Future<Output = Result<M::ClusterReceipt, ClusterCastError<M>>> + Send;
 
     /// Sends a message immediately, without waiting for room.
     ///
-    /// Equivalent to [`RemoteAccepts::try_cast_with`] with the default
-    /// [`RemoteCallOptions`].
-    fn try_cast(&self, msg: M) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
+    /// Equivalent to [`ClusterAccepts::try_cast_with`] with the default
+    /// [`ClusterCallOptions`].
+    fn try_cast(&self, msg: M) -> Result<M::ClusterReceipt, ClusterCastError<M>> {
         self.try_cast_with(msg, Default::default())
     }
 
-    /// Same as [`RemoteAccepts::try_cast`], with explicit [`RemoteCallOptions`].
+    /// Same as [`ClusterAccepts::try_cast`], with explicit [`ClusterCallOptions`].
     ///
     /// Fails with [`CastFailure::Full`] if many messages are queued for the
     /// node.
     fn try_cast_with(
         &self,
         msg: M,
-        options: RemoteCallOptions,
-    ) -> Result<M::RemoteReceipt, RemoteCastError<M>>;
+        options: ClusterCallOptions,
+    ) -> Result<M::ClusterReceipt, ClusterCastError<M>>;
 
-    /// Sends a message via [`RemoteAccepts::cast`] and waits for its reply.
+    /// Sends a message via [`ClusterAccepts::cast`] and waits for its reply.
     ///
-    /// Equivalent to calling [`RemoteAccepts::cast`] and then
-    /// [`RemoteReceipt::wait`] on the result, so it shares `cast`'s failures and
+    /// Equivalent to calling [`ClusterAccepts::cast`] and then
+    /// [`ClusterReceipt::wait`] on the result, so it shares `cast`'s failures and
     /// adds those of getting the reply. The output is [`Message::Output`](zestors_interface::Message::Output), the
     /// reply. For a message that expects no reply, that is `()` as soon as the
     /// message is queued.
-    fn call(&self, msg: M) -> impl Future<Output = Result<M::Output, RemoteCallError<M>>> + Send {
+    fn call(&self, msg: M) -> impl Future<Output = Result<M::Output, ClusterCallError<M>>> + Send {
         self.call_with(msg, Default::default())
     }
 
-    /// Same as [`RemoteAccepts::call`], with explicit [`RemoteCallOptions`].
+    /// Same as [`ClusterAccepts::call`], with explicit [`ClusterCallOptions`].
     fn call_with(
         &self,
         msg: M,
-        options: RemoteCallOptions,
-    ) -> impl Future<Output = Result<M::Output, RemoteCallError<M>>> + Send {
+        options: ClusterCallOptions,
+    ) -> impl Future<Output = Result<M::Output, ClusterCallError<M>>> + Send {
         async move {
             let receipt = self.cast_with(msg, options).await?;
-            receipt.wait().await.map_err(RemoteCallError::Reply)
+            receipt.wait().await.map_err(ClusterCallError::Reply)
         }
     }
 }
 
-/// One implementation for every kind of address: [`RemoteAddress`](super::RemoteAddress)
-/// and [`ClusterAddress`](super::ClusterAddress) both are sent to through it.
-impl<M, T> RemoteAccepts<M> for T
+/// One implementation for every kind of address: [`LocalAddress`](super::LocalAddress),
+/// [`RemoteAddress`](super::RemoteAddress) and [`ClusterAddress`](super::ClusterAddress)
+/// are all sent to through it.
+impl<M, T> ClusterAccepts<M> for T
 where
     M: RemoteMessage,
     T: ClusterActorRef,
@@ -298,8 +393,8 @@ where
     async fn cast_with(
         &self,
         msg: M,
-        options: RemoteCallOptions,
-    ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
+        options: ClusterCallOptions,
+    ) -> Result<M::ClusterReceipt, ClusterCastError<M>> {
         match self.as_ref() {
             ClusterAddressRef::Remote(address) => address.cast_remote(msg, options).await,
             ClusterAddressRef::Local(local) => cast(local.address(), msg, options).await,
@@ -309,8 +404,8 @@ where
     fn try_cast_with(
         &self,
         msg: M,
-        options: RemoteCallOptions,
-    ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
+        options: ClusterCallOptions,
+    ) -> Result<M::ClusterReceipt, ClusterCastError<M>> {
         match self.as_ref() {
             ClusterAddressRef::Remote(address) => address.try_cast_remote(msg, options),
             ClusterAddressRef::Local(local) => try_cast(local.address(), msg, options),
@@ -322,8 +417,8 @@ where
 pub(super) async fn cast<M: RemoteMessage, C: Context>(
     address: &Address<C>,
     msg: M,
-    options: RemoteCallOptions,
-) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
+    options: ClusterCallOptions,
+) -> Result<M::ClusterReceipt, ClusterCastError<M>> {
     // Not `Accepts::cast`, which panics if a `Dyn` address is for an actor that
     // doesn't accept the message.
     match address.cast_dyn_with(msg, CallOptions::default()).await {
@@ -337,8 +432,8 @@ pub(super) async fn cast<M: RemoteMessage, C: Context>(
 pub(super) fn try_cast<M: RemoteMessage, C: Context>(
     address: &Address<C>,
     msg: M,
-    options: RemoteCallOptions,
-) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
+    options: ClusterCallOptions,
+) -> Result<M::ClusterReceipt, ClusterCastError<M>> {
     match address.try_cast_dyn_with(msg, CallOptions::default()) {
         Ok(receipt) => Ok(M::local_receipt(receipt, options.timeout)),
         Err(TryCastDynError::Closed(msg)) => Err(CastFailure::Closed.with(msg)),

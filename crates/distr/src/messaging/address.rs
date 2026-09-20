@@ -1,6 +1,6 @@
 //! What you hold to reach an actor: [`LocalAddress`] for one on this node,
 //! [`RemoteAddress`] for one on another, [`ClusterAddress`] for one that may be
-//! either, and the [`RemoteActorRef`] they are all reached through.
+//! either, and the [`ClusterActorRef`] they are all reached through.
 
 use crate::{Cluster, GlobalName};
 use std::{fmt, marker::PhantomData, time::Duration};
@@ -15,8 +15,8 @@ use zestors_runtime::{Address, Context, Dyn};
 /// really does is up to the node it runs on to say: a message it doesn't accept
 /// is answered with [`RemoteError::NotAccepted`](super::RemoteError::NotAccepted).
 ///
-/// Messages are sent with [`RemoteAccepts`](super::RemoteAccepts), and the actor
-/// is operated on with [`RemoteActorOps`](super::RemoteActorOps). Messages sent to one actor arrive
+/// Messages are sent with [`ClusterAccepts`](super::ClusterAccepts), and the actor
+/// is operated on with [`ClusterActorOps`](super::ClusterActorOps). Messages sent to one actor arrive
 /// in the order they were sent. A message that is not answered is not sent
 /// again; delivery is at most once.
 pub struct RemoteAddress<C: Context = Dyn> {
@@ -60,10 +60,10 @@ impl<C: Context> RemoteAddress<C> {
         &self.target
     }
 
-    /// How long [`RemoteAccepts::call`](super::RemoteAccepts::call) and [`RemoteReceipt::wait`](super::RemoteReceipt::wait) wait for a
+    /// How long [`ClusterAccepts::call`](super::ClusterAccepts::call) and [`ClusterReceipt::wait`](super::ClusterReceipt::wait) wait for a
     /// reply, instead of the node's
     /// [`ClusterConfig::call_timeout`](crate::ClusterConfig::call_timeout).
-    /// [`RemoteCallOptions::timeout`] overrides it for one call.
+    /// [`ClusterCallOptions::timeout`](super::ClusterCallOptions::timeout) overrides it for one call.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
@@ -75,9 +75,9 @@ impl<C: Context> RemoteAddress<C> {
 ///
 /// It is an [`Address`] together with the [`Cluster`] it belongs to. The cluster
 /// is what lets the operations that go by [`MessageId`](crate::MessageId) — such
-/// as [`members`](super::RemoteActorOps::members) — answer for a local actor
+/// as [`members`](super::ClusterActorOps::members) — answer for a local actor
 /// exactly as they do for a remote one, by consulting the same registry of
-/// [registered](crate::Cluster::register) messages.
+/// [registered](crate::ClusterConfig::register) messages.
 ///
 /// Use [`LocalAddress::address`] for the plain [`Address`], which is what
 /// [`ActorOps`](zestors_runtime::ActorOps) works on.
@@ -129,8 +129,8 @@ impl<C: Context> fmt::Debug for LocalAddress<C> {
 ///
 /// Made with [`Cluster::address`](crate::Cluster::address), or from a
 /// [`LocalAddress`] or a [`RemoteAddress`]. Messages are sent with
-/// [`RemoteAccepts`](super::RemoteAccepts), and the actor is operated on with
-/// [`RemoteActorOps`](super::RemoteActorOps), exactly as with a
+/// [`ClusterAccepts`](super::ClusterAccepts), and the actor is operated on with
+/// [`ClusterActorOps`](super::ClusterActorOps), exactly as with a
 /// [`RemoteAddress`]: a local actor is simply reached without leaving the
 /// process, and without the message being encoded.
 ///
@@ -142,7 +142,7 @@ impl<C: Context> fmt::Debug for LocalAddress<C> {
 /// - There is no default timeout to wait for a reply, as the node's
 ///   [`call_timeout`](crate::ClusterConfig::call_timeout) and
 ///   [`ClusterAddress::with_timeout`] are for remote actors. A
-///   [`RemoteCallOptions::timeout`] is honoured.
+///   [`ClusterCallOptions::timeout`](super::ClusterCallOptions::timeout) is honoured.
 /// - It works whether or not the node is running.
 pub enum ClusterAddress<C: Context = Dyn> {
     /// An actor on this node.
@@ -152,7 +152,7 @@ pub enum ClusterAddress<C: Context = Dyn> {
 }
 
 impl<C: Context> ClusterAddress<C> {
-    /// How long [`RemoteAccepts::call`](super::RemoteAccepts::call) waits for a
+    /// How long [`ClusterAccepts::call`](super::ClusterAccepts::call) waits for a
     /// reply from a remote actor, see [`RemoteAddress::with_timeout`]. It has no
     /// effect on a local actor.
     pub fn with_timeout(self, timeout: Duration) -> Self {
@@ -213,8 +213,8 @@ impl<C: Context> From<RemoteAddress<C>> for ClusterAddress<C> {
     }
 }
 
-/// How a [`RemoteActorRef`] reaches its actor. An implementation detail of
-/// [`RemoteAccepts`](super::RemoteAccepts) and [`RemoteActorOps`].
+/// How a [`ClusterActorRef`] reaches its actor. An implementation detail of
+/// [`ClusterAccepts`](super::ClusterAccepts) and [`ClusterActorOps`].
 #[doc(hidden)]
 pub enum ClusterAddressRef<'a, C: Context> {
     /// An actor on this node.
@@ -232,7 +232,8 @@ pub enum ClusterAddressMut<'a, C: Context> {
 }
 
 /// A reference to an actor on another node, or on this one, which
-/// [`RemoteAccepts`](super::RemoteAccepts) and [`RemoteActorOps`] work on:
+/// [`ClusterAccepts`](super::ClusterAccepts) and [`ClusterActorOps`](super::ClusterActorOps)
+/// work on:
 /// [`LocalAddress`], [`RemoteAddress`] and [`ClusterAddress`](super::ClusterAddress).
 ///
 /// Implement this trait, and both are automatically implemented for your type.

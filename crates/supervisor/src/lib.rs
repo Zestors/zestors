@@ -1,4 +1,4 @@
-//! An OTP-style [`Supervisor`] actor for `zestors`: it starts and watches a
+//! An OTP-style [`Supervisor`] actor for `zestors`: it starts and monitors a
 //! set of children — each described by a
 //! [`ChildSpec`](zestors_supervision::ChildSpec) — and restarts them according
 //! to a [`SupervisionStrategy`] and a
@@ -85,7 +85,7 @@
 //!
 //! // A `Supervisor` only reports itself as `Running` once every child it
 //! // started with has finished its own initialization.
-//! supervisor.watch_init().await.unwrap();
+//! supervisor.monitor_init().await.unwrap();
 //!
 //! // `SupervisorInterface` answers `GetChildren`/`GetHealth` (from
 //! // `zestors-supervision`) without needing to stop the tree to inspect it.
@@ -153,7 +153,7 @@
 //! let root = node.root_supervisor().address().clone();
 //! let node_task = tokio::spawn(node.run());
 //!
-//! root.watch_running().await;
+//! root.monitor_running().await;
 //! let children = root.call(GetChildren).await.unwrap();
 //! assert_eq!(children.len(), 1);
 //!

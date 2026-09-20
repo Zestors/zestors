@@ -16,7 +16,7 @@ async fn shutdown_once_running_stops_the_node() {
         let root = node.root_supervisor().address().clone();
 
         let handle = tokio::spawn(node.run());
-        tokio::time::timeout(TIMEOUT, root.watch_accepts_messages())
+        tokio::time::timeout(TIMEOUT, root.monitor_accepts_messages())
             .await
             .expect("the root supervisor starts");
         assert!(root.signal_shutdown());

@@ -13,14 +13,14 @@ use tokio::task::JoinHandle;
 use zestors::{
     interface::{Envelope, Interface, Message},
     prelude::*,
-    runtime::{ActorStatus, Inbox, Name, spawn},
+    runtime::{ActorStatus, ActorStatusKind, Inbox, Name, spawn},
     supervisor::Supervisor,
 };
 use zestors_distr::{
-    AddressError, CastFailure, Cluster, ClusterActorOps, ClusterAddress, ClusterConfig,
-    ClusterNode, ClusterNodeError, Decode, DecodeError, Encode, EncodeError, GlobalName,
-    RemoteAccepts, RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError, RemoteOpError,
-    RemoteReceipt as _, RemoteReplyError, RemoteRequest, Seed, StableId, sim::SimNetwork,
+    AddressError, CastFailure, Cluster, ClusterAccepts, ClusterActorOps, ClusterAddress,
+    ClusterCallError, ClusterCallOptions, ClusterCastError, ClusterConfig, ClusterNode,
+    ClusterNodeError, ClusterOpError, ClusterReceipt as _, ClusterReplyError, Decode, DecodeError,
+    Encode, EncodeError, GlobalName, RemoteError, RemoteRequest, Seed, StableId, sim::SimNetwork,
 };
 use zestors_runtime::Registry;
 
@@ -300,6 +300,14 @@ async fn within<T>(future: impl std::future::Future<Output = T>) -> T {
         .expect("Timed out")
 }
 
+/// Waits until node-b is holding exactly `count` monitors. Sleeps rather than
+/// spinning, so that paused time keeps advancing and `within` can give up.
+async fn watches_on_b(pair: &Pair, count: usize) {
+    while pair.b.cluster.monitors_held() != count {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 /// Two nodes that know each other, and the address of an actor on `node-b`
 /// as seen from `node-a`.
 struct Pair {
@@ -343,7 +351,7 @@ impl Pair {
 /// is initializing or running. Sooner, they are dropped.
 async fn stop(root: &zestors::runtime::Address<zestors_supervisor::SupervisorInterface>) {
     use zestors::runtime::prelude::*;
-    root.watch_accepts_messages().await;
+    root.monitor_accepts_messages().await;
     root.signal_shutdown();
 }
 
@@ -451,10 +459,10 @@ async fn the_reason_a_message_wasnt_delivered_is_told() {
     let _worker = worker("remote-reasons", Log::default());
 
     fn remote_error<T: std::fmt::Debug>(
-        result: Result<T, RemoteCallError<impl std::fmt::Debug>>,
+        result: Result<T, ClusterCallError<impl std::fmt::Debug>>,
     ) -> RemoteError {
         match result {
-            Err(RemoteCallError::Reply(RemoteReplyError::Remote(error))) => error,
+            Err(ClusterCallError::Reply(ClusterReplyError::Remote(error))) => error,
             other => panic!("Expected an error from the node, got {other:?}"),
         }
     }
@@ -508,7 +516,7 @@ async fn a_call_that_is_not_answered_times_out() {
     let started = tokio::time::Instant::now();
     assert!(matches!(
         hangs.call(Hang).await,
-        Err(RemoteCallError::Reply(RemoteReplyError::Timeout))
+        Err(ClusterCallError::Reply(ClusterReplyError::Timeout))
     ));
     assert_eq!(started.elapsed(), Duration::from_secs(2));
 }
@@ -527,8 +535,106 @@ async fn a_call_fails_when_the_node_leaves() {
     stop(&pair.b.shutdown).await;
     assert!(matches!(
         within(reply.wait()).await,
-        Err(RemoteReplyError::Disconnected)
+        Err(ClusterReplyError::Disconnected)
     ));
+}
+
+/// Monitoring an actor on this node: the status it already has counts.
+#[tokio::test(start_paused = true)]
+async fn a_local_watch_returns_the_status_it_is_already_in() {
+    let pair = Pair::start().await;
+    let worker = worker("monitor-local", Log::default());
+    within(worker.monitor_running()).await;
+    let local = local_on_b(&pair, "monitor-local").await;
+
+    assert_eq!(
+        within(local.monitor_any(&[ActorStatusKind::Running]))
+            .await
+            .unwrap(),
+        ActorStatus::Running
+    );
+}
+
+/// The point of the whole thing: an actor on another node exiting is news that
+/// arrives, rather than something to poll for.
+#[tokio::test(start_paused = true)]
+async fn watching_an_actor_on_another_node_reports_its_exit() {
+    let pair = Pair::start().await;
+    let worker = worker("monitor-exit", Log::default());
+    let remote = remote_on_b(&pair, "monitor-exit").await;
+
+    let monitoring = tokio::spawn(async move { remote.monitor_exit().await });
+    worker.signal_shutdown();
+    within(worker.monitor_exit()).await.unwrap();
+
+    assert!(matches!(within(monitoring).await.unwrap(), Ok(Ok(()))));
+}
+
+/// A monitor outlives the call timeout. It is sent as a call, so without care it
+/// would give up after `call_timeout` and report an exit that never happened.
+#[tokio::test(start_paused = true)]
+async fn a_watch_does_not_expire_with_the_call_timeout() {
+    let pair = Pair::start().await;
+    let worker = worker("monitor-patient", Log::default());
+    let remote = remote_on_b(&pair, "monitor-patient").await;
+    let mut monitoring = tokio::spawn(async move { remote.monitor_exit().await });
+
+    // Far past the 10s these tests configure, and the 30s default.
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    assert!(
+        futures::poll!(&mut monitoring).is_pending(),
+        "The monitor should still be waiting, not timed out"
+    );
+
+    worker.signal_shutdown();
+    assert!(matches!(within(monitoring).await.unwrap(), Ok(Ok(()))));
+}
+
+/// Losing the node is an answer too: OTP calls this `noconnection`.
+#[tokio::test(start_paused = true)]
+async fn watching_an_actor_on_a_node_that_is_lost_fails_the_watch() {
+    let pair = Pair::start().await;
+    let _worker = worker("monitor-lost", Log::default());
+    let remote = remote_on_b(&pair, "monitor-lost").await;
+
+    let monitoring = tokio::spawn(async move { remote.monitor_exit().await });
+    pair.b.task.abort();
+
+    assert!(matches!(
+        within(monitoring).await.unwrap(),
+        Err(ClusterOpError::Reply(ClusterReplyError::Disconnected))
+    ));
+}
+
+/// Dropping a monitor has to reach the node holding it, or it keeps the monitor
+/// and the task behind it for as long as the actor's status never changes.
+#[tokio::test(start_paused = true)]
+async fn dropping_a_watch_calls_it_off_on_the_other_node() {
+    let pair = Pair::start().await;
+    let _worker = worker("monitor-dropped", Log::default());
+    let remote = remote_on_b(&pair, "monitor-dropped").await;
+
+    let monitoring = tokio::spawn(async move { remote.monitor_exit().await });
+    within(watches_on_b(&pair, 1)).await;
+
+    monitoring.abort();
+    within(watches_on_b(&pair, 0)).await;
+}
+
+/// The monitoring node dying is the one way a monitor ends with no message to say
+/// so. The node holding it has to notice by itself, or it keeps it for good.
+#[tokio::test(start_paused = true)]
+async fn losing_the_watching_node_drops_the_watches_it_asked_for() {
+    let pair = Pair::start().await;
+    let _worker = worker("monitor-orphan", Log::default());
+    let remote = remote_on_b(&pair, "monitor-orphan").await;
+
+    let _watching = tokio::spawn(async move { remote.monitor_exit().await });
+    within(watches_on_b(&pair, 1)).await;
+
+    // node-a is gone without ever calling the monitor off.
+    pair.a.task.abort();
+    within(watches_on_b(&pair, 0)).await;
 }
 
 #[tokio::test(start_paused = true)]
@@ -546,7 +652,7 @@ async fn a_call_fails_when_the_node_crashes() {
     pair.b.task.abort();
     assert!(matches!(
         within(reply.wait()).await,
-        Err(RemoteReplyError::Disconnected)
+        Err(ClusterReplyError::Disconnected)
     ));
 }
 
@@ -568,7 +674,7 @@ async fn a_call_fails_when_this_node_stops_without_saying_so() {
     pair.a.task.abort();
     assert!(matches!(
         within(reply.wait()).await,
-        Err(RemoteReplyError::Disconnected)
+        Err(ClusterReplyError::Disconnected)
     ));
 }
 
@@ -587,7 +693,7 @@ async fn messages_that_cant_be_sent_are_given_back() {
         .unwrap();
 
     // Too large for the network.
-    let Err(RemoteCastError {
+    let Err(ClusterCastError {
         msg,
         reason: CastFailure::TooLarge { size, max },
     }) = blobs.cast(Blob(vec![0; 5 * 1024 * 1024])).await
@@ -600,7 +706,7 @@ async fn messages_that_cant_be_sent_are_given_back() {
     // A node that has left since: the message comes back rather than going out.
     stop(&pair.b.shutdown).await;
     within(pair.a.cluster.wait_for_members(0)).await;
-    let Err(RemoteCastError {
+    let Err(ClusterCastError {
         msg: Note(3),
         reason: CastFailure::NotAMember,
     }) = worker_address.cast(Note(3)).await
@@ -620,7 +726,7 @@ async fn nothing_reaches_another_node_before_this_one_runs() {
         remote
             .address_dyn::<(Note,)>(GlobalName::new("any", "node-b"))
             .await,
-        Err(AddressError::Remote(RemoteOpError::NotSent(
+        Err(AddressError::Remote(ClusterOpError::NotSent(
             CastFailure::NotRunning
         )))
     ));
@@ -656,7 +762,7 @@ async fn a_slow_actor_does_not_delay_another() {
 }
 
 /// Code that is generic over what it sends to takes any address that accepts the message.
-async fn double_via(target: &impl RemoteAccepts<Double>, n: u32) -> u32 {
+async fn double_via(target: &impl ClusterAccepts<Double>, n: u32) -> u32 {
     target.call(Double(n)).await.unwrap()
 }
 
@@ -688,12 +794,12 @@ async fn a_call_can_have_a_timeout_of_its_own() {
     let result = hangs
         .call_with(
             Hang,
-            RemoteCallOptions::new().timeout(Duration::from_secs(1)),
+            ClusterCallOptions::new().timeout(Duration::from_secs(1)),
         )
         .await;
     assert!(matches!(
         result,
-        Err(RemoteCallError::Reply(RemoteReplyError::Timeout))
+        Err(ClusterCallError::Reply(ClusterReplyError::Timeout))
     ));
     assert_eq!(started.elapsed(), Duration::from_secs(1));
 }
@@ -773,7 +879,7 @@ async fn a_request_for_an_actor_that_is_not_there_fails_its_reply() {
     // The actor is addressed while it is there, and gone by the time the
     // message arrives.
     gone.signal_shutdown();
-    within(gone.watch_exit()).await.unwrap();
+    within(gone.monitor_exit()).await.unwrap();
     drop(gone);
 
     let (reply, answer) = RemoteRequest::new();
@@ -832,7 +938,7 @@ async fn a_request_in_a_message_that_is_not_sent_fails_its_reply() {
         .unwrap();
 
     let (reply, answer) = RemoteRequest::new();
-    let Err(RemoteCastError {
+    let Err(ClusterCastError {
         reason: CastFailure::TooLarge { .. },
         ..
     }) = big
@@ -858,7 +964,7 @@ fn a_request_is_only_serialized_as_part_of_a_sent_message() {
 async fn an_actor_on_another_node_can_be_signalled() {
     let pair = Pair::start().await;
     let local = worker("ops-signal", Log::default());
-    local.watch_init().await.unwrap();
+    local.monitor_init().await.unwrap();
     let remote = pair.on_b::<WorkerInterface>("ops-signal").await;
 
     assert_eq!(remote.status().await.unwrap(), ActorStatus::Running);
@@ -872,7 +978,7 @@ async fn an_actor_on_another_node_can_be_signalled() {
     assert_eq!(remote.status().await.unwrap(), ActorStatus::Running);
 
     assert!(remote.signal_shutdown().await.unwrap());
-    assert!(within(local.watch_exit()).await.is_ok());
+    assert!(within(local.monitor_exit()).await.is_ok());
     assert!(remote.is_dead().await.unwrap());
     assert!(!remote.signal_shutdown().await.unwrap(), "Already dead");
 }
@@ -1012,17 +1118,17 @@ async fn operations_report_why_they_failed() {
     let gone = worker("ops-nobody", Log::default());
     let nobody = pair.on_b::<WorkerInterface>("ops-nobody").await;
     gone.signal_shutdown();
-    within(gone.watch_exit()).await.unwrap();
+    within(gone.monitor_exit()).await.unwrap();
     drop(gone);
     assert!(matches!(
         nobody.ping().await,
-        Err(RemoteOpError::Reply(RemoteReplyError::Remote(
+        Err(ClusterOpError::Reply(ClusterReplyError::Remote(
             RemoteError::NoSuchActor
         )))
     ));
     assert!(matches!(
         nobody.info().await,
-        Err(RemoteOpError::Reply(RemoteReplyError::Remote(
+        Err(ClusterOpError::Reply(ClusterReplyError::Remote(
             RemoteError::NoSuchActor
         )))
     ));
@@ -1034,7 +1140,7 @@ async fn operations_report_why_they_failed() {
     within(pair.a.cluster.wait_for_members(0)).await;
     assert!(matches!(
         stranger.signal_shutdown().await,
-        Err(RemoteOpError::NotSent(CastFailure::NotAMember))
+        Err(ClusterOpError::NotSent(CastFailure::NotAMember))
     ));
 }
 
@@ -1130,7 +1236,7 @@ async fn a_local_message_is_not_encoded() {
             .await
             .call(NoWire(1))
             .await,
-        Err(RemoteCallError::NotSent(RemoteCastError {
+        Err(ClusterCallError::NotSent(ClusterCastError {
             reason: CastFailure::Encode(_),
             ..
         }))
@@ -1155,7 +1261,7 @@ async fn a_local_actor_is_reached_without_the_node_running() {
         remote
             .address::<WorkerInterface>(GlobalName::new("cluster-idle", "node-y"))
             .await,
-        Err(AddressError::Remote(RemoteOpError::NotSent(
+        Err(AddressError::Remote(ClusterOpError::NotSent(
             CastFailure::NotRunning
         )))
     ));
@@ -1172,35 +1278,35 @@ async fn a_local_call_can_time_out_and_a_closed_actor_is_told() {
     let result = local
         .call_with(
             Hang,
-            RemoteCallOptions::new().timeout(Duration::from_secs(2)),
+            ClusterCallOptions::new().timeout(Duration::from_secs(2)),
         )
         .await;
     assert!(matches!(
         result,
-        Err(RemoteCallError::Reply(RemoteReplyError::Timeout))
+        Err(ClusterCallError::Reply(ClusterReplyError::Timeout))
     ));
     assert_eq!(started.elapsed(), Duration::from_secs(2));
 
     // An actor that drops the request.
     assert!(matches!(
         local.call(Forget).await,
-        Err(RemoteCallError::Reply(RemoteReplyError::Remote(
+        Err(ClusterCallError::Reply(ClusterReplyError::Remote(
             RemoteError::NoReply
         )))
     ));
 
     local_worker.signal_shutdown();
-    within(local_worker.watch_exit()).await.unwrap();
+    within(local_worker.monitor_exit()).await.unwrap();
     assert!(matches!(
         local.call(Double(1)).await,
-        Err(RemoteCallError::NotSent(RemoteCastError {
+        Err(ClusterCallError::NotSent(ClusterCastError {
             reason: CastFailure::Closed,
             ..
         }))
     ));
     assert!(matches!(
         local.try_cast(Double(1)),
-        Err(RemoteCastError {
+        Err(ClusterCastError {
             reason: CastFailure::Closed,
             ..
         })
@@ -1274,7 +1380,7 @@ async fn making_an_address_checks_the_actor_where_it_is() {
     assert!(matches!(
         a.address::<WorkerInterface>(GlobalName::new("cluster-check", "node-z"))
             .await,
-        Err(AddressError::Remote(RemoteOpError::NotSent(
+        Err(AddressError::Remote(ClusterOpError::NotSent(
             CastFailure::NotAMember
         )))
     ));
@@ -1305,7 +1411,7 @@ async fn an_address_for_an_actor_on_this_node_is_local() {
 async fn a_local_actor_can_be_operated_on_through_a_cluster_address() {
     let pair = Pair::start().await;
     let child = worker("cluster-ops", Log::default());
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
     let local = local_on_b(&pair, "cluster-ops").await;
 
     assert_eq!(local.status().await.unwrap(), ActorStatus::Running);
@@ -1331,7 +1437,7 @@ async fn a_local_actor_can_be_operated_on_through_a_cluster_address() {
     assert!(local.signal_resume().await.unwrap());
     local.ping().await.unwrap();
     assert!(local.signal_shutdown().await.unwrap());
-    assert!(within(child.watch_exit()).await.is_ok());
+    assert!(within(child.monitor_exit()).await.is_ok());
     assert!(local.is_dead().await.unwrap());
 
     // The same for the actor seen from the other node, over the network.

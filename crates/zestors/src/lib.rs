@@ -11,7 +11,7 @@
 //! | [`runtime`] | The delivery machinery: actors receive through `Inbox`, everyone else sends through `Address`/`StrongAddress`, and actors are looked up by `Name` in `Registry`. |
 //! | [`actor`] | The actors: implement `Handler` (per-message handlers) or `Actor` (the full event loop), then package either in an `Blueprint`. |
 //! | [`supervision`] | The supervisor's vocabulary: `ChildSpec` pairs a blueprint with its `ChildConfig`, and `RestartIntensity` bounds how often a child may restart. |
-//! | [`supervisor`] | The supervision actors: `Supervisor` starts, watches, and restarts children per a `SupervisionStrategy`; `Node` runs a root supervisor as a whole program. |
+//! | [`supervisor`] | The supervision actors: `Supervisor` starts, monitors, and restarts children per a `SupervisionStrategy`; `Node` runs a root supervisor as a whole program. |
 //! | [`distr`] | Distributed messaging: nodes form a cluster, and `RemoteAddress` sends messages to actors on other nodes, and `ClusterAddress` to actors on this node or another. `StableId` gives each message type a stable, globally unique `Id`. |
 //! | [`distr_quic`] | The QUIC backend for [`distr`] clusters, with mutually authenticated nodes: `Quic` and `Tls`. |
 //! | [`api_server`] | HTTP introspection: `ApiServer` exposes `/processes`, `/snapshots`, and `/health` for a running tree. |
@@ -148,7 +148,7 @@
 //! has run even once, and only becomes `Running` once it calls a receiving
 //! method for the first time. Code that runs immediately after spawning
 //! should not assume the actor is already `Running`; either wait for it
-//! with `child.watch_init().await`, or accept `Initializing` as well.
+//! with `child.monitor_init().await`, or accept `Initializing` as well.
 //!
 //! Two behaviors around signals (shutdown, suspend, resume) depart from
 //! what the method names alone would suggest:
@@ -158,7 +158,7 @@
 //!   returns without waiting for it to be processed. Checking
 //!   `child.status()` on the next line can still show the previous status.
 //!   To observe the effect, await something that actually waits for it,
-//!   such as `child.watch_exit().await`.
+//!   such as `child.monitor_exit().await`.
 //! - **Signals take priority over messages, except when the queue is
 //!   empty.** Signals are checked before regular messages, so a shutdown
 //!   request does not wait behind a backlog of messages. But once an
@@ -258,7 +258,7 @@
 //! an optional layer for Erlang/OTP-style restart trees:
 //! [`ChildSpec`](supervision::ChildSpec) pairs a blueprint with the
 //! configuration a supervisor applies to it (restart mode, timeouts), and a
-//! [`Supervisor`](supervisor::Supervisor) actor starts, watches, and
+//! [`Supervisor`](supervisor::Supervisor) actor starts, monitors, and
 //! restarts a set of them.
 //!
 //! Any actor that is `Clone + Debug` - a [`Handler`](actor::Handler)
@@ -317,7 +317,7 @@
 //! let root = node.root_supervisor().address().clone();
 //! let node_task = tokio::spawn(node.run());
 //!
-//! root.watch_running().await;
+//! root.monitor_running().await;
 //!
 //! let children = root.call(GetChildren).await.unwrap();
 //! assert_eq!(children.len(), 1);

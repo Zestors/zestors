@@ -26,10 +26,10 @@ enum AckInterface {
 #[tokio::test]
 async fn shutdown_stops_the_actor() {
     let child = spawn_rand(common::simplest_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     assert!(child.signal_shutdown());
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
     assert!(child.is_dead());
 }
 
@@ -37,7 +37,7 @@ async fn shutdown_stops_the_actor() {
 async fn shutdown_returns_false_once_already_dead() {
     let child = spawn_rand(common::simplest_handler);
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
 
     assert!(!child.signal_shutdown());
 }
@@ -52,7 +52,7 @@ async fn a_signal_queued_right_after_shutdown_on_an_idle_actor_outlives_the_even
     // answered - but only by `Inbox::drop`'s `drain_messages_and_signals`,
     // by which point the actor has already fully exited.
     let child = spawn_rand(common::simplest_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     child.signal_shutdown();
     child.ping().await.unwrap();
@@ -80,14 +80,14 @@ async fn shutdown_still_drains_every_queued_message() {
         Ok(())
     });
 
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     for _ in 0..50 {
         child.cast(()).await.unwrap();
     }
     child.signal_shutdown();
 
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
     assert_eq!(counter.get(), 50);
 }
 
@@ -98,7 +98,7 @@ async fn shutdown_still_drains_every_queued_message() {
 #[tokio::test]
 async fn suspend_then_resume_round_trips_status() {
     let child = spawn_rand(common::simplest_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     assert!(child.signal_suspend());
     assert!(common::wait_for_suspended(&child).await);
@@ -126,7 +126,7 @@ async fn suspend_is_a_no_op_when_already_suspended() {
 #[tokio::test]
 async fn resume_is_a_no_op_when_already_running() {
     let child = spawn_rand(common::simplest_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     assert!(child.signal_resume());
     assert!(child.status().is_running());
@@ -174,7 +174,7 @@ async fn suspend_prevents_processing_until_resumed() {
         }
         Ok(())
     });
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     child.signal_suspend();
     assert!(common::wait_for_suspended(&child).await);
@@ -209,7 +209,7 @@ async fn messages_queued_while_suspended_are_processed_exactly_once_after_resumi
         }
         Ok(())
     });
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     child.signal_suspend();
     assert!(common::wait_for_suspended(&child).await);
@@ -222,7 +222,7 @@ async fn messages_queued_while_suspended_are_processed_exactly_once_after_resumi
     assert!(common::wait_for_running(&child).await);
 
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
     assert_eq!(counter.get(), 5);
 }
 
@@ -233,7 +233,7 @@ async fn messages_queued_while_suspended_are_processed_exactly_once_after_resumi
 #[tokio::test]
 async fn ping_resolves_on_a_live_actor() {
     let child = spawn_rand(common::simplest_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     assert!(child.ping().await.is_ok());
 
@@ -244,7 +244,7 @@ async fn ping_resolves_on_a_live_actor() {
 async fn ping_fails_once_the_actor_is_dead() {
     let child = spawn_rand(common::simplest_handler);
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
 
     assert!(child.ping().await.is_err());
 }
@@ -263,7 +263,7 @@ async fn ping_jumps_ahead_of_a_slow_message_backlog() {
         }
         Ok(())
     });
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     // 20 messages at 50ms/message would take a full second to drain.
     for _ in 0..20 {
@@ -290,7 +290,7 @@ async fn ping_jumps_ahead_of_a_slow_message_backlog() {
 #[tokio::test]
 async fn later_signals_override_earlier_ones_in_order() {
     let child = spawn_rand(common::simplest_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     // Enqueue suspend, resume, suspend, back to back before the actor has a
     // chance to process any of them.
@@ -308,7 +308,7 @@ async fn later_signals_override_earlier_ones_in_order() {
 async fn every_signal_returns_false_on_a_dead_channel() {
     let child = spawn_rand(common::simplest_handler);
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
 
     assert!(!child.signal_suspend());
     assert!(!child.signal_resume());

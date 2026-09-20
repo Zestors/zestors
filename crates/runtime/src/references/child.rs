@@ -26,7 +26,7 @@ use std::{fmt::Debug, pin::Pin, task::Poll, time::Duration};
 ///     while inbox.recv().await.is_some() {}
 ///     Ok(())
 /// });
-/// child.watch_init().await.unwrap();
+/// child.monitor_init().await.unwrap();
 ///
 /// let address = child.address().clone();
 /// child.detach(); // otherwise the `drop` below would abort it

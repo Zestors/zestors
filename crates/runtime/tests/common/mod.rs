@@ -6,8 +6,8 @@
 #![allow(dead_code)]
 //!
 //! Keep this deliberately small. Most tests can drive an actor to a known
-//! state with the crate's own deterministic primitives (`watch_init`,
-//! `watch_exit`, `ping`, or a `call` that acts as a barrier against
+//! state with the crate's own deterministic primitives (`monitor_init`,
+//! `monitor_exit`, `ping`, or a `call` that acts as a barrier against
 //! previously-cast messages — see the FIFO ordering guarantee documented on
 //! [`zestors_runtime::Channel`]'s single per-actor queue). Reach for
 //! `wait_for_*` only when there's genuinely no such signal to wait on; it
@@ -48,7 +48,7 @@ async fn wait_for<T: ActorRef>(
     actor: &T,
     check_for: impl FnMut(ActorStatus) -> Option<()> + Send + 'static,
 ) -> bool {
-    timeout(Duration::from_secs(5), actor.watch(check_for))
+    timeout(Duration::from_secs(5), actor.monitor(check_for))
         .await
         .is_ok()
 }

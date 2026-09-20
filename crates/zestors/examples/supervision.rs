@@ -212,7 +212,7 @@ async fn main() -> Result<(), Report> {
 
     tokio::spawn(node.run()).await??;
 
-    root_address.watch_init().await?;
+    root_address.monitor_init().await?;
 
     spawn_tasks_in_background(source);
 

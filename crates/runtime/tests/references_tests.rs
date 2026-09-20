@@ -67,7 +67,7 @@ async fn address_can_still_send_after_every_strong_ref_is_dropped() {
     let weak = child.address().clone();
 
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
     drop(child);
 
     assert!(weak.is_permanently_dead());
@@ -114,7 +114,7 @@ async fn respawn_reuses_the_name_and_registry_entry() {
     let child1 = strong.clone().spawn(common::simplest_handler).unwrap();
     assert_eq!(child1.name(), &name);
     child1.signal_shutdown();
-    child1.watch_exit().await.unwrap();
+    child1.monitor_exit().await.unwrap();
 
     let child2 = strong.spawn(common::simplest_handler).unwrap();
     assert_eq!(child2.name(), &name);
@@ -126,13 +126,13 @@ async fn respawn_reuses_the_name_and_registry_entry() {
 #[tokio::test]
 async fn upgrade_fails_once_permanently_dead_and_succeeds_otherwise() {
     let child = spawn_rand(common::simplest_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     let address = child.address().clone();
     assert!(address.upgrade().is_some());
 
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
     drop(child);
 
     assert!(address.is_permanently_dead());
@@ -172,7 +172,7 @@ async fn manual_init_suppresses_the_automatic_running_transition() {
     assert!(common::wait_for_running(&child).await);
 
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
 }
 
 #[tokio::test]
@@ -186,9 +186,9 @@ async fn register_initialized_is_idempotent() {
         Ok(())
     });
 
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
 }
 
 #[tokio::test]
@@ -226,7 +226,7 @@ async fn recv_event_stops_but_recv_event_always_keeps_waiting_once_exiting_and_e
         assert!(inbox.recv_event().await.is_none());
         Ok(())
     });
-    plain.watch_init().await.unwrap();
+    plain.monitor_init().await.unwrap();
     plain.signal_shutdown();
     assert!(
         tokio::time::timeout(Duration::from_secs(2), plain)
@@ -249,7 +249,7 @@ async fn recv_event_stops_but_recv_event_always_keeps_waiting_once_exiting_and_e
         );
         Ok(())
     });
-    always.watch_init().await.unwrap();
+    always.monitor_init().await.unwrap();
     always.signal_shutdown();
     assert!(
         tokio::time::timeout(Duration::from_secs(3), always)
@@ -267,13 +267,13 @@ async fn dropping_the_inbox_drains_its_queue() {
         inbox.recv().await;
         Ok(())
     });
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     for _ in 0..5 {
         child.cast(()).await.unwrap();
     }
 
-    let outcome = tokio::time::timeout(Duration::from_secs(2), child.watch_exit()).await;
+    let outcome = tokio::time::timeout(Duration::from_secs(2), child.monitor_exit()).await;
     assert!(
         outcome.is_ok(),
         "the actor should exit promptly even with unread messages left"
@@ -291,7 +291,7 @@ async fn task_box_wait_shutdown_returns_once_shutdown_is_seen() {
         Ok::<_, rootcause::Report>("done")
     });
 
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
     child.signal_shutdown();
 
     let result = tokio::time::timeout(Duration::from_secs(2), child).await;
@@ -309,7 +309,7 @@ async fn task_box_wait_shutdown_is_immediate_if_already_exiting() {
         task_box.wait_shutdown().await;
         Ok(())
     });
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
     child.signal_shutdown();
 
     let result = tokio::time::timeout(Duration::from_secs(2), child).await;
@@ -340,7 +340,7 @@ async fn run_until_shutdown_cancels_a_pending_future_on_shutdown() {
         Ok(())
     });
 
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
     child.signal_shutdown();
 
     let result = tokio::time::timeout(Duration::from_secs(2), child).await;
@@ -380,14 +380,14 @@ async fn dropping_an_attached_child_aborts_it() {
     })
     .unwrap();
     // This handler blocks on `pending()` before ever touching the inbox, so
-    // it never reaches `Running` - only `watch_exit`-style waits make sense
-    // here, not `watch_init`.
+    // it never reaches `Running` - only `monitor_exit`-style waits make sense
+    // here, not `monitor_init`.
     tokio::task::yield_now().await;
 
     let weak = child.address().clone();
     drop(child);
 
-    let outcome = tokio::time::timeout(Duration::from_secs(2), weak.watch_exit()).await;
+    let outcome = tokio::time::timeout(Duration::from_secs(2), weak.monitor_exit()).await;
     assert!(
         outcome.is_ok(),
         "dropping an attached Child should eventually abort its task"
@@ -407,7 +407,7 @@ async fn detach_prevents_abort_on_drop() {
         while inbox.recv().await.is_some() {}
         Ok(())
     });
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     let mut child = child;
     child.detach();
@@ -465,7 +465,7 @@ async fn shutdown_abort_gives_a_slow_actor_a_grace_period_then_aborts() {
 #[tokio::test]
 async fn shutdown_abort_returns_ok_for_a_cooperative_actor() {
     let child = spawn_rand(common::simplest_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     let result = child.shutdown_abort(Duration::from_secs(2)).await;
     assert!(result.is_ok());
@@ -474,7 +474,7 @@ async fn shutdown_abort_returns_ok_for_a_cooperative_actor() {
 #[tokio::test]
 async fn into_parts_and_into_handle_hand_back_ownership() {
     let child = spawn_rand(common::simplest_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     let (handle, strong) = child.into_parts();
     strong.signal_shutdown();
@@ -489,7 +489,7 @@ async fn into_parts_and_into_handle_hand_back_ownership() {
 #[tokio::test]
 async fn into_dyn_widens_to_an_accepted_subset() {
     let child = spawn_rand(ping_pong_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     let address = child.address().clone();
     let dyn_address = address.into_dyn::<(Ping,)>();
@@ -503,7 +503,7 @@ async fn into_dyn_widens_to_an_accepted_subset() {
 #[tokio::test]
 async fn into_dyn_checked_fails_for_a_message_the_interface_does_not_accept() {
     let child = spawn_rand(ping_pong_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     let address = child.address().clone();
     let result = address.into_dyn_checked::<(u8,)>();
@@ -519,7 +519,7 @@ async fn into_dyn_checked_fails_for_a_message_the_interface_does_not_accept() {
 #[tokio::test]
 async fn downcast_round_trips_to_the_concrete_interface() {
     let child = spawn_rand(ping_pong_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     let dyn_address = child.address().clone().into_dyn::<(Ping, Pong)>();
 
@@ -541,7 +541,7 @@ async fn downcast_round_trips_to_the_concrete_interface() {
 #[tokio::test]
 async fn as_dyn_and_downcast_ref_convert_by_reference() {
     let child = spawn_rand(ping_pong_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     let address = child.address();
     let as_dyn: &Address<Dyn<(Ping,)>> = address.as_dyn::<(Ping,)>();

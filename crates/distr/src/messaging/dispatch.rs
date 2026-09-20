@@ -1,7 +1,7 @@
 //! Delivers a message to a local actor, knowing its type.
 
 use super::{Encode, RemoteError, RemoteMessage, ops, wire::Wire};
-use crate::{Cluster, MessageId};
+use crate::{Cluster, MessageId, NodeName};
 use bytes::Bytes;
 use indexmap::IndexMap;
 use std::{any::TypeId, future::Future, marker::PhantomData, pin::Pin, sync::Arc};
@@ -119,11 +119,13 @@ pub(super) struct Typed<M>(pub(super) PhantomData<fn() -> M>);
 /// An operation on an actor, see [`super::ops`]: handled by the node, not by
 /// the actor's mailbox.
 pub(super) trait Operation: RemoteMessage + Send + 'static {
-    /// Carries the operation out on `address`.
+    /// Carries the operation out on `address`. `peer` is the node that asked,
+    /// which an operation outliving its message needs in order to be called off.
     fn run(
         self,
         address: Address,
         cluster: Cluster,
+        peer: NodeName,
     ) -> BoxFuture<Result<Self::Output, RemoteError>>;
 }
 
@@ -142,7 +144,11 @@ impl<M: Operation> Handler for Builtin<M> {
             let msg = wire
                 .scope(|| M::decode(payload))
                 .map_err(|error| RemoteError::Decode(error.to_string()))?;
-            let running = msg.run(address, wire.session().cluster().clone());
+            let running = msg.run(
+                address,
+                wire.session().cluster().clone(),
+                wire.peer().clone(),
+            );
             if !reply {
                 tokio::spawn(async move {
                     let _ = running.await;

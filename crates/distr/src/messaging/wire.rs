@@ -52,6 +52,11 @@ impl Wire {
         }
     }
 
+    /// The node this message came from, or is going to.
+    pub(super) fn peer(&self) -> &NodeName {
+        &self.peer
+    }
+
     pub(super) fn session(&self) -> &Session {
         &self.session
     }

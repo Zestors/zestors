@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use zestors::{
-    distr::{ClusterConfig, ClusterNode, GlobalName, RemoteAccepts, RemoteRequest, Seed},
+    distr::{ClusterAccepts, ClusterConfig, ClusterNode, GlobalName, RemoteRequest, Seed},
     distr_quic::{Quic, Tls},
     interface::{Envelope, Interface, Message},
     prelude::*,
@@ -123,6 +123,6 @@ async fn main() {
 /// Shuts a node down through its root supervisor, once that takes signals: it
 /// is initializing or running. Sooner, they are dropped.
 async fn stop(root: &zestors::runtime::Address<zestors::supervisor::SupervisorInterface>) {
-    root.watch_accepts_messages().await;
+    root.monitor_accepts_messages().await;
     root.signal_shutdown();
 }

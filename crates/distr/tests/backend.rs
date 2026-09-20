@@ -193,7 +193,7 @@ fn config(hub: &Hub, name: &str, n: u8) -> ClusterConfig {
 /// is initializing or running.
 async fn stop(root: &zestors::runtime::Address<zestors_supervisor::SupervisorInterface>) {
     use zestors::runtime::prelude::*;
-    root.watch_accepts_messages().await;
+    root.monitor_accepts_messages().await;
     root.signal_shutdown();
 }
 

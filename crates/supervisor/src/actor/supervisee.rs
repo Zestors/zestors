@@ -131,7 +131,7 @@ impl Supervisee {
                 (SuperviseeState::dead(), StopOutcome::Cancelled)
             }
 
-            // If the supervisee is still initializing, the init-watch future
+            // If the supervisee is still initializing, the init-monitor future
             // no longer matters; initiate a shutdown same as if it were alive.
             SuperviseeState::Initializing { child, .. } | SuperviseeState::Alive { child } => {
                 let child = child.into_shutdown(self.spec.cfg().abort_timeout);
@@ -389,7 +389,7 @@ struct InitFuture(BoxFuture<'static, Result<(), ExitStatus>>);
 impl InitFuture {
     fn new(child: &Child) -> Self {
         let address = child.address().clone();
-        InitFuture(Box::pin(async move { address.watch_init().await }))
+        InitFuture(Box::pin(async move { address.monitor_init().await }))
     }
 }
 

@@ -4,7 +4,7 @@
 [![Documentation](https://docs.rs/zestors-supervisor/badge.svg)](https://docs.rs/zestors-supervisor)
 
 An OTP-style `Supervisor` actor for [`zestors`](https://crates.io/crates/zestors):
-starts and watches a set of children, restarting them according to a
+starts and monitors a set of children, restarting them according to a
 restart strategy. `Node` runs a root `Supervisor` as an entire program,
 shutting it down gracefully on Ctrl+C/SIGTERM.
 

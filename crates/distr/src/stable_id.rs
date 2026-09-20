@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Gives a message type a stable, globally unique [`Id`].
+/// Gives a message type a stable, globally unique [`MessageId`].
 ///
 /// Derive it with `#[derive(StableId)]` and `#[msg(id = "<uuid>")]`.
 #[allow(non_upper_case_globals)]
@@ -19,7 +19,7 @@ impl MessageId {
         Self(id)
     }
 
-    /// Creates a [`Id`] from the raw 128 bits of a [`Uuid`].
+    /// Creates a [`MessageId`] from the raw 128 bits of a [`Uuid`].
     pub const fn from_u128(id: u128) -> Self {
         Self(Uuid::from_u128(id))
     }

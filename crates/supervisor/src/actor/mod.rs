@@ -21,7 +21,7 @@ use zestors_supervision::{
 };
 
 /// A supervisor actor: owns a set of [`ChildSpec`] supervisees, starts them,
-/// watches them, and restarts them according to its [`SupervisionStrategy`]
+/// monitors them, and restarts them according to its [`SupervisionStrategy`]
 /// and restart budget when they exit.
 ///
 /// Constructed declaratively from a [`SupervisorBlueprint`] via

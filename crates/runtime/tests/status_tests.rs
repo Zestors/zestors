@@ -1,5 +1,5 @@
 //! Tests for `ActorStatus`/`ExitStatus` (src/status.rs) and the status-derived
-//! parts of `ActorOps` (src/ops.rs): `watch`/`watch_init`/`watch_exit`,
+//! parts of `ActorOps` (src/ops.rs): `monitor`/`monitor_init`/`monitor_exit`,
 //! `snapshot`, `uptime`, and the reference-count-aware `is_permanently_dead`.
 
 use std::time::Duration;
@@ -97,7 +97,7 @@ async fn full_lifecycle_transitions_in_order() {
     assert_eq!(child.status(), ActorStatus::Initializing);
 
     // The first `recv` inside `simplest_handler` completes initialization.
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
     assert_eq!(child.status(), ActorStatus::Running);
 
     assert!(child.signal_suspend());
@@ -112,7 +112,7 @@ async fn full_lifecycle_transitions_in_order() {
     // `Exiting` is transient (it may already have flipped to `Exited` by the
     // time we look), but it must never be skipped backwards into anything
     // else, so we only assert the terminal state here.
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
     assert_eq!(child.status(), ActorStatus::Exited(ExitStatus::Normal));
 }
 
@@ -123,10 +123,10 @@ async fn exit_status_reflects_panic() {
         panic!("intentional panic for exit-status test");
     });
 
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
     let _ = child.cast(()).await;
 
-    let outcome = child.watch_exit().await;
+    let outcome = child.monitor_exit().await;
     assert_eq!(outcome, Err(ExitError::Panicked));
     assert_eq!(child.status(), ActorStatus::Exited(ExitStatus::Panicked));
 }
@@ -138,10 +138,10 @@ async fn exit_status_reflects_unhandled_error() {
         Err(rootcause::report!("handler error"))
     });
 
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
     let _ = child.cast(()).await;
 
-    let outcome = child.watch_exit().await;
+    let outcome = child.monitor_exit().await;
     assert_eq!(outcome, Err(ExitError::UnhandledError));
     assert_eq!(
         child.status(),
@@ -154,31 +154,31 @@ async fn watch_init_reports_early_exit_instead_of_hanging() {
     let child: zestors_runtime::Child<(), ()> =
         spawn_rand(|_inbox: Inbox<()>| async { panic!("dies before first recv") });
 
-    let outcome = child.watch_init().await;
+    let outcome = child.monitor_init().await;
     assert_eq!(outcome, Err(ExitStatus::Panicked));
 }
 
 #[tokio::test]
 async fn watch_resolves_for_an_already_satisfied_condition() {
     let child = spawn_rand(common::simplest_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     // The status is already `Running`, so this must resolve without ever
     // observing a status change.
     let already_true = child
-        .watch(|status| status.is_running().then_some(()))
+        .monitor(|status| status.is_running().then_some(()))
         .await;
     assert_eq!(already_true, ());
 
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
 }
 
 #[tokio::test]
 async fn watch_never_resolves_for_an_unreachable_condition() {
     let child = spawn_rand(common::simplest_handler);
 
-    let timed_out = tokio::time::timeout(Duration::from_millis(100), child.watch(|_| None::<()>))
+    let timed_out = tokio::time::timeout(Duration::from_millis(100), child.monitor(|_| None::<()>))
         .await
         .is_err();
     assert!(timed_out);
@@ -193,7 +193,7 @@ async fn watch_never_resolves_for_an_unreachable_condition() {
 #[tokio::test]
 async fn permanently_dead_requires_every_strong_ref_to_be_gone() {
     let child = spawn_rand(common::simplest_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
     assert!(!child.is_permanently_dead());
 
     let strong = child
@@ -202,7 +202,7 @@ async fn permanently_dead_requires_every_strong_ref_to_be_gone() {
     let weak = child.address().clone();
 
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
 
     // Dead, but `child` and `strong` both still hold a strong reference.
     assert!(weak.is_dead());
@@ -225,7 +225,7 @@ async fn permanently_dead_requires_every_strong_ref_to_be_gone() {
 #[tokio::test]
 async fn snapshot_reports_name_status_and_empty_queues() {
     let child = spawn_rand(common::simplest_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     let snapshot = child.snapshot();
     assert_eq!(&snapshot.name, child.name());
@@ -236,7 +236,7 @@ async fn snapshot_reports_name_status_and_empty_queues() {
     assert!(snapshot.exits.is_empty());
 
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
 }
 
 #[tokio::test]
@@ -268,7 +268,7 @@ async fn spawn_and_exit_history_are_bounded_and_ordered() {
     for _ in 0..10 {
         let child = strong.clone().spawn(common::simplest_handler).unwrap();
         child.signal_shutdown();
-        child.watch_exit().await.unwrap();
+        child.monitor_exit().await.unwrap();
         last_child = Some(child);
     }
     let child = last_child.unwrap();
@@ -301,12 +301,12 @@ async fn spawn_and_exit_history_are_bounded_and_ordered() {
 #[tokio::test]
 async fn uptime_counts_from_last_spawn_and_keeps_counting_after_exit() {
     let child = spawn_rand(common::simplest_handler);
-    child.watch_init().await.unwrap();
+    child.monitor_init().await.unwrap();
 
     let uptime_while_running = child.uptime().expect("spawned, so uptime is Some");
 
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
 
     let uptime_after_exit = child.uptime().expect("uptime keeps counting after exit");
     assert!(uptime_after_exit >= uptime_while_running);

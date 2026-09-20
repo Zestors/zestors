@@ -36,7 +36,7 @@ pub trait ActorRef {
 ///     Ok(())
 /// });
 ///
-/// child.watch_init().await.unwrap();
+/// child.monitor_init().await.unwrap();
 /// assert!(child.status().is_running());
 ///
 /// let snapshot = child.snapshot();
@@ -44,7 +44,7 @@ pub trait ActorRef {
 /// assert_eq!(snapshot.msg_len, 0);
 ///
 /// child.signal_shutdown();
-/// let outcome = child.watch_exit().await;
+/// let outcome = child.monitor_exit().await;
 /// assert!(outcome.is_ok());
 /// assert!(child.is_dead());
 /// # }
@@ -70,7 +70,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     ///     while inbox.recv().await.is_some() {}
     ///     Ok(())
     /// });
-    /// child.watch_init().await.unwrap();
+    /// child.monitor_init().await.unwrap();
     ///
     /// assert!(child.cast_dyn(()).await.is_ok());
     /// assert!(matches!(child.cast_dyn(7u8).await, Err(CastDynError::NotAccepted(7))));
@@ -175,11 +175,30 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// Waits until `check_for` returns `Some` for the actor's [`ActorStatus`].
     /// Checked once against the current status, and then again after every
     /// subsequent status change, until `check_for` returns `Some`.
-    fn watch<T>(
+    fn monitor<T>(
         &self,
         check_for: impl FnMut(ActorStatus) -> Option<T> + Send,
     ) -> impl Future<Output = T> + Send {
-        self.channel().watch(check_for)
+        self.channel().monitor(check_for)
+    }
+
+    /// Waits until the actor's status is one of `kinds`, and returns it — with
+    /// the exit reason, if it exited.
+    ///
+    /// Like [`ActorOps::monitor`], the current status counts: if it already
+    /// matches, this returns at once. Unlike `monitor` it names the statuses as
+    /// data rather than as a closure, which is what lets the same question be
+    /// asked of an actor on another node.
+    ///
+    /// Never returns if `kinds` is empty, or if the actor never reaches any of
+    /// them; include [`ActorStatusKind::Exited`] to be sure of an answer.
+    fn monitor_any(&self, kinds: &[ActorStatusKind]) -> impl Future<Output = ActorStatus> + Send {
+        self.monitor(|status| {
+            kinds
+                .iter()
+                .any(|kind| kind.matches(&status))
+                .then_some(status)
+        })
     }
 
     /// Waits until the actor reaches [`ActorStatus::Running`] for the first
@@ -191,11 +210,11 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// by default - that default is indistinguishable from a genuine exit by
     /// status alone, so this also checks whether a spawn has ever actually
     /// happened before treating an `Exited` status as a real one to report.
-    fn watch_init(&self) -> impl Future<Output = Result<(), ExitStatus>> + Send
+    fn monitor_init(&self) -> impl Future<Output = Result<(), ExitStatus>> + Send
     where
         Self: Sync,
     {
-        self.watch(move |status| match status {
+        self.monitor(move |status| match status {
             ActorStatus::Running => Some(Ok(())),
             ActorStatus::Exited(exit) if self.last_spawned_at().is_some() => Some(Err(exit)),
             _ => None,
@@ -203,8 +222,8 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     }
 
     /// Waits until the actor reaches [`ActorStatus::Running`] for the first time.
-    fn watch_running(&self) -> impl Future<Output = ()> + Send {
-        self.watch(|status| match status {
+    fn monitor_running(&self) -> impl Future<Output = ()> + Send {
+        self.monitor(|status| match status {
             ActorStatus::Running => return Some(()),
             _ => None,
         })
@@ -215,18 +234,18 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// [`ActorStatus::Suspended`], see [`ActorStatus::accepts_messages`]. Sooner
     /// than that, a signal is rejected and dropped.
     ///
-    /// Unlike [`ActorOps::watch_running`], this doesn't wait for the actor to
+    /// Unlike [`ActorOps::monitor_running`], this doesn't wait for the actor to
     /// start receiving, so it also returns for an actor that is still
     /// initializing. Never returns for an actor that exits without ever
     /// accepting a message.
-    fn watch_accepts_messages(&self) -> impl Future<Output = ()> + Send {
-        self.watch(|status| status.accepts_messages().then_some(()))
+    fn monitor_accepts_messages(&self) -> impl Future<Output = ()> + Send {
+        self.monitor(|status| status.accepts_messages().then_some(()))
     }
 
     /// Waits until the actor reaches [`ActorStatus::Exited`], returning the
     /// outcome as a `Result`.
-    fn watch_exit(&self) -> impl Future<Output = Result<(), ExitError>> + Send {
-        self.watch(|status| match status {
+    fn monitor_exit(&self) -> impl Future<Output = Result<(), ExitError>> + Send {
+        self.monitor(|status| match status {
             ActorStatus::Exited(exit) => return Some(exit.into_result()),
             _ => None,
         })

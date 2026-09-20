@@ -86,9 +86,17 @@ pub(super) async fn serve(
     mut members: broadcast::Receiver<ClusterEvent>,
 ) {
     let pending = running.pending.clone();
+    let monitors = cluster.clone();
     let mut router = Router {
         session: Session::new(cluster, running),
         routes: HashMap::new(),
+    };
+    // Losing a node ends two different things, and they are easy to confuse:
+    // the calls *this* node made *to* it, which `fail_node` gives up on, and the
+    // monitors *it* asked *of* this node, which nothing else would ever call off.
+    let lost = |node: &NodeName| {
+        pending.fail_node(node);
+        monitors.messaging().monitors.drop_node(node);
     };
 
     loop {
@@ -98,7 +106,7 @@ pub(super) async fn serve(
                 None => break,
             },
             event = peers.recv() => match event {
-                Ok(PeerEvent::Disconnected { node, .. }) => pending.fail_node(&node),
+                Ok(PeerEvent::Disconnected { node, .. }) => lost(&node),
                 Ok(_) => {}
                 // Some reports were missed; calls that depended on them run out of time.
                 Err(broadcast::error::RecvError::Lagged(_)) => {
@@ -108,7 +116,7 @@ pub(super) async fn serve(
             },
             event = members.recv() => match event {
                 Ok(ClusterEvent::Left(member) | ClusterEvent::Failed(member)) => {
-                    pending.fail_node(&member.name);
+                    lost(&member.name);
                 }
                 Ok(_) => {}
                 Err(broadcast::error::RecvError::Lagged(_)) => {

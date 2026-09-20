@@ -42,7 +42,7 @@ async fn main() {
 
     child.address().cast(10u32).await.unwrap();
     child.address().signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
 
     // test().await;
 }

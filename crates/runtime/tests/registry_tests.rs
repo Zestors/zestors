@@ -54,7 +54,7 @@ async fn contains_reflects_registration_and_removal() {
     assert!(Registry::local().contains(&name));
 
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
     drop(child);
 
     assert!(!Registry::local().contains(&name));
@@ -112,7 +112,7 @@ async fn spawn_auto_registers_and_exit_plus_drop_auto_deregisters() {
     assert!(Registry::local().contains(&name));
 
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
     // Still registered: `Child` itself is a strong reference.
     assert!(Registry::local().contains(&name));
 
@@ -155,7 +155,7 @@ async fn a_rejected_duplicate_spawn_does_not_deregister_the_original() {
     assert!(!child.is_dead());
 
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
     drop(child);
     assert!(!Registry::local().contains(&name));
 }
@@ -165,7 +165,7 @@ async fn name_can_be_reused_once_the_previous_actor_is_fully_gone() {
     let name = common::test_name("name_reuse");
     let child1 = spawn(name.clone(), common::simplest_handler).unwrap();
     child1.signal_shutdown();
-    child1.watch_exit().await.unwrap();
+    child1.monitor_exit().await.unwrap();
     drop(child1);
 
     let child2 = spawn(name.clone(), common::simplest_handler);
@@ -253,7 +253,7 @@ async fn a_names_address_mirrors_the_registry() {
     );
 
     child.signal_shutdown();
-    child.watch_exit().await.unwrap();
+    child.monitor_exit().await.unwrap();
     drop(child);
 
     assert!(name.address().is_none());
@@ -281,9 +281,9 @@ async fn a_names_address_mirrors_the_registry() {
 //                 Ok(())
 //             }
 //         });
-//         child.watch_init().await.unwrap();
+//         child.monitor_init().await.unwrap();
 //         child.signal_shutdown();
-//         let child_exit = child.watch_exit().await;
+//         let child_exit = child.monitor_exit().await;
 //         let _ = tx.send(child_exit.is_ok());
 
 //         while inbox.recv().await.is_some() {}
@@ -297,7 +297,7 @@ async fn a_names_address_mirrors_the_registry() {
 
 //     parent.signal_shutdown();
 //     assert!(
-//         parent.watch_exit().await.is_ok(),
+//         parent.monitor_exit().await.is_ok(),
 //         "the parent's own assertions must have held too"
 //     );
 // }

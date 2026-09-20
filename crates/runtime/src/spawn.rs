@@ -146,7 +146,7 @@ impl<T: Context> StrongAddress<T> {
     /// })
     /// .unwrap();
     /// first.signal_shutdown();
-    /// first.watch_exit().await.unwrap();
+    /// first.monitor_exit().await.unwrap();
     ///
     /// // The first process is gone, but the name and registry entry live on,
     /// // so a second process can now be spawned on the very same channel.
