@@ -121,13 +121,13 @@ impl<T: Send + 'static> RemoteMessageKind<T> for Call {
 )]
 pub trait RemoteSet {
     /// The id each message in the set goes by on the wire.
-    const MESSAGE_IDS: &'static [MessageId];
+    const REMOTE_IDS: &'static [MessageId];
 }
 
 macro_rules! impl_remote_set {
     ($($member:ident),*) => {
         impl<$($member: RemoteMessage,)*> RemoteSet for ($($member,)*) {
-            const MESSAGE_IDS: &'static [MessageId] = &[$($member::Id,)*];
+            const REMOTE_IDS: &'static [MessageId] = &[$($member::Id,)*];
         }
     };
 }

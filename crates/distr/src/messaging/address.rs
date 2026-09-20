@@ -168,17 +168,17 @@ impl<C: Context> ClusterAddress<C> {
 impl<C: Context> ClusterActorRef for ClusterAddress<C> {
     type Ctx = C;
 
-    fn route(&self) -> ClusterActorRouteRef<'_, C> {
+    fn as_address(&self) -> ClusterAddressRef<'_, C> {
         match self {
-            ClusterAddress::Local(address) => ClusterActorRouteRef::Local(address),
-            ClusterAddress::Remote(address) => ClusterActorRouteRef::Remote(address),
+            ClusterAddress::Local(address) => ClusterAddressRef::Local(address),
+            ClusterAddress::Remote(address) => ClusterAddressRef::Remote(address),
         }
     }
 
-    fn route_mut(&mut self) -> ClusterActorRouteMut<'_, C> {
+    fn as_address_mut(&mut self) -> ClusterAddressMut<'_, C> {
         match self {
-            ClusterAddress::Local(address) => ClusterActorRouteMut::Local(address),
-            ClusterAddress::Remote(address) => ClusterActorRouteMut::Remote(address),
+            ClusterAddress::Local(address) => ClusterAddressMut::Local(address),
+            ClusterAddress::Remote(address) => ClusterAddressMut::Remote(address),
         }
     }
 }
@@ -216,7 +216,7 @@ impl<C: Context> From<RemoteAddress<C>> for ClusterAddress<C> {
 /// How a [`RemoteActorRef`] reaches its actor. An implementation detail of
 /// [`RemoteAccepts`](super::RemoteAccepts) and [`RemoteActorOps`].
 #[doc(hidden)]
-pub enum ClusterActorRouteRef<'a, C: Context> {
+pub enum ClusterAddressRef<'a, C: Context> {
     /// An actor on this node.
     Local(&'a LocalAddress<C>),
     /// An actor on another node.
@@ -224,7 +224,7 @@ pub enum ClusterActorRouteRef<'a, C: Context> {
 }
 
 #[doc(hidden)]
-pub enum ClusterActorRouteMut<'a, C: Context> {
+pub enum ClusterAddressMut<'a, C: Context> {
     /// An actor on this node.
     Local(&'a mut LocalAddress<C>),
     /// An actor on another node.
@@ -242,30 +242,32 @@ pub trait ClusterActorRef: Sync {
 
     /// How the actor is reached.
     #[doc(hidden)]
-    fn route(&self) -> ClusterActorRouteRef<'_, Self::Ctx>;
-    fn route_mut(&mut self) -> ClusterActorRouteMut<'_, Self::Ctx>;
+    fn as_address(&self) -> ClusterAddressRef<'_, Self::Ctx>;
+
+    #[doc(hidden)]
+    fn as_address_mut(&mut self) -> ClusterAddressMut<'_, Self::Ctx>;
 }
 
 impl<C: Context> ClusterActorRef for RemoteAddress<C> {
     type Ctx = C;
 
-    fn route(&self) -> ClusterActorRouteRef<'_, C> {
-        ClusterActorRouteRef::Remote(self)
+    fn as_address(&self) -> ClusterAddressRef<'_, C> {
+        ClusterAddressRef::Remote(self)
     }
 
-    fn route_mut(&mut self) -> ClusterActorRouteMut<'_, C> {
-        ClusterActorRouteMut::Remote(self)
+    fn as_address_mut(&mut self) -> ClusterAddressMut<'_, C> {
+        ClusterAddressMut::Remote(self)
     }
 }
 
 impl<C: Context> ClusterActorRef for LocalAddress<C> {
     type Ctx = C;
 
-    fn route(&self) -> ClusterActorRouteRef<'_, C> {
-        ClusterActorRouteRef::Local(self)
+    fn as_address(&self) -> ClusterAddressRef<'_, C> {
+        ClusterAddressRef::Local(self)
     }
 
-    fn route_mut(&mut self) -> ClusterActorRouteMut<'_, C> {
-        ClusterActorRouteMut::Local(self)
+    fn as_address_mut(&mut self) -> ClusterAddressMut<'_, C> {
+        ClusterAddressMut::Local(self)
     }
 }

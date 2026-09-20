@@ -66,7 +66,7 @@ mod request;
 mod send;
 mod wire;
 
-pub use address::{ClusterActorRef, ClusterAddress, LocalAddress, RemoteAddress, ClusterActorRouteRef};
+pub use address::{ClusterActorRef, ClusterAddress, LocalAddress, RemoteAddress, ClusterAddressRef};
 #[cfg(feature = "auto-register")]
 #[doc(hidden)]
 pub use auto_register::{IfNot, IfRemote, Probe, Registration};

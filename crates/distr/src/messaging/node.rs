@@ -117,7 +117,7 @@ impl Cluster {
             let address = Registry::local().get_typed::<I>(target.name())?;
             return Ok(self.local_address(address));
         }
-        self.resolve(target, <I::Set as RemoteSet>::MESSAGE_IDS)
+        self.resolve(target, <I::Set as RemoteSet>::REMOTE_IDS)
             .await
             .map(ClusterAddress::Remote)
     }
@@ -135,7 +135,7 @@ impl Cluster {
             let address = Registry::local().get_dyn::<S>(target.name())?;
             return Ok(self.local_address(address));
         }
-        self.resolve(target, S::MESSAGE_IDS)
+        self.resolve(target, S::REMOTE_IDS)
             .await
             .map(ClusterAddress::Remote)
     }

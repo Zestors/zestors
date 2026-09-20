@@ -71,5 +71,5 @@ pub use messaging::{
     AddressError, CastFailure, ClusterActorOps, ClusterActorRef, ClusterAddress, Decode,
     DecodeError, Encode, EncodeError, LocalAddress, RemoteAccepts, RemoteAddress, RemoteCallError,
     RemoteCallOptions, RemoteCastError, RemoteError, RemoteInfo, RemoteMessage, RemoteOpError,
-    RemoteReceipt, RemoteReply, RemoteReplyError, RemoteRequest, RemoteSet, ClusterActorRouteRef,
+    RemoteReceipt, RemoteReply, RemoteReplyError, RemoteRequest, RemoteSet, ClusterAddressRef,
 };

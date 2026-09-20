@@ -2,7 +2,7 @@
 //! to an actor on another node or on this one.
 
 use super::{
-    CastFailure, ClusterActorRef, ClusterActorRouteRef, Decode, RemoteAddress, RemoteCallError,
+    CastFailure, ClusterActorRef, ClusterAddressRef, Decode, RemoteAddress, RemoteCallError,
     RemoteCastError, RemoteMessage, RemoteOpError, RemoteReceipt, RemoteReply,
     frame::Frame,
     message::RemoteMessageKind,
@@ -300,9 +300,9 @@ where
         msg: M,
         options: RemoteCallOptions,
     ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
-        match self.route() {
-            ClusterActorRouteRef::Remote(address) => address.cast_remote(msg, options).await,
-            ClusterActorRouteRef::Local(local) => cast(local.address(), msg, options).await,
+        match self.as_address() {
+            ClusterAddressRef::Remote(address) => address.cast_remote(msg, options).await,
+            ClusterAddressRef::Local(local) => cast(local.address(), msg, options).await,
         }
     }
 
@@ -311,9 +311,9 @@ where
         msg: M,
         options: RemoteCallOptions,
     ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
-        match self.route() {
-            ClusterActorRouteRef::Remote(address) => address.try_cast_remote(msg, options),
-            ClusterActorRouteRef::Local(local) => try_cast(local.address(), msg, options),
+        match self.as_address() {
+            ClusterAddressRef::Remote(address) => address.try_cast_remote(msg, options),
+            ClusterAddressRef::Local(local) => try_cast(local.address(), msg, options),
         }
     }
 }
