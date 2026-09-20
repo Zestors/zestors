@@ -73,6 +73,13 @@ impl ClusterConfig {
     /// config.auto_register()
     /// # }
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// If two of the collected types share a
+    /// [`MessageId`](crate::MessageId), as
+    /// [`ClusterConfig::register`] does. Collecting a type that was also
+    /// registered by hand is not that, and only logs a warning.
     pub fn auto_register(mut self) -> Self {
         for registration in inventory::iter::<Registration> {
             (registration.register)(&mut self.handlers);

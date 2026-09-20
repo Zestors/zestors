@@ -126,7 +126,7 @@ impl<C: Context> RemoteAddress<C> {
     /// The monitor lives on the actor's node until then, so it has to be called
     /// off if this future is dropped — see [`Demonitor`]. It is sent with no
     /// deadline; the node going away is what ends it otherwise.
-    pub(super) async fn watch_remote(
+    pub(super) async fn monitor_remote(
         &self,
         kinds: &[ActorStatusKind],
     ) -> Result<ActorStatus, ClusterOpError> {

@@ -104,6 +104,15 @@ not an oversight — it closes a window where a node could serve before its hand
 and it is what lets `Handlers` be a plain `IndexMap` with no locking
 ([dispatch.rs](src/messaging/dispatch.rs)). Do not add a `Cluster::register` back.
 
+Because it is build-time, a `MessageId` claimed by two types **panics** while the node is
+being built, in `Handlers::claim`. That is deliberate and not too strict: an id names a
+message to the whole cluster, so two types under one id means arriving bytes are decoded
+as whichever type won the `insert` — a wrong message delivered silently, or a decode
+failure, with nothing in the build to point at the cause. This happened during
+development, between two built-in ops, and cost an afternoon. Registering the *same* type
+twice is not that, and only logs a warning: it normally means a message registered by hand
+as well as by `auto_register`.
+
 ## 5. Open issues, roughly by value
 
 ### Resolved — cross-node monitors

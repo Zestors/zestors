@@ -302,7 +302,7 @@ async fn within<T>(future: impl std::future::Future<Output = T>) -> T {
 
 /// Waits until node-b is holding exactly `count` monitors. Sleeps rather than
 /// spinning, so that paused time keeps advancing and `within` can give up.
-async fn watches_on_b(pair: &Pair, count: usize) {
+async fn monitors_on_b(pair: &Pair, count: usize) {
     while pair.b.cluster.monitors_held() != count {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -541,7 +541,7 @@ async fn a_call_fails_when_the_node_leaves() {
 
 /// Monitoring an actor on this node: the status it already has counts.
 #[tokio::test(start_paused = true)]
-async fn a_local_watch_returns_the_status_it_is_already_in() {
+async fn a_local_monitor_returns_the_status_it_is_already_in() {
     let pair = Pair::start().await;
     let worker = worker("monitor-local", Log::default());
     within(worker.monitor_running()).await;
@@ -558,7 +558,7 @@ async fn a_local_watch_returns_the_status_it_is_already_in() {
 /// The point of the whole thing: an actor on another node exiting is news that
 /// arrives, rather than something to poll for.
 #[tokio::test(start_paused = true)]
-async fn watching_an_actor_on_another_node_reports_its_exit() {
+async fn monitoring_an_actor_on_another_node_reports_its_exit() {
     let pair = Pair::start().await;
     let worker = worker("monitor-exit", Log::default());
     let remote = remote_on_b(&pair, "monitor-exit").await;
@@ -573,7 +573,7 @@ async fn watching_an_actor_on_another_node_reports_its_exit() {
 /// A monitor outlives the call timeout. It is sent as a call, so without care it
 /// would give up after `call_timeout` and report an exit that never happened.
 #[tokio::test(start_paused = true)]
-async fn a_watch_does_not_expire_with_the_call_timeout() {
+async fn a_monitor_does_not_expire_with_the_call_timeout() {
     let pair = Pair::start().await;
     let worker = worker("monitor-patient", Log::default());
     let remote = remote_on_b(&pair, "monitor-patient").await;
@@ -592,7 +592,7 @@ async fn a_watch_does_not_expire_with_the_call_timeout() {
 
 /// Losing the node is an answer too: OTP calls this `noconnection`.
 #[tokio::test(start_paused = true)]
-async fn watching_an_actor_on_a_node_that_is_lost_fails_the_watch() {
+async fn monitoring_an_actor_on_a_node_that_is_lost_fails_the_monitor() {
     let pair = Pair::start().await;
     let _worker = worker("monitor-lost", Log::default());
     let remote = remote_on_b(&pair, "monitor-lost").await;
@@ -609,32 +609,32 @@ async fn watching_an_actor_on_a_node_that_is_lost_fails_the_watch() {
 /// Dropping a monitor has to reach the node holding it, or it keeps the monitor
 /// and the task behind it for as long as the actor's status never changes.
 #[tokio::test(start_paused = true)]
-async fn dropping_a_watch_calls_it_off_on_the_other_node() {
+async fn dropping_a_monitor_calls_it_off_on_the_other_node() {
     let pair = Pair::start().await;
     let _worker = worker("monitor-dropped", Log::default());
     let remote = remote_on_b(&pair, "monitor-dropped").await;
 
     let monitoring = tokio::spawn(async move { remote.monitor_exit().await });
-    within(watches_on_b(&pair, 1)).await;
+    within(monitors_on_b(&pair, 1)).await;
 
     monitoring.abort();
-    within(watches_on_b(&pair, 0)).await;
+    within(monitors_on_b(&pair, 0)).await;
 }
 
 /// The monitoring node dying is the one way a monitor ends with no message to say
 /// so. The node holding it has to notice by itself, or it keeps it for good.
 #[tokio::test(start_paused = true)]
-async fn losing_the_watching_node_drops_the_watches_it_asked_for() {
+async fn losing_the_monitoring_node_drops_the_monitors_it_asked_for() {
     let pair = Pair::start().await;
     let _worker = worker("monitor-orphan", Log::default());
     let remote = remote_on_b(&pair, "monitor-orphan").await;
 
-    let _watching = tokio::spawn(async move { remote.monitor_exit().await });
-    within(watches_on_b(&pair, 1)).await;
+    let _monitoring = tokio::spawn(async move { remote.monitor_exit().await });
+    within(monitors_on_b(&pair, 1)).await;
 
     // node-a is gone without ever calling the monitor off.
     pair.a.task.abort();
-    within(watches_on_b(&pair, 0)).await;
+    within(monitors_on_b(&pair, 0)).await;
 }
 
 #[tokio::test(start_paused = true)]

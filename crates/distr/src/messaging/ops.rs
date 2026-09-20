@@ -12,13 +12,12 @@
 use super::{
     ClusterActorRef, ClusterAddressRef, ClusterOpError, ClusterReplyError, RemoteError,
     RemoteMessage,
-    dispatch::{Builtin, Handler, Operation},
+    dispatch::{Handlers, Operation},
 };
 use crate::{Cluster, MessageId, NodeName, StableId};
-use indexmap::IndexMap;
 use jiff::Zoned;
 use serde::{Deserialize, Serialize};
-use std::{future::Future, marker::PhantomData, sync::Arc};
+use std::future::Future;
 use zestors_interface::Message;
 use zestors_runtime::{
     ActorStatus, ActorStatusKind, Address, AsDyn, ChannelSnapshot, ExitStatus, Name, Signal,
@@ -216,18 +215,17 @@ impl Operation for DemonitorOp {
     }
 }
 
-/// Makes a node handle the operations.
-pub(super) fn register(handlers: &mut IndexMap<MessageId, Arc<dyn Handler>>) {
-    handlers.insert(SignalOp::Id, Arc::new(Builtin::<SignalOp>(PhantomData)));
-    handlers.insert(PingOp::Id, Arc::new(Builtin::<PingOp>(PhantomData)));
-    handlers.insert(InfoOp::Id, Arc::new(Builtin::<InfoOp>(PhantomData)));
-    handlers.insert(MonitorOp::Id, Arc::new(Builtin::<MonitorOp>(PhantomData)));
-    handlers.insert(
-        DemonitorOp::Id,
-        Arc::new(Builtin::<DemonitorOp>(PhantomData)),
-    );
-    handlers.insert(StateOp::Id, Arc::new(Builtin::<StateOp>(PhantomData)));
-    handlers.insert(AcceptsOp::Id, Arc::new(Builtin::<AcceptsOp>(PhantomData)));
+/// Makes a node handle the operations. Each claims its id like any other
+/// message, so an operation given an id another one already has is caught the
+/// moment a node is built — by the first test that builds one.
+pub(super) fn register(handlers: &mut Handlers) {
+    handlers.insert_op::<SignalOp>();
+    handlers.insert_op::<PingOp>();
+    handlers.insert_op::<InfoOp>();
+    handlers.insert_op::<MonitorOp>();
+    handlers.insert_op::<DemonitorOp>();
+    handlers.insert_op::<StateOp>();
+    handlers.insert_op::<AcceptsOp>();
 }
 
 /// Operations on actors on other nodes: the counterpart of
@@ -481,7 +479,7 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => Ok(local.address().monitor_any(kinds).await),
-                ClusterAddressRef::Remote(address) => address.watch_remote(kinds).await,
+                ClusterAddressRef::Remote(address) => address.monitor_remote(kinds).await,
             }
         }
     }
@@ -493,7 +491,7 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
         async move {
             match self.monitor_any(&[ActorStatusKind::Exited]).await? {
                 ActorStatus::Exited(exit) => Ok(exit.into_result()),
-                status => unreachable!("Watched for an exit, got {status:?}"),
+                status => unreachable!("Monitored for an exit, got {status:?}"),
             }
         }
     }

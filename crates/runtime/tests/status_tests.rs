@@ -150,7 +150,7 @@ async fn exit_status_reflects_unhandled_error() {
 }
 
 #[tokio::test]
-async fn watch_init_reports_early_exit_instead_of_hanging() {
+async fn monitor_init_reports_early_exit_instead_of_hanging() {
     let child: zestors_runtime::Child<(), ()> =
         spawn_rand(|_inbox: Inbox<()>| async { panic!("dies before first recv") });
 
@@ -159,7 +159,7 @@ async fn watch_init_reports_early_exit_instead_of_hanging() {
 }
 
 #[tokio::test]
-async fn watch_resolves_for_an_already_satisfied_condition() {
+async fn monitor_resolves_for_an_already_satisfied_condition() {
     let child = spawn_rand(common::simplest_handler);
     child.monitor_init().await.unwrap();
 
@@ -175,7 +175,7 @@ async fn watch_resolves_for_an_already_satisfied_condition() {
 }
 
 #[tokio::test]
-async fn watch_never_resolves_for_an_unreachable_condition() {
+async fn monitor_never_resolves_for_an_unreachable_condition() {
     let child = spawn_rand(common::simplest_handler);
 
     let timed_out = tokio::time::timeout(Duration::from_millis(100), child.monitor(|_| None::<()>))

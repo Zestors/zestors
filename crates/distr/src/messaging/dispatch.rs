@@ -15,11 +15,19 @@ use zestors_runtime::{ActorRef, Address, errors::CastDynError, prelude::*};
 /// needs no locking, and the whole node shares one of them.
 #[doc(hidden)]
 pub struct Handlers {
-    by_id: IndexMap<MessageId, Arc<dyn Handler>>,
+    by_id: IndexMap<MessageId, Registered>,
     /// The id of each registered message, by its Rust type. Only a way into
     /// `by_id`, so that a question asked about an actor's [`TypeId`]s doesn't
     /// have to walk every handler.
     by_type: IndexMap<TypeId, MessageId>,
+}
+
+/// A handler, and the type it was registered for: enough to tell one message
+/// registered twice from two messages that claim the same [`MessageId`].
+struct Registered {
+    handler: Arc<dyn Handler>,
+    type_id: TypeId,
+    type_name: &'static str,
 }
 
 impl Handlers {
@@ -29,20 +37,79 @@ impl Handlers {
             by_id: IndexMap::new(),
             by_type: IndexMap::new(),
         };
-        ops::register(&mut handlers.by_id);
+        ops::register(&mut handlers);
         handlers
     }
 
     /// Makes `M` deliverable to actors on this node. Registering it twice is
     /// the same as once.
+    ///
+    /// # Panics
+    ///
+    /// If another message is already registered under `M`'s
+    /// [`MessageId`](crate::StableId::Id). See [`Handlers::claim`].
     pub(crate) fn insert<M: RemoteMessage>(&mut self) {
-        self.by_id.insert(M::Id, Arc::new(Typed::<M>(PhantomData)));
+        self.claim::<M>(Arc::new(Typed::<M>(PhantomData)));
         self.by_type.insert(TypeId::of::<M>(), M::Id);
+    }
+
+    /// Makes the node handle the operation `M` itself, see [`ops`]. Not listed
+    /// by type: an operation is for the actor's channel, not its mailbox.
+    pub(super) fn insert_op<M: Operation>(&mut self) {
+        self.claim::<M>(Arc::new(Builtin::<M>(PhantomData)));
+    }
+
+    /// Puts `handler` under `M`'s id, which `M` must be alone in claiming.
+    ///
+    /// A [`MessageId`] names a message to every node in the cluster, so two
+    /// types under one id is not a collision this node can resolve: it decodes
+    /// whatever arrives as one of them, silently delivering the wrong message
+    /// or failing to decode. It is a mistake in the program — two types given
+    /// the same uuid, or one copied from another — and not a state a running
+    /// node can be left in, so it panics here, while the node is still being
+    /// built.
+    ///
+    /// Registering the *same* type twice is harmless, since the second handler
+    /// is the first one over again; it is worth saying so, because it usually
+    /// means a message registered by hand as well as by
+    /// [`auto_register`](crate::ClusterConfig::auto_register).
+    ///
+    /// # Panics
+    ///
+    /// If `M::Id` is already registered for a different type.
+    fn claim<M: RemoteMessage>(&mut self, handler: Arc<dyn Handler>) {
+        let type_id = TypeId::of::<M>();
+        if let Some(taken) = self.by_id.get(&M::Id) {
+            assert!(
+                taken.type_id == type_id,
+                "The message id {} is claimed by two types: `{}` and `{}`. \
+                 A `StableId` names a message to the whole cluster, so it must \
+                 be unique; give one of them a fresh uuid.",
+                M::Id,
+                taken.type_name,
+                std::any::type_name::<M>(),
+            );
+            // Not named `message`: that is the field tracing puts the event's
+            // own text in, and a second one would shadow it.
+            tracing::warn!(
+                id = %M::Id,
+                message_type = std::any::type_name::<M>(),
+                "A remote message was registered twice; the second registration changes nothing"
+            );
+        }
+        self.by_id.insert(
+            M::Id,
+            Registered {
+                handler,
+                type_id,
+                type_name: std::any::type_name::<M>(),
+            },
+        );
     }
 
     /// What delivers the message `id`, if this node accepts it at all.
     pub(super) fn get(&self, id: &MessageId) -> Option<&Arc<dyn Handler>> {
-        self.by_id.get(id)
+        self.by_id.get(id).map(|registered| &registered.handler)
     }
 
     /// The ids `address` accepts, among the messages registered here, sorted.
@@ -198,5 +265,111 @@ impl<M: RemoteMessage> Handler for Typed<M> {
             });
             Ok(Some(reply))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::StableId;
+    use serde::{Deserialize, Serialize};
+    use zestors_interface::Message;
+
+    /// The uuid `Ask` and `Tell` both claim, which is the mistake under test.
+    /// They opt out of `auto_register` so that they are never collected into a
+    /// real node: they exist only to be registered by hand, here.
+    const SHARED: &str = "0f7a1c2d-3e4b-4a5c-8d6e-7f8091a2b3c4";
+
+    #[derive(Message, StableId, Serialize, Deserialize)]
+    #[msg(reply = u32, id = "0f7a1c2d-3e4b-4a5c-8d6e-7f8091a2b3c4", no_auto_register)]
+    #[zestors(interface_path = "zestors_interface", distr_path = "crate")]
+    struct Ask(u32);
+
+    #[derive(Message, StableId, Serialize, Deserialize)]
+    #[msg(reply = u32, id = "0f7a1c2d-3e4b-4a5c-8d6e-7f8091a2b3c4", no_auto_register)]
+    #[zestors(interface_path = "zestors_interface", distr_path = "crate")]
+    struct Tell(u32);
+
+    #[test]
+    fn built_in_operations_have_distinct_ids() {
+        // `new` panics if two of them share an id, which nothing else catches:
+        // the second would silently replace the first, and the operation it
+        // belongs to would answer with the wrong one's reply.
+        let handlers = Handlers::new();
+        assert!(handlers.by_id.len() >= 7);
+    }
+
+    #[test]
+    fn registering_the_same_message_twice_is_the_same_as_once() {
+        let mut handlers = Handlers::new();
+        handlers.insert::<Ask>();
+        let after_first = handlers.by_id.len();
+
+        let warnings = capture_warnings(|| handlers.insert::<Ask>());
+
+        assert_eq!(handlers.by_id.len(), after_first);
+        assert!(handlers.get(&Ask::Id).is_some());
+        assert_eq!(handlers.by_type.get(&TypeId::of::<Ask>()), Some(&Ask::Id));
+        // Harmless, but said out loud: it usually means a message registered
+        // by hand as well as by `auto_register`.
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("registered twice"), "{warnings:?}");
+    }
+
+    /// Runs `f` and returns the warnings it logs, so that a warning documented
+    /// as part of the behaviour is tested like the rest of it.
+    fn capture_warnings(f: impl FnOnce()) -> Vec<String> {
+        use std::sync::{Arc, Mutex};
+        use tracing::field::{Field, Visit};
+        use tracing_subscriber::{Layer, layer::Context, prelude::*};
+
+        #[derive(Clone, Default)]
+        struct Warnings(Arc<Mutex<Vec<String>>>);
+
+        impl<S: tracing::Subscriber> Layer<S> for Warnings {
+            fn on_event(&self, event: &tracing::Event<'_>, _: Context<'_, S>) {
+                if *event.metadata().level() != tracing::Level::WARN {
+                    return;
+                }
+                struct Message(String);
+                impl Visit for Message {
+                    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+                        if field.name() == "message" {
+                            self.0 = format!("{value:?}");
+                        }
+                    }
+                }
+                let mut message = Message(String::new());
+                event.record(&mut message);
+                self.0.lock().expect("Not poisoned").push(message.0);
+            }
+        }
+
+        let warnings = Warnings::default();
+        tracing::subscriber::with_default(
+            tracing_subscriber::registry().with(warnings.clone()),
+            f,
+        );
+        warnings.0.lock().expect("Not poisoned").clone()
+    }
+
+    #[test]
+    #[should_panic(expected = "claimed by two types")]
+    fn two_types_cannot_claim_the_same_message_id() {
+        assert_eq!(Ask::Id.to_string(), SHARED);
+        let mut handlers = Handlers::new();
+        handlers.insert::<Ask>();
+        handlers.insert::<Tell>();
+    }
+
+    #[test]
+    #[should_panic(expected = "claimed by two types")]
+    fn a_message_cannot_claim_a_built_in_operations_id() {
+        #[derive(Message, StableId, Serialize, Deserialize)]
+        #[msg(reply = bool, id = "b5c3f7a0-5f0e-4b0f-9f7e-2f6c1f0a0001", no_auto_register)]
+        #[zestors(interface_path = "zestors_interface", distr_path = "crate")]
+        struct Impostor;
+
+        Handlers::new().insert::<Impostor>();
     }
 }

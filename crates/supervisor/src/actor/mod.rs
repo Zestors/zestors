@@ -181,7 +181,7 @@ impl SupervisorInner {
     }
 
     /// Pulls this supervisor's own inbox into `Exiting`, so e.g. `add_spec`
-    /// starts rejecting new children and external watchers see it exiting.
+    /// starts rejecting new children and external monitors see it exiting.
     pub(super) fn register_exiting(&mut self) {
         self.inbox.register_exiting();
     }

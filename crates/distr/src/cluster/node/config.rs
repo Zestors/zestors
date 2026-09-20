@@ -61,6 +61,13 @@ impl ClusterConfig {
     /// Registering happens here and not on a running node, so that there is no
     /// window in which the node is serving but a message it should accept has
     /// no handler yet.
+    ///
+    /// # Panics
+    ///
+    /// If another message type is already registered under `M`'s
+    /// [`MessageId`](crate::MessageId). A message id names a message to the
+    /// whole cluster, so two types cannot share one; give one of them a fresh
+    /// uuid. Registering `M` itself twice is fine, and only logs a warning.
     pub fn register<M: RemoteMessage>(mut self) -> Self {
         self.handlers.insert::<M>();
         self
