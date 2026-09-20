@@ -266,10 +266,14 @@ fn node_with_lanes(
     seed: Option<u8>,
     lanes: u8,
 ) -> ClusterNode {
+    // Everything with a `StableId` but `Unknown`, which opts out: node-b to
+    // receive them, node-a to name them when it asks for an address. Registered
+    // here so the node never serves before its handlers exist.
     let mut config = ClusterConfig::new(name, net.backend(addr(n)))
         .foca_config(fast_foca())
         .call_timeout(Duration::from_secs(10))
-        .lanes(NonZeroU8::new(lanes).unwrap());
+        .lanes(NonZeroU8::new(lanes).unwrap())
+        .auto_register();
     if let Some(seed) = seed {
         config = config.seed(Seed::new(
             format!("node-{}", (b'a' + seed - 1) as char),
@@ -318,12 +322,6 @@ impl Pair {
         let b = Node::run(node_with_lanes(&net, "node-b", 2, Some(1), b_lanes));
         within(a.cluster.wait_for_members(1)).await;
         within(b.cluster.wait_for_members(1)).await;
-
-        // What both accept, everything with a `StableId` but `Unknown`: node-b for receiving, node-a for checking the
-        // actors it addresses.
-        for node in [&a, &b] {
-            node.cluster.auto_register();
-        }
         Self { a, b }
     }
 

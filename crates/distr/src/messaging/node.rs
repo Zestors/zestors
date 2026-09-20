@@ -3,19 +3,13 @@
 
 use super::{
     AddressError, ClusterActorOps as _, ClusterAddress, LocalAddress, RemoteAddress, RemoteError,
-    RemoteMessage, RemoteOpError, RemoteReplyError, RemoteSet,
-    dispatch::{Handler, Typed},
-    ops,
-    pending::Pending,
-    receive,
+    RemoteOpError, RemoteReplyError, RemoteSet, dispatch::Handlers, pending::Pending, receive,
 };
 use crate::{
     Cluster, GlobalName, MessageId,
     link::{Links, Protocol},
 };
-use dashmap::DashMap;
 use std::{
-    marker::PhantomData,
     sync::{Arc, RwLock, atomic::AtomicU64},
     time::Duration,
 };
@@ -30,7 +24,8 @@ pub(crate) struct CommunicationView {
     pub(super) call_timeout: Duration,
     /// How many lanes to a peer messages between actors are spread over.
     pub(super) shards: u8,
-    pub(super) handlers: DashMap<MessageId, Arc<dyn Handler>>,
+    /// The messages this node accepts, fixed when it was built.
+    pub(super) handlers: Handlers,
     /// Set while the node runs.
     pub(super) running: RwLock<Option<Started>>,
     /// Numbers the answers this node is waiting for. Both a call and a request
@@ -48,9 +43,7 @@ pub(super) struct Started {
 }
 
 impl CommunicationView {
-    pub(crate) fn new(call_timeout: Duration, shards: u8) -> Self {
-        let handlers = DashMap::new();
-        ops::register(&handlers);
+    pub(crate) fn new(call_timeout: Duration, shards: u8, handlers: Handlers) -> Self {
         Self {
             call_timeout,
             shards,
@@ -63,26 +56,21 @@ impl CommunicationView {
     pub(super) fn running(&self) -> Option<Started> {
         self.running.read().expect("Not poisoned").clone()
     }
-
-    pub(super) fn register<M: RemoteMessage>(&self) {
-        self.handlers
-            .insert(M::Id, Arc::new(Typed::<M>(PhantomData)));
-    }
 }
 
 /// Messaging between actors: registers what this node accepts, and makes
 /// [`RemoteAddress`]es to send with.
 impl Cluster {
-    /// Makes messages of type `M` acceptable from other nodes: they can be sent
-    /// to any actor on this node that accepts them. Messages of a type that
-    /// isn't registered are answered with [`RemoteError::UnknownMessage`].
-    ///
-    /// Only receiving needs it. Sending a message doesn't, and neither does
-    /// [`Cluster::address`], which names the messages it asks about by the
-    /// [`MessageId`] on their type.
-    pub fn register<M: RemoteMessage>(&self) -> &Self {
-        self.messaging().register::<M>();
-        self
+    /// The ids `address` accepts, among the messages this node was built with,
+    /// sorted. The one answer to that question, so that a node says the same
+    /// about an actor whether it is asked from here or over the network.
+    pub(crate) fn accepted_ids(&self, address: &Address) -> Vec<MessageId> {
+        self.messaging().handlers.accepted_ids(address)
+    }
+
+    /// Whether `address` accepts the message `id`, without building the list.
+    pub(crate) fn accepts_id(&self, address: &Address, id: MessageId) -> bool {
+        self.messaging().handlers.accepts_id(address, id)
     }
 
     /// An actor on this node as a [`ClusterAddress`], so that it can be

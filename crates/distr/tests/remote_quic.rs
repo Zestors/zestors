@@ -46,7 +46,10 @@ fn node(name: &str, addr: SocketAddr, seed: Option<(&str, SocketAddr)>) -> Clust
         keep_alive: Duration::from_millis(200),
         idle_timeout: Duration::from_secs(1),
     });
-    let mut config = ClusterConfig::new(name, quic).foca_config(foca);
+    let mut config = ClusterConfig::new(name, quic)
+        .foca_config(foca)
+        .register::<Greet>()
+        .register::<Note>();
     if let Some((seed, seed_addr)) = seed {
         config = config.seed(Seed::new(seed, seed_addr));
     }
@@ -66,7 +69,7 @@ async fn actors_on_another_node_can_be_called_and_cast_to() {
     let (a_addr, b_addr) = (free_addr(), free_addr());
     let a = node("node-a", a_addr, None);
     let b = node("node-b", b_addr, Some(("node-a", a_addr)));
-    let (a_remote, b_remote) = (a.cluster(), b.cluster());
+    let a_remote = a.cluster();
     let (a_cluster, a_shutdown, b_shutdown) = (
         a.cluster(),
         a.root_supervisor().address().clone(),
@@ -74,7 +77,6 @@ async fn actors_on_another_node_can_be_called_and_cast_to() {
     );
     let (a_task, b_task) = (tokio::spawn(a.run()), tokio::spawn(b.run()));
 
-    b_remote.register::<Greet>().register::<Note>();
     tokio::time::timeout(Duration::from_secs(30), a_cluster.wait_for_members(1))
         .await
         .expect("The nodes find each other");

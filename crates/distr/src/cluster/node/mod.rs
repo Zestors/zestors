@@ -29,7 +29,9 @@ impl ClusterNode {
     }
 
     /// Adds cluster membership to an existing [`Node`].
-    pub fn from_node(node: Node, config: ClusterConfig) -> Self {
+    pub fn from_node(node: Node, mut config: ClusterConfig) -> Self {
+        // The registry moves out of the config: it is fixed from here on.
+        let handlers = std::mem::take(&mut config.handlers);
         let cluster = Cluster::new(
             Member {
                 name: config.node_id.clone(),
@@ -42,6 +44,7 @@ impl ClusterNode {
             },
             config.call_timeout,
             config.lanes.get(),
+            handlers,
         );
         Self {
             node,

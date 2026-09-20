@@ -1,5 +1,6 @@
 use crate::{
-    LinkTimings, NodeAddr, NodeName, backend::Backend, cluster::membership::Options, link::Starter,
+    LinkTimings, NodeAddr, NodeName, RemoteMessage, backend::Backend, cluster::membership::Options,
+    link::Starter, messaging::Handlers,
 };
 use rand::{SeedableRng, rngs::StdRng};
 use std::{
@@ -22,6 +23,9 @@ pub struct ClusterConfig {
     pub(super) generation_store: Option<PathBuf>,
     pub(super) call_timeout: Duration,
     pub(super) lanes: NonZeroU8,
+    /// What this node will accept from others. Fixed here rather than on the
+    /// running node, so that it can't start serving before its handlers exist.
+    pub(crate) handlers: Handlers,
 }
 
 impl ClusterConfig {
@@ -41,7 +45,25 @@ impl ClusterConfig {
             generation_store: None,
             call_timeout: Duration::from_secs(30),
             lanes: NonZeroU8::new(4).unwrap(),
+            handlers: Handlers::new(),
         }
+    }
+
+    /// Makes messages of type `M` acceptable from other nodes: once the node
+    /// runs, they can be sent to any actor on it that accepts them. A message
+    /// that isn't registered is answered with
+    /// [`RemoteError::UnknownMessage`](crate::RemoteError::UnknownMessage).
+    ///
+    /// Only receiving needs it. Sending doesn't, and neither does
+    /// [`Cluster::address`](crate::Cluster::address), which names the messages
+    /// it asks about by the [`MessageId`](crate::MessageId) on their type.
+    ///
+    /// Registering happens here and not on a running node, so that there is no
+    /// window in which the node is serving but a message it should accept has
+    /// no handler yet.
+    pub fn register<M: RemoteMessage>(mut self) -> Self {
+        self.handlers.insert::<M>();
+        self
     }
 
     /// Adds a node to contact when joining. A node with no seeds waits to be

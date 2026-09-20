@@ -25,10 +25,10 @@ pub mod prelude {
 macro_rules! __auto_register {
     ($ty:ty) => {
         $crate::__private::inventory::submit! {
-            $crate::__private::Registration::new(|cluster| {
+            $crate::__private::Registration::new(|handlers| {
                 #[allow(unused_imports)]
                 use $crate::__private::{IfNot as _, IfRemote as _};
-                (&$crate::__private::Probe::<$ty>::new()).register(cluster);
+                (&$crate::__private::Probe::<$ty>::new()).register(handlers);
             })
         }
     };
@@ -45,7 +45,7 @@ macro_rules! __auto_register {
 #[cfg(feature = "auto-register")]
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::messaging::{IfNot, IfRemote, Probe, Registration};
+    pub use crate::messaging::{Handlers, IfNot, IfRemote, Probe, Registration};
     pub use inventory;
 }
 
@@ -68,8 +68,8 @@ pub use cluster::{
 };
 pub use link::LinkTimings;
 pub use messaging::{
-    AddressError, CastFailure, ClusterActorOps, ClusterActorRef, ClusterAddress, Decode,
-    DecodeError, Encode, EncodeError, LocalAddress, RemoteAccepts, RemoteAddress, RemoteCallError,
-    RemoteCallOptions, RemoteCastError, RemoteError, RemoteInfo, RemoteMessage, RemoteOpError,
-    RemoteReceipt, RemoteReply, RemoteReplyError, RemoteRequest, RemoteSet, ClusterAddressRef,
+    AddressError, CastFailure, ClusterActorOps, ClusterActorRef, ClusterAddress, ClusterAddressRef,
+    Decode, DecodeError, Encode, EncodeError, LocalAddress, RemoteAccepts, RemoteAddress,
+    RemoteCallError, RemoteCallOptions, RemoteCastError, RemoteError, RemoteInfo, RemoteMessage,
+    RemoteOpError, RemoteReceipt, RemoteReply, RemoteReplyError, RemoteRequest, RemoteSet,
 };

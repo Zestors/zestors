@@ -168,14 +168,14 @@ impl<C: Context> ClusterAddress<C> {
 impl<C: Context> ClusterActorRef for ClusterAddress<C> {
     type Ctx = C;
 
-    fn as_address(&self) -> ClusterAddressRef<'_, C> {
+    fn as_ref(&self) -> ClusterAddressRef<'_, C> {
         match self {
             ClusterAddress::Local(address) => ClusterAddressRef::Local(address),
             ClusterAddress::Remote(address) => ClusterAddressRef::Remote(address),
         }
     }
 
-    fn as_address_mut(&mut self) -> ClusterAddressMut<'_, C> {
+    fn as_ref_mut(&mut self) -> ClusterAddressMut<'_, C> {
         match self {
             ClusterAddress::Local(address) => ClusterAddressMut::Local(address),
             ClusterAddress::Remote(address) => ClusterAddressMut::Remote(address),
@@ -242,20 +242,20 @@ pub trait ClusterActorRef: Sync {
 
     /// How the actor is reached.
     #[doc(hidden)]
-    fn as_address(&self) -> ClusterAddressRef<'_, Self::Ctx>;
+    fn as_ref(&self) -> ClusterAddressRef<'_, Self::Ctx>;
 
     #[doc(hidden)]
-    fn as_address_mut(&mut self) -> ClusterAddressMut<'_, Self::Ctx>;
+    fn as_ref_mut(&mut self) -> ClusterAddressMut<'_, Self::Ctx>;
 }
 
 impl<C: Context> ClusterActorRef for RemoteAddress<C> {
     type Ctx = C;
 
-    fn as_address(&self) -> ClusterAddressRef<'_, C> {
+    fn as_ref(&self) -> ClusterAddressRef<'_, C> {
         ClusterAddressRef::Remote(self)
     }
 
-    fn as_address_mut(&mut self) -> ClusterAddressMut<'_, C> {
+    fn as_ref_mut(&mut self) -> ClusterAddressMut<'_, C> {
         ClusterAddressMut::Remote(self)
     }
 }
@@ -263,11 +263,11 @@ impl<C: Context> ClusterActorRef for RemoteAddress<C> {
 impl<C: Context> ClusterActorRef for LocalAddress<C> {
     type Ctx = C;
 
-    fn as_address(&self) -> ClusterAddressRef<'_, C> {
+    fn as_ref(&self) -> ClusterAddressRef<'_, C> {
         ClusterAddressRef::Local(self)
     }
 
-    fn as_address_mut(&mut self) -> ClusterAddressMut<'_, C> {
+    fn as_ref_mut(&mut self) -> ClusterAddressMut<'_, C> {
         ClusterAddressMut::Local(self)
     }
 }

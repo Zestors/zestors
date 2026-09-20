@@ -1,5 +1,5 @@
 use super::{ClusterEvent, ClusterSnapshot, Member, NodeStatus};
-use crate::{NodeName, messaging::CommunicationView};
+use crate::{NodeName, messaging::CommunicationView, messaging::Handlers};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
@@ -45,7 +45,12 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    pub(crate) fn new(local: Member, call_timeout: Duration, shards: u8) -> Self {
+    pub(crate) fn new(
+        local: Member,
+        call_timeout: Duration,
+        shards: u8,
+        handlers: Handlers,
+    ) -> Self {
         Self {
             inner: Arc::new(ClusterInner {
                 local_name: local.name.clone(),
@@ -58,14 +63,14 @@ impl Cluster {
                     }),
                     event_sender: broadcast::channel(256).0,
                 },
-                messaging: CommunicationView::new(call_timeout, shards),
+                messaging: CommunicationView::new(call_timeout, shards, handlers),
             }),
         }
     }
 
     /// For nodes that only take part in membership, such as the simulated ones.
     pub(crate) fn membership_only(local: Member) -> Self {
-        Self::new(local, Duration::from_secs(30), 4)
+        Self::new(local, Duration::from_secs(30), 4, Handlers::new())
     }
 
     pub(crate) fn messaging(&self) -> &CommunicationView {

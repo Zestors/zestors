@@ -35,7 +35,11 @@ enum GreeterInterface {
 
 fn node(name: &str, addr: SocketAddr, seed: Option<(&str, SocketAddr)>) -> ClusterNode {
     // Development only: use `Tls::from_pem` to authenticate cluster members.
-    let mut config = ClusterConfig::new(name, Quic::new(addr, Tls::insecure_dev().unwrap()));
+    // Both nodes accept these from others: the host to serve them, the caller
+    // so it can name them when it asks the host for an address.
+    let mut config = ClusterConfig::new(name, Quic::new(addr, Tls::insecure_dev().unwrap()))
+        .register::<Greet>()
+        .register::<CountLetters>();
     if let Some((seed, seed_addr)) = seed {
         config = config.seed(Seed::new(seed, seed_addr));
     }
@@ -51,15 +55,7 @@ async fn main() {
     let host = node("host", a_addr, None);
     let caller = node("caller", b_addr, Some(("host", a_addr)));
 
-    // The host accepts these messages from other nodes, and runs an actor that handles it.
-    host.cluster()
-        .register::<Greet>()
-        .register::<CountLetters>();
-    // The caller registers them too, so that it can tell the host which messages it means.
-    caller
-        .cluster()
-        .register::<Greet>()
-        .register::<CountLetters>();
+    // The host runs the actor that handles them.
     let _greeter = spawn(
         Name::new_static("greeter"),
         |mut inbox: Inbox<GreeterInterface>| async move {

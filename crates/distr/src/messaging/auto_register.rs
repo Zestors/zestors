@@ -1,18 +1,18 @@
 //! Registering every message type in the binary at once, see
 //! [`Cluster::auto_register`].
 
-use super::RemoteMessage;
-use crate::Cluster;
+use super::{Handlers, RemoteMessage};
+use crate::ClusterConfig;
 use std::marker::PhantomData;
 
 /// A message type to register, collected from wherever it is derived.
 #[doc(hidden)]
 pub struct Registration {
-    register: fn(&Cluster),
+    register: fn(&mut Handlers),
 }
 
 impl Registration {
-    pub const fn new(register: fn(&Cluster)) -> Self {
+    pub const fn new(register: fn(&mut Handlers)) -> Self {
         Self { register }
     }
 }
@@ -38,44 +38,44 @@ impl<M> Default for Probe<M> {
 
 #[doc(hidden)]
 pub trait IfRemote {
-    fn register(&self, cluster: &Cluster);
+    fn register(&self, handlers: &mut Handlers);
 }
 
 impl<M: RemoteMessage> IfRemote for Probe<M> {
-    fn register(&self, cluster: &Cluster) {
-        cluster.register::<M>();
+    fn register(&self, handlers: &mut Handlers) {
+        handlers.insert::<M>();
     }
 }
 
 #[doc(hidden)]
 pub trait IfNot {
-    fn register(&self, _: &Cluster) {}
+    fn register(&self, _: &mut Handlers) {}
 }
 
 impl<M> IfNot for &Probe<M> {}
 
 inventory::collect!(Registration);
 
-impl Cluster {
-    /// [Registers](Cluster::register) every message type in the binary that
-    /// derives [`StableId`](crate::StableId), including those of the crates it
-    /// depends on. Available with the `auto-register` feature.
+impl ClusterConfig {
+    /// [Registers](ClusterConfig::register) every message type in the binary
+    /// that derives [`StableId`](crate::StableId), including those of the
+    /// crates it depends on. Available with the `auto-register` feature.
     ///
     /// Types are collected where they are derived, so it makes no difference
     /// where or how often this is called. Only those that are a
-    /// [`RemoteMessage`] are registered. A generic type has no one type to
-    /// collect, and is registered with [`Cluster::register`] like one that
-    /// opts out with `#[msg(no_auto_register)]`.
+    /// [`RemoteMessage`] are registered; a generic type has no one type to
+    /// collect, and is registered with [`ClusterConfig::register`] like one
+    /// that opts out with `#[msg(no_auto_register)]`.
     ///
     /// ```no_run
-    /// # use zestors_distr::ClusterNode;
-    /// # fn example(node: ClusterNode) {
-    /// node.cluster().auto_register();
+    /// # use zestors_distr::ClusterConfig;
+    /// # fn example(config: ClusterConfig) -> ClusterConfig {
+    /// config.auto_register()
     /// # }
     /// ```
-    pub fn auto_register(&self) -> &Self {
+    pub fn auto_register(mut self) -> Self {
         for registration in inventory::iter::<Registration> {
-            (registration.register)(self);
+            (registration.register)(&mut self.handlers);
         }
         self
     }

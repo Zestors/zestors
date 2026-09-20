@@ -233,7 +233,7 @@ impl Session {
             .messaging()
             .handlers
             .get(&msg)
-            .map(|handler| handler.clone())
+            .cloned()
             .ok_or(RemoteError::UnknownMessage)?;
         let address = name.address().ok_or(RemoteError::NoSuchActor)?;
         handler.deliver(wire, address, payload, reply).await

@@ -7,7 +7,8 @@
 //! the process.
 //!
 //! Which message types a node accepts is decided by registering them with
-//! [`Cluster::register`]. Any registered message can then reach any local actor
+//! [`ClusterConfig::register`](crate::ClusterConfig::register), before the node
+//! is built. Any registered message can then reach any local actor
 //! that accepts it, addressed by its [`Name`](zestors_runtime::Name).
 //!
 //! Nothing here requires a message to be serde: it must be [`Encode`] and
@@ -19,7 +20,7 @@
 //! ```no_run
 //! use serde::{Deserialize, Serialize};
 //! use zestors::{
-//!     distr::{ClusterAddress, ClusterNode, GlobalName},
+//!     distr::{ClusterAddress, ClusterConfig, ClusterNode, GlobalName},
 //!     interface::{Envelope, Interface, Message},
 //!     prelude::*,
 //! };
@@ -34,10 +35,12 @@
 //!     Double(Envelope<Double>),
 //! }
 //!
-//! # async fn example(node: ClusterNode) -> Result<(), Box<dyn std::error::Error>> {
-//! // On the node that runs the actor: accept the message from other nodes.
-//! node.cluster().register::<Double>();
+//! // Which messages a node accepts is fixed when it is built.
+//! # fn configure(config: ClusterConfig) -> ClusterConfig {
+//! config.register::<Double>()
+//! # }
 //!
+//! # async fn example(node: ClusterNode) -> Result<(), Box<dyn std::error::Error>> {
 //! // On another node: address the actor, and call it. This looks for the
 //! // actor there, checking that it accepts the messages registered here.
 //! let counter: ClusterAddress<CounterInterface> = node
@@ -66,7 +69,9 @@ mod request;
 mod send;
 mod wire;
 
-pub use address::{ClusterActorRef, ClusterAddress, LocalAddress, RemoteAddress, ClusterAddressRef};
+pub use address::{
+    ClusterActorRef, ClusterAddress, ClusterAddressRef, LocalAddress, RemoteAddress,
+};
 #[cfg(feature = "auto-register")]
 #[doc(hidden)]
 pub use auto_register::{IfNot, IfRemote, Probe, Registration};
@@ -80,6 +85,8 @@ pub use ops::{ClusterActorOps, RemoteInfo};
 pub use reply::{RemoteReceipt, RemoteReply};
 pub use request::RemoteRequest;
 
+#[doc(hidden)]
+pub use dispatch::Handlers;
 pub(crate) use node::CommunicationView;
 use node::Started;
 pub use send::{RemoteAccepts, RemoteCallOptions};

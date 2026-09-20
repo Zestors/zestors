@@ -300,7 +300,7 @@ where
         msg: M,
         options: RemoteCallOptions,
     ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
-        match self.as_address() {
+        match self.as_ref() {
             ClusterAddressRef::Remote(address) => address.cast_remote(msg, options).await,
             ClusterAddressRef::Local(local) => cast(local.address(), msg, options).await,
         }
@@ -311,7 +311,7 @@ where
         msg: M,
         options: RemoteCallOptions,
     ) -> Result<M::RemoteReceipt, RemoteCastError<M>> {
-        match self.as_address() {
+        match self.as_ref() {
             ClusterAddressRef::Remote(address) => address.try_cast_remote(msg, options),
             ClusterAddressRef::Local(local) => try_cast(local.address(), msg, options),
         }

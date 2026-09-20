@@ -1,11 +1,80 @@
 //! Delivers a message to a local actor, knowing its type.
 
-use super::{Encode, RemoteError, RemoteMessage, wire::Wire};
-use crate::Cluster;
+use super::{Encode, RemoteError, RemoteMessage, ops, wire::Wire};
+use crate::{Cluster, MessageId};
 use bytes::Bytes;
-use std::{future::Future, marker::PhantomData, pin::Pin};
+use indexmap::IndexMap;
+use std::{any::TypeId, future::Future, marker::PhantomData, pin::Pin, sync::Arc};
 use zestors_interface::Receipt;
-use zestors_runtime::{Address, errors::CastDynError, prelude::*};
+use zestors_runtime::{ActorRef, Address, errors::CastDynError, prelude::*};
+
+/// The messages a node accepts, and what delivers each of them.
+///
+/// Fixed once the node is built — messages are registered on
+/// [`ClusterConfig`](crate::ClusterConfig), never while the node runs — so this
+/// needs no locking, and the whole node shares one of them.
+#[doc(hidden)]
+pub struct Handlers {
+    by_id: IndexMap<MessageId, Arc<dyn Handler>>,
+    /// The id of each registered message, by its Rust type. Only a way into
+    /// `by_id`, so that a question asked about an actor's [`TypeId`]s doesn't
+    /// have to walk every handler.
+    by_type: IndexMap<TypeId, MessageId>,
+}
+
+impl Handlers {
+    /// The operations every node handles, and nothing else yet.
+    pub(crate) fn new() -> Self {
+        let mut handlers = Self {
+            by_id: IndexMap::new(),
+            by_type: IndexMap::new(),
+        };
+        ops::register(&mut handlers.by_id);
+        handlers
+    }
+
+    /// Makes `M` deliverable to actors on this node. Registering it twice is
+    /// the same as once.
+    pub(crate) fn insert<M: RemoteMessage>(&mut self) {
+        self.by_id.insert(M::Id, Arc::new(Typed::<M>(PhantomData)));
+        self.by_type.insert(TypeId::of::<M>(), M::Id);
+    }
+
+    /// What delivers the message `id`, if this node accepts it at all.
+    pub(super) fn get(&self, id: &MessageId) -> Option<&Arc<dyn Handler>> {
+        self.by_id.get(id)
+    }
+
+    /// Whether `address` accepts the message `id`, in one lookup.
+    pub(crate) fn accepts_id(&self, address: &Address, id: MessageId) -> bool {
+        self.by_id
+            .get(&id)
+            .is_some_and(|handler| handler.accepts(address))
+    }
+
+    /// The ids `address` accepts, among the messages registered here, sorted.
+    ///
+    /// Walks the actor's own message types rather than every handler: an actor
+    /// accepts few messages, a node may know many. The built-in operations are
+    /// not listed, since they are for the channel and not the mailbox.
+    pub(crate) fn accepted_ids(&self, address: &impl ActorRef) -> Vec<MessageId> {
+        let members = address.members();
+        let mut accepts: Vec<MessageId> = Vec::with_capacity(members.len());
+        accepts.extend(
+            members
+                .iter()
+                .filter_map(|type_id| self.by_type.get(type_id).copied()),
+        );
+        accepts.sort_unstable();
+        accepts
+    }
+}
+
+impl Default for Handlers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 pub(super) type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
