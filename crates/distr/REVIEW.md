@@ -12,8 +12,8 @@ is green at 41 suites.
 ## 1. The `Remote*` prefix — resolved
 
 **Done.** The prefix used to split the API along no line at all: the crate began as
-"actors on other nodes", then local actors became first-class (`LocalAddress`,
-`ClusterAddress`, `ClusterActorOps`) and only the traits got renamed.
+"actors on other nodes", then local actors became first-class (`ClusterAddress`,
+`ClusterActorOps`) and only the traits got renamed.
 
 The rule now applied: **`Remote*` means crossing the network is the reason the type
 exists.** Everything reachable from a purely local send is `Cluster*`.
@@ -30,7 +30,7 @@ exists.** Everything reachable from a purely local send is `Cluster*`.
 | `RemoteReplyError`  | `ClusterReplyError`  |
 | `RemoteInfo`        | `ActorInfo`          |
 
-Kept, because remoteness is the property that makes them exist: `RemoteAddress`,
+Kept, because remoteness is the property that makes them exist:
 `RemoteError` (it is literally what the peer put on the wire), `RemoteMessage`,
 `RemoteSet`, `RemoteMessageKind`, `RemoteRequest`. `CastFailure` was already unprefixed.
 
@@ -39,7 +39,7 @@ information *about the cluster*, which it is not, and nothing else is called `Ac
 
 Two knock-on names were checked and left alone because they are still accurate:
 `RemoteMessage::remote_receipt` / `local_receipt` build the receipt for a remote vs a
-local send, and `RemoteAddress::cast_remote` is the remote path.
+local send, and `ClusterAddress::cast_remote` is the remote path.
 
 ## 2. `Cluster` is one type implemented in two files
 
@@ -61,10 +61,6 @@ a real stumbling block.
 
 ## 3. Dead code
 
-- **`ClusterAddressMut` and `ClusterActorRef::as_ref_mut`**
-  ([address.rs:227](src/messaging/address.rs#L227), [:245](src/messaging/address.rs#L245))
-  are defined and implemented three times but **never called**. Either they are scaffolding
-  for planned work — in which case say so — or they should go.
 - **`Cluster::membership_only`** ([state.rs:72](src/cluster/state.rs#L72)) warns as dead
   code on any build without `--features sim`. It is used only by `sim` and by a
   `#[cfg(test)]` test in `cluster/membership/driver.rs`. Gate it:
@@ -166,10 +162,10 @@ A call through a remote address gets the node's `call_timeout` (30s default); a 
 through a local one has **no** default timeout, and `ClusterAddress::with_timeout` silently
 ignores the local case. OTP's `gen_server:call` is 5s either way.
 
-`LocalAddress` now exists and is the obvious place for an `Option<Duration>`, seeded from
-the cluster's `call_timeout` at construction. Note `Route::Local`/`ClusterAddressRef::Local`
-would have to carry it through to the local `cast`/`try_cast` in
-[send.rs](src/messaging/send.rs).
+`Target::Local` ([address.rs](src/messaging/address.rs)) is the obvious place for an
+`Option<Duration>` beside the one `Target::Remote` already has, seeded from the cluster's
+`call_timeout` at construction. The local arms of `ClusterAccepts` in
+[send.rs](src/messaging/send.rs) would then have to carry it into `cast`/`try_cast`.
 
 ### Medium — `auto_register` skips non-remote types in silence
 [auto_register.rs:52](src/messaging/auto_register.rs#L52): `IfNot::register` is an empty

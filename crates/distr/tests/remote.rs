@@ -1045,10 +1045,11 @@ async fn what_an_actor_accepts_can_be_asked() {
     let snapshot = remote.snapshot().await.unwrap();
     assert_eq!(&snapshot.name, remote.name());
     assert!(remote.last_spawned_at().await.unwrap().is_some());
-    let ClusterAddress::Remote(address) = &remote else {
-        panic!("An actor on node-b is remote from node-a")
-    };
-    assert_eq!(address.name().node().to_string(), "node-b");
+    assert!(
+        remote.is_remote(),
+        "An actor on node-b is remote from node-a"
+    );
+    assert_eq!(remote.node().to_string(), "node-b");
 }
 
 /// The operations that read one thing give exactly the answer a full `info()`
@@ -1152,7 +1153,7 @@ async fn local_on_b(pair: &Pair, name: &'static str) -> ClusterAddress<WorkerInt
         .address::<WorkerInterface>(GlobalName::new(name, "node-b"))
         .await
         .unwrap();
-    assert!(matches!(address, ClusterAddress::Local(_)));
+    assert!(address.is_local());
     address
 }
 
@@ -1164,7 +1165,7 @@ async fn remote_on_b(pair: &Pair, name: &'static str) -> ClusterAddress<WorkerIn
         .address::<WorkerInterface>(GlobalName::new(name, "node-b"))
         .await
         .unwrap();
-    assert!(matches!(address, ClusterAddress::Remote(_)));
+    assert!(address.is_remote());
     address
 }
 
@@ -1366,16 +1367,18 @@ async fn making_an_address_checks_the_actor_where_it_is() {
             .await,
         Err(AddressError::TypeMismatch(_))
     ));
-    assert!(matches!(
+    assert!(
         a.address::<WorkerInterface>(GlobalName::new("cluster-check", "node-b"))
-            .await,
-        Ok(ClusterAddress::Remote(_))
-    ));
-    assert!(matches!(
+            .await
+            .unwrap()
+            .is_remote()
+    );
+    assert!(
         a.address_dyn::<(Double, Note)>(GlobalName::new("cluster-check", "node-b"))
-            .await,
-        Ok(ClusterAddress::Remote(_))
-    ));
+            .await
+            .unwrap()
+            .is_remote()
+    );
     // A node that isn't a member can't be asked.
     assert!(matches!(
         a.address::<WorkerInterface>(GlobalName::new("cluster-check", "node-z"))
@@ -1398,13 +1401,49 @@ async fn an_address_for_an_actor_on_this_node_is_local() {
         .address::<WorkerInterface>(GlobalName::new("cluster-check", "node-b"))
         .await
         .unwrap();
-    assert!(matches!(itself, ClusterAddress::Local(_)));
+    assert!(itself.is_local());
     assert_eq!(itself.call(Double(1)).await.unwrap(), 2);
 
     let address = Registry::local()
         .get_typed::<WorkerInterface>(&"cluster-check".into())
         .unwrap();
-    assert!(matches!(b.local_address(address), ClusterAddress::Local(_)));
+    assert!(b.local_address(address).is_local());
+}
+
+/// The two things a `ClusterAddress` still says about where the actor is, now
+/// that its halves are private. `node()` is the one that would catch a
+/// local/remote mix-up in routing: it must name node-b for the same actor
+/// whether node-b or node-a is asking.
+#[tokio::test(start_paused = true)]
+async fn an_address_names_the_node_its_actor_is_on_from_either_side() {
+    let pair = Pair::start().await;
+    let _worker = worker("where-check", Log::default());
+
+    let from_itself = local_on_b(&pair, "where-check").await;
+    let from_elsewhere = remote_on_b(&pair, "where-check").await;
+
+    assert_eq!(from_itself.node().to_string(), "node-b");
+    assert_eq!(from_elsewhere.node().to_string(), "node-b");
+    // The same actor, named the same way, whichever side is holding it.
+    assert_eq!(from_itself.name(), from_elsewhere.name());
+}
+
+/// A local actor's plain `Address` can be had back, which is the only way to
+/// reach `ActorOps` through a `ClusterAddress`. A remote one has none to give.
+#[tokio::test(start_paused = true)]
+async fn the_plain_address_is_there_for_a_local_actor_and_not_a_remote_one() {
+    let pair = Pair::start().await;
+    let _worker = worker("escape-check", Log::default());
+
+    let local = local_on_b(&pair, "escape-check").await;
+    let address = local.local_address().expect("The actor is on node-b");
+    // A plain `Address`, so the local-only operations are available on it.
+    assert_eq!(address.name(), local.name());
+    assert_eq!(address.call(Double(4)).await.unwrap(), 8);
+
+    let remote = remote_on_b(&pair, "escape-check").await;
+    assert!(remote.local_address().is_none());
+    assert!(remote.into_local_address().is_none());
 }
 
 #[tokio::test(start_paused = true)]

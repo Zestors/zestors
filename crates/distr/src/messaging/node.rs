@@ -3,8 +3,7 @@
 
 use super::{
     AddressError, ClusterActorOps as _, ClusterAddress, ClusterOpError, ClusterReplyError,
-    LocalAddress, RemoteAddress, RemoteError, RemoteSet, dispatch::Handlers, monitors::Monitors,
-    pending::Pending, receive,
+    RemoteError, RemoteSet, dispatch::Handlers, monitors::Monitors, pending::Pending, receive,
 };
 use crate::{
     Cluster, GlobalName, MessageId,
@@ -63,7 +62,7 @@ impl CommunicationView {
 }
 
 /// Messaging between actors: registers what this node accepts, and makes
-/// [`RemoteAddress`]es to send with.
+/// [`ClusterAddress`]es to send with.
 impl Cluster {
     /// How many monitors other nodes are holding on actors here. For tests that
     /// check a monitor is let go of.
@@ -90,12 +89,12 @@ impl Cluster {
     /// cluster is needed because the operations that go by
     /// [`MessageId`] answer from its registry.
     pub fn local_address<C: Context>(&self, address: Address<C>) -> ClusterAddress<C> {
-        ClusterAddress::Local(LocalAddress::new(self.clone(), address))
+        ClusterAddress::local(self.clone(), address)
     }
 
-    /// The actor `target`, whether it is on this node or another: a
-    /// [`ClusterAddress::Local`] if it is on this node, else a
-    /// [`ClusterAddress::Remote`]. `I` is what it accepts.
+    /// The actor `target`, whether it is on this node or another — which
+    /// [`ClusterAddress::is_local`] tells apart, though nothing else need.
+    /// `I` is what it accepts.
     ///
     /// The actor is looked up where it is: in the registry of this node, or by
     /// asking the node it is on. It has to be running, and accept `I`.
@@ -119,7 +118,6 @@ impl Cluster {
         }
         self.resolve(target, <I::Set as RemoteSet>::REMOTE_IDS)
             .await
-            .map(ClusterAddress::Remote)
     }
 
     /// Like [`Cluster::address`], for the actor to accept a set of messages like
@@ -135,9 +133,7 @@ impl Cluster {
             let address = Registry::local().get_dyn::<S>(target.name())?;
             return Ok(self.local_address(address));
         }
-        self.resolve(target, S::REMOTE_IDS)
-            .await
-            .map(ClusterAddress::Remote)
+        self.resolve(target, S::REMOTE_IDS).await
     }
 
     /// Asks the node `target` is on whether the actor is there, and accepts
@@ -146,9 +142,9 @@ impl Cluster {
         &self,
         target: GlobalName,
         ids: &'static [MessageId],
-    ) -> Result<RemoteAddress<C>, AddressError> {
+    ) -> Result<ClusterAddress<C>, AddressError> {
         let name = target.name().clone();
-        let address = RemoteAddress::new(self.clone(), target);
+        let address = ClusterAddress::remote(self.clone(), target);
         match address.is_superset_of(ids).await {
             Ok(true) => Ok(address),
             Ok(false) => Err(AddressError::TypeMismatch(name)),

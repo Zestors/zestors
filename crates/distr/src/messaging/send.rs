@@ -2,8 +2,9 @@
 //! to an actor on another node or on this one.
 
 use super::{
-    CastFailure, ClusterActorRef, ClusterAddressRef, ClusterCallError, ClusterCastError,
-    ClusterOpError, ClusterReceipt, ClusterReply, Decode, RemoteAddress, RemoteMessage,
+    CastFailure, ClusterActorRef, ClusterAddress, ClusterCallError, ClusterCastError,
+    ClusterOpError, ClusterReceipt, ClusterReply, Decode, RemoteMessage,
+    address::Target,
     frame::Frame,
     message::RemoteMessageKind,
     ops::{DemonitorOp, MonitorOp},
@@ -34,7 +35,7 @@ use zestors_runtime::{
 /// monitor would never be called off.
 struct Demonitor<'a, C: Context> {
     /// `None` once the monitor has been answered.
-    address: Option<&'a RemoteAddress<C>>,
+    address: Option<&'a ClusterAddress<C>>,
     monitor_id: u64,
 }
 
@@ -72,7 +73,13 @@ struct Prepared {
     exports: Exports,
 }
 
-impl<C: Context> RemoteAddress<C> {
+/// The network path: how a message reaches an actor on another node.
+///
+/// Every one of these is for an actor on another node, and every one of them
+/// goes through [`prepare`](ClusterAddress::prepare), which is where that is
+/// required. An actor on this node is messaged by [`cast`] and [`try_cast`]
+/// below instead, without a frame or a lane.
+impl<C: Context> ClusterAddress<C> {
     /// Sends `msg` to the actor on its node, waiting for room in the lane to it.
     pub(super) async fn cast_remote<M: RemoteMessage>(
         &self,
@@ -92,7 +99,7 @@ impl<C: Context> RemoteAddress<C> {
         }
     }
 
-    /// Like [`RemoteAddress::cast_remote`], but fails if the lane is full.
+    /// Like [`ClusterAddress::cast_remote`], but fails if the lane is full.
     pub(super) fn try_cast_remote<M: RemoteMessage>(
         &self,
         msg: M,
@@ -131,7 +138,7 @@ impl<C: Context> RemoteAddress<C> {
         kinds: &[ActorStatusKind],
     ) -> Result<ActorStatus, ClusterOpError> {
         let monitor_id = self
-            .cluster
+            .cluster()
             .messaging()
             .next_call
             .fetch_add(1, Ordering::Relaxed);
@@ -152,7 +159,7 @@ impl<C: Context> RemoteAddress<C> {
         reached
     }
 
-    /// Like [`RemoteAddress::call_op`], for an operation that is answered when
+    /// Like [`ClusterAddress::call_op`], for an operation that is answered when
     /// it is answered: a monitor waits for as long as the actor takes.
     pub(super) async fn call_op_untimed<M: RemoteMessage>(
         &self,
@@ -186,28 +193,37 @@ impl<C: Context> RemoteAddress<C> {
         options: ClusterCallOptions,
         deadline: Deadline,
     ) -> Result<Sending<M>, CastFailure> {
-        let cluster = &self.cluster;
+        // Every caller reaches this from a `Target::Remote` branch: an actor on
+        // this node is messaged without a frame, a lane or a node to send to.
+        let Target::Remote {
+            name: target,
+            timeout,
+        } = self.target()
+        else {
+            unreachable!("Only an actor on another node is sent to over the network")
+        };
+        let cluster = self.cluster();
         let messaging = cluster.messaging();
         let running = messaging.running().ok_or(CastFailure::NotRunning)?;
         let member = cluster
-            .member(self.target.node())
+            .member(target.node())
             .ok_or(CastFailure::NotAMember)?;
-        if !cluster.is_reachable(self.target.node()) {
+        if !cluster.is_reachable(target.node()) {
             return Err(CastFailure::Unreachable);
         }
 
-        let session = Session::new(self.cluster.clone(), running.clone());
+        let session = Session::new(cluster.clone(), running.clone());
         let wire = Wire::new(session, member.name.clone());
         let payload = wire.scope(|| msg.encode());
         // Forgets the requests in the message again if it isn't sent.
         let exports = wire.exports();
         let payload = payload.map_err(CastFailure::Encode)?;
-        let (target, id) = (self.target.name().clone(), M::Id);
+        let (name, id) = (target.name().clone(), M::Id);
         let call_id = <M::Kind as RemoteMessageKind<M::Output>>::REPLIES
             .then(|| messaging.next_call.fetch_add(1, Ordering::Relaxed));
         let frame = Frame::Message {
             call_id,
-            target,
+            target: name,
             msg: id,
             requests: exports.ids(),
             payload,
@@ -226,7 +242,7 @@ impl<C: Context> RemoteAddress<C> {
                 Deadline::Default => Some(
                     options
                         .timeout
-                        .or(self.timeout)
+                        .or(*timeout)
                         .unwrap_or(messaging.call_timeout),
                 ),
                 Deadline::Never => None,
@@ -244,7 +260,7 @@ impl<C: Context> RemoteAddress<C> {
             &member.addr,
             Protocol::ACTORS,
             Delivery::Ordered,
-            shard_of(self.target.name(), messaging.shards),
+            shard_of(target.name(), messaging.shards),
         );
         Ok((
             Prepared {
@@ -300,8 +316,8 @@ impl ClusterCallOptions {
 /// works the same way.
 ///
 /// It is implemented for every [`ClusterActorRef`](super::ClusterActorRef) — so
-/// [`RemoteAddress`](super::RemoteAddress), [`LocalAddress`](super::LocalAddress)
-/// and [`ClusterAddress`](super::ClusterAddress) alike — for every
+/// for [`ClusterAddress`](super::ClusterAddress), and for anything of yours
+/// holding one — for every
 /// [`RemoteMessage`] that `C` accepts, so only messages the actor is expected to
 /// take can be sent.
 /// Sending returns the message's [`RemoteMessage::ClusterReceipt`]: `()` for a
@@ -381,9 +397,8 @@ pub trait ClusterAccepts<M: RemoteMessage>: Sync {
     }
 }
 
-/// One implementation for every kind of address: [`LocalAddress`](super::LocalAddress),
-/// [`RemoteAddress`](super::RemoteAddress) and [`ClusterAddress`](super::ClusterAddress)
-/// are all sent to through it.
+/// One implementation, wherever the actor is: an actor on another node is sent
+/// a frame, one on this node is put straight in its mailbox.
 impl<M, T> ClusterAccepts<M> for T
 where
     M: RemoteMessage,
@@ -395,9 +410,10 @@ where
         msg: M,
         options: ClusterCallOptions,
     ) -> Result<M::ClusterReceipt, ClusterCastError<M>> {
-        match self.as_ref() {
-            ClusterAddressRef::Remote(address) => address.cast_remote(msg, options).await,
-            ClusterAddressRef::Local(local) => cast(local.address(), msg, options).await,
+        let address = self.cluster_address();
+        match address.target() {
+            Target::Local(local) => cast(local, msg, options).await,
+            Target::Remote { .. } => address.cast_remote(msg, options).await,
         }
     }
 
@@ -406,9 +422,10 @@ where
         msg: M,
         options: ClusterCallOptions,
     ) -> Result<M::ClusterReceipt, ClusterCastError<M>> {
-        match self.as_ref() {
-            ClusterAddressRef::Remote(address) => address.try_cast_remote(msg, options),
-            ClusterAddressRef::Local(local) => try_cast(local.address(), msg, options),
+        let address = self.cluster_address();
+        match address.target() {
+            Target::Local(local) => try_cast(local, msg, options),
+            Target::Remote { .. } => address.try_cast_remote(msg, options),
         }
     }
 }

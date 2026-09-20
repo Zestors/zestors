@@ -1,6 +1,6 @@
 //! Messages to actors on other nodes.
 //!
-//! A [`RemoteMessage`] is sent to a [`GlobalName`] through a [`RemoteAddress`];
+//! A [`RemoteMessage`] is sent to a [`GlobalName`] through a [`ClusterAddress`];
 //! the node that hosts the actor decodes it and delivers it like any local
 //! message, and sends the reply back. A [`ClusterAddress`] is the same for an
 //! actor that may be on this node too, which is then reached without leaving
@@ -70,9 +70,7 @@ mod request;
 mod send;
 mod wire;
 
-pub use address::{
-    ClusterActorRef, ClusterAddress, ClusterAddressRef, LocalAddress, RemoteAddress,
-};
+pub use address::{ClusterActorRef, ClusterAddress};
 #[cfg(feature = "auto-register")]
 #[doc(hidden)]
 pub use auto_register::{IfNot, IfRemote, Probe, Registration};

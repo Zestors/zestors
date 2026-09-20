@@ -6,14 +6,14 @@
 //! [`backend`]: any implementation of [`backend::Backend`], such as the
 //! mutually authenticated QUIC backend in the `zestors-distr-quic` crate.
 //!
-//! Actors on other nodes are messaged through a [`RemoteAddress`], from
+//! Actors elsewhere in the cluster are messaged through a [`ClusterAddress`], from
 //! [`ClusterNode::cluster`]; see [`Cluster`].
 
 pub mod prelude {
     pub use crate::{
         Cluster, ClusterAccepts, ClusterActorOps, ClusterAddress, ClusterConfig, ClusterEvent,
-        ClusterNode, ClusterNodeError, ClusterSnapshot, NodeStatus, RemoteAddress, RemoteMessage,
-        RemoteRequest, RemoteSet, Seed,
+        ClusterNode, ClusterNodeError, ClusterSnapshot, NodeStatus, RemoteMessage, RemoteRequest,
+        RemoteSet, Seed,
     };
 }
 
@@ -69,7 +69,7 @@ pub use cluster::{
 pub use link::LinkTimings;
 pub use messaging::{
     ActorInfo, AddressError, CastFailure, ClusterAccepts, ClusterActorOps, ClusterActorRef,
-    ClusterAddress, ClusterAddressRef, ClusterCallError, ClusterCallOptions, ClusterCastError,
-    ClusterOpError, ClusterReceipt, ClusterReply, ClusterReplyError, Decode, DecodeError, Encode,
-    EncodeError, LocalAddress, RemoteAddress, RemoteError, RemoteMessage, RemoteRequest, RemoteSet,
+    ClusterAddress, ClusterCallError, ClusterCallOptions, ClusterCastError, ClusterOpError,
+    ClusterReceipt, ClusterReply, ClusterReplyError, Decode, DecodeError, Encode, EncodeError,
+    RemoteError, RemoteMessage, RemoteRequest, RemoteSet,
 };

@@ -346,10 +346,7 @@ mod tests {
         }
 
         let warnings = Warnings::default();
-        tracing::subscriber::with_default(
-            tracing_subscriber::registry().with(warnings.clone()),
-            f,
-        );
+        tracing::subscriber::with_default(tracing_subscriber::registry().with(warnings.clone()), f);
         warnings.0.lock().expect("Not poisoned").clone()
     }
 
