@@ -56,6 +56,34 @@ pub struct RemoteInfo {
     pub accepts: Vec<MessageId>,
 }
 
+/// Asks for the state of the actor that is live counters only: no name, no
+/// spawn and exit history, no accepts list. Answers everything a caller that
+/// wants one number needs, at a fraction of an [`InfoOp`]'s wire cost.
+#[derive(Message, StableId, Serialize, Deserialize, Debug)]
+#[msg(reply = ChannelState, id = "b5c3f7a0-5f0e-4b0f-9f7e-2f6c1f0a0004", no_auto_register)]
+#[zestors(interface_path = "zestors_interface", distr_path = "crate")]
+pub(super) struct StateOp;
+
+/// The cheap half of a [`RemoteInfo`]: what the actor's channel says about
+/// itself right now. Not public: it is read one field at a time through
+/// [`ClusterActorOps`], and a caller that wants several at one instant asks
+/// for a [`RemoteInfo`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct ChannelState {
+    pub(super) status: ActorStatus,
+    pub(super) msg_len: usize,
+    pub(super) signal_len: usize,
+    pub(super) reached_backpressure: bool,
+}
+
+/// Asks whether the actor accepts every message in the list. The node answers
+/// from its [`Handlers`](super::dispatch::Handlers) with a single bool, rather
+/// than sending back the whole accepts list for the caller to scan.
+#[derive(Message, StableId, Serialize, Deserialize, Debug)]
+#[msg(reply = bool, id = "b5c3f7a0-5f0e-4b0f-9f7e-2f6c1f0a0005", no_auto_register)]
+#[zestors(interface_path = "zestors_interface", distr_path = "crate")]
+pub(super) struct AcceptsOp(pub(super) Vec<MessageId>);
+
 impl Operation for SignalOp {
     fn run(
         self,
@@ -92,11 +120,40 @@ impl Operation for InfoOp {
     }
 }
 
+impl Operation for StateOp {
+    fn run(
+        self,
+        address: Address,
+        _: Cluster,
+    ) -> super::dispatch::BoxFuture<Result<ChannelState, RemoteError>> {
+        Box::pin(async move {
+            Ok(ChannelState {
+                status: address.status(),
+                msg_len: address.msg_len(),
+                signal_len: address.signal_len(),
+                reached_backpressure: address.reached_backpressure(),
+            })
+        })
+    }
+}
+
+impl Operation for AcceptsOp {
+    fn run(
+        self,
+        address: Address,
+        cluster: Cluster,
+    ) -> super::dispatch::BoxFuture<Result<bool, RemoteError>> {
+        Box::pin(async move { Ok(cluster.accepts_ids(&address, &self.0)) })
+    }
+}
+
 /// Makes a node handle the operations.
 pub(super) fn register(handlers: &mut IndexMap<MessageId, Arc<dyn Handler>>) {
     handlers.insert(SignalOp::Id, Arc::new(Builtin::<SignalOp>(PhantomData)));
     handlers.insert(PingOp::Id, Arc::new(Builtin::<PingOp>(PhantomData)));
     handlers.insert(InfoOp::Id, Arc::new(Builtin::<InfoOp>(PhantomData)));
+    handlers.insert(StateOp::Id, Arc::new(Builtin::<StateOp>(PhantomData)));
+    handlers.insert(AcceptsOp::Id, Arc::new(Builtin::<AcceptsOp>(PhantomData)));
 }
 
 /// Operations on actors on other nodes: the counterpart of
@@ -160,8 +217,9 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
         }
     }
 
-    /// Asks about the actor's state, everything at one instant. For a local
-    /// actor, [`RemoteInfo::accepts`] is `None`.
+    /// Asks about the actor's state, everything at one instant. This is the
+    /// only operation that carries the actor's history and accepts list; the
+    /// methods below that read one field ask for that field alone.
     fn info(&self) -> impl Future<Output = Result<RemoteInfo, RemoteOpError>> + Send {
         async move {
             match self.as_ref() {
@@ -194,33 +252,19 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => Ok(local.address().status()),
-                ClusterAddressRef::Remote(address) => Ok(address.info().await?.snapshot.status),
+                ClusterAddressRef::Remote(address) => Ok(address.call_op(StateOp).await?.status),
             }
         }
     }
 
     /// Whether the actor's status is [`ActorStatus::Exiting`].
     fn is_exiting(&self) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
-        async move {
-            match self.as_ref() {
-                ClusterAddressRef::Local(local) => Ok(local.address().is_exiting()),
-                ClusterAddressRef::Remote(address) => {
-                    Ok(address.info().await?.snapshot.status.is_exiting())
-                }
-            }
-        }
+        async move { Ok(self.status().await?.is_exiting()) }
     }
 
     /// Whether the actor's status is [`ActorStatus::Exited`].
     fn is_dead(&self) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
-        async move {
-            match self.as_ref() {
-                ClusterAddressRef::Local(local) => Ok(local.address().is_dead()),
-                ClusterAddressRef::Remote(address) => {
-                    Ok(address.info().await?.snapshot.status.is_dead())
-                }
-            }
-        }
+        async move { Ok(self.status().await?.is_dead()) }
     }
 
     /// The number of messages currently queued for the actor.
@@ -228,7 +272,7 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => Ok(local.address().msg_len()),
-                ClusterAddressRef::Remote(address) => Ok(address.info().await?.snapshot.msg_len),
+                ClusterAddressRef::Remote(address) => Ok(address.call_op(StateOp).await?.msg_len),
             }
         }
     }
@@ -243,7 +287,9 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => Ok(local.address().signal_len()),
-                ClusterAddressRef::Remote(address) => Ok(address.info().await?.snapshot.signal_len),
+                ClusterAddressRef::Remote(address) => {
+                    Ok(address.call_op(StateOp).await?.signal_len)
+                }
             }
         }
     }
@@ -259,7 +305,7 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => Ok(local.address().reached_backpressure()),
                 ClusterAddressRef::Remote(address) => {
-                    Ok(address.info().await?.reached_backpressure)
+                    Ok(address.call_op(StateOp).await?.reached_backpressure)
                 }
             }
         }
@@ -314,11 +360,11 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
     ) -> impl Future<Output = Result<bool, RemoteOpError>> + Send {
         async move {
             match self.as_ref() {
-                // One lookup, rather than building the whole list to scan it.
                 ClusterAddressRef::Local(local) => {
-                    Ok(local.cluster().accepts_id(local.address().as_dyn(), id))
+                    Ok(local.cluster().accepts_ids(local.address().as_dyn(), &[id]))
                 }
-                ClusterAddressRef::Remote(_) => Ok(self.members().await?.contains(&id)),
+                // One question, rather than the node's whole list back to scan.
+                ClusterAddressRef::Remote(address) => address.call_op(AcceptsOp(vec![id])).await,
             }
         }
     }
@@ -331,12 +377,10 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
         async move {
             match self.as_ref() {
                 ClusterAddressRef::Local(local) => {
-                    let (cluster, address) = (local.cluster(), local.address().as_dyn());
-                    Ok(ids.iter().all(|id| cluster.accepts_id(address, *id)))
+                    Ok(local.cluster().accepts_ids(local.address().as_dyn(), ids))
                 }
-                ClusterAddressRef::Remote(_) => {
-                    let accepts = self.members().await?;
-                    Ok(ids.iter().all(|id| accepts.contains(id)))
+                ClusterAddressRef::Remote(address) => {
+                    address.call_op(AcceptsOp(ids.to_vec())).await
                 }
             }
         }

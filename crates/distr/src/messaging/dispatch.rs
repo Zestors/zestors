@@ -45,20 +45,30 @@ impl Handlers {
         self.by_id.get(id)
     }
 
-    /// Whether `address` accepts the message `id`, in one lookup.
-    pub(crate) fn accepts_id(&self, address: &Address, id: MessageId) -> bool {
-        self.by_id
-            .get(&id)
-            .is_some_and(|handler| handler.accepts(address))
+    /// The ids `address` accepts, among the messages registered here, sorted.
+    pub(crate) fn accepted_ids(&self, address: &impl ActorRef) -> Vec<MessageId> {
+        self.registered_ids(address.members())
     }
 
-    /// The ids `address` accepts, among the messages registered here, sorted.
+    /// Whether `address` accepts every message in `ids`, however many that is.
     ///
-    /// Walks the actor's own message types rather than every handler: an actor
-    /// accepts few messages, a node may know many. The built-in operations are
-    /// not listed, since they are for the channel and not the mailbox.
-    pub(crate) fn accepted_ids(&self, address: &impl ActorRef) -> Vec<MessageId> {
-        let members = address.members();
+    /// Maps the actor's types once and looks each id up in the result, rather
+    /// than rescanning the actor per id. An actor accepts few messages, so the
+    /// list is short whatever `ids` asks about.
+    pub(crate) fn accepts_ids(&self, address: &impl ActorRef, ids: &[MessageId]) -> bool {
+        let accepted = self.registered_ids(address.members());
+        ids.iter().all(|id| accepted.binary_search(id).is_ok())
+    }
+
+    /// The ids registered here for `members`, sorted. The one answer to "which
+    /// of these types can this node name on the wire?", so that a question
+    /// about an actor is answered the same way however it is asked.
+    ///
+    /// Walks the types given rather than every handler: an actor accepts few
+    /// messages, a node may know many. The built-in operations are never
+    /// listed — they are registered by id alone, since they are for the
+    /// actor's channel and not its mailbox.
+    fn registered_ids(&self, members: &[TypeId]) -> Vec<MessageId> {
         let mut accepts: Vec<MessageId> = Vec::with_capacity(members.len());
         accepts.extend(
             members
@@ -96,9 +106,6 @@ pub(super) trait Handler: Send + Sync {
         payload: Bytes,
         reply: bool,
     ) -> BoxFuture<Result<Option<ReplyFuture>, RemoteError>>;
-
-    /// Whether `address` accepts messages of this type.
-    fn accepts(&self, address: &Address) -> bool;
 
     /// Whether the messages are for the actor itself rather than its mailbox,
     /// so that they needn't wait for the messages before them.
@@ -152,10 +159,6 @@ impl<M: Operation> Handler for Builtin<M> {
         })
     }
 
-    fn accepts(&self, _: &Address) -> bool {
-        false
-    }
-
     fn bypasses_queue(&self) -> bool {
         true
     }
@@ -189,9 +192,5 @@ impl<M: RemoteMessage> Handler for Typed<M> {
             });
             Ok(Some(reply))
         })
-    }
-
-    fn accepts(&self, address: &Address) -> bool {
-        address.accepts::<M>()
     }
 }

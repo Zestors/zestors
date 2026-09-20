@@ -945,6 +945,65 @@ async fn what_an_actor_accepts_can_be_asked() {
     assert_eq!(address.name().node().to_string(), "node-b");
 }
 
+/// The operations that read one thing give exactly the answer a full `info()`
+/// would, which is the whole point of their existing: a caller that wants one
+/// number, or asks "do you accept these?", must not make the actor's node
+/// build and serialise its history and its whole accepts list.
+#[tokio::test(start_paused = true)]
+async fn the_narrow_operations_agree_with_a_full_info() {
+    let pair = Pair::start().await;
+    let _worker = worker("ops-narrow", Log::default());
+    let remote = pair.on_b::<WorkerInterface>("ops-narrow").await;
+
+    // Suspended with messages queued, so the counters are neither zero nor
+    // moving between one question and the next.
+    assert!(remote.signal_suspend().await.unwrap());
+    remote.ping().await.unwrap();
+    for i in 0..8 {
+        remote.cast(Note(i)).await.unwrap();
+    }
+
+    let info = remote.info().await.unwrap();
+    assert_eq!(info.snapshot.status, ActorStatus::Suspended);
+    assert!(info.snapshot.msg_len > 0, "{:?}", info.snapshot);
+    assert_eq!(remote.status().await.unwrap(), info.snapshot.status);
+    assert_eq!(remote.msg_len().await.unwrap(), info.snapshot.msg_len);
+    assert_eq!(remote.signal_len().await.unwrap(), info.snapshot.signal_len);
+    assert_eq!(
+        remote.reached_backpressure().await.unwrap(),
+        info.reached_backpressure
+    );
+    assert_eq!(
+        remote.is_exiting().await.unwrap(),
+        info.snapshot.status.is_exiting()
+    );
+    assert_eq!(
+        remote.is_dead().await.unwrap(),
+        info.snapshot.status.is_dead()
+    );
+
+    // Accepted, registered but unaccepted, and unregistered: each answered the
+    // same whether asked one at a time or read off the full list.
+    for id in [Double::Id, Note::Id, Unwanted::Id, Unknown::Id] {
+        assert_eq!(
+            remote.accepts_id(id).await.unwrap(),
+            info.accepts.contains(&id),
+            "{id:?}"
+        );
+        assert_eq!(
+            remote.is_superset_of(&[id]).await.unwrap(),
+            info.accepts.contains(&id),
+            "{id:?}"
+        );
+    }
+
+    // Asking about no messages at all is asking only whether the actor is
+    // there, as it is for one on this node.
+    assert!(remote.is_superset_of(&[]).await.unwrap());
+    let here = local_on_b(&pair, "ops-narrow").await;
+    assert!(here.is_superset_of(&[]).await.unwrap());
+}
+
 #[tokio::test(start_paused = true)]
 async fn operations_report_why_they_failed() {
     let pair = Pair::start().await;

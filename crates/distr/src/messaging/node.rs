@@ -68,9 +68,10 @@ impl Cluster {
         self.messaging().handlers.accepted_ids(address)
     }
 
-    /// Whether `address` accepts the message `id`, without building the list.
-    pub(crate) fn accepts_id(&self, address: &Address, id: MessageId) -> bool {
-        self.messaging().handlers.accepts_id(address, id)
+    /// Whether `address` accepts every message in `ids`, without the list
+    /// itself going anywhere.
+    pub(crate) fn accepts_ids(&self, address: &Address, ids: &[MessageId]) -> bool {
+        self.messaging().handlers.accepts_ids(address, ids)
     }
 
     /// An actor on this node as a [`ClusterAddress`], so that it can be
