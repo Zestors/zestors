@@ -9,8 +9,8 @@ description = "Compiles and runs the code in the zestors book and README as doct
 path = "lib.rs"
 
 [dev-dependencies]
-zestors = { workspace = true }
-zestors-distr = { workspace = true, features = ["sim", "auto-register"] }
+zestors = { path = "../crates/zestors" }
+zestors-distr = { path = "../crates/distr", features = ["sim", "auto-register"] }
 tokio = { workspace = true, features = ["test-util"] }
 serde.workspace = true
 rootcause.workspace = true
