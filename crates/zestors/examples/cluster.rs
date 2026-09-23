@@ -3,9 +3,9 @@
 //! Start the first node, then more that point at it (in separate terminals):
 //!
 //! ```text
-//! cargo run --example cluster -- node-a 127.0.0.1:7001
-//! cargo run --example cluster -- node-b 127.0.0.1:7002 node-a=127.0.0.1:7001
-//! cargo run --example cluster -- node-c 127.0.0.1:7003 node-a=127.0.0.1:7001
+//! cargo run -p zestors --features distr --example cluster -- node-a 127.0.0.1:7001
+//! cargo run -p zestors --features distr --example cluster -- node-b 127.0.0.1:7002 node-a=127.0.0.1:7001
+//! cargo run -p zestors --features distr --example cluster -- node-c 127.0.0.1:7003 node-a=127.0.0.1:7001
 //! ```
 //!
 //! Press Ctrl+C on one node to see the others notice it leave, or kill it

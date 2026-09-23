@@ -36,7 +36,7 @@ jiff.workspace = true
 inventory = { workspace = true, optional = true }
 
 [dev-dependencies]
-zestors = { path = "../zestors" } # path-only: stripped on publish, as `zestors` depends on this crate
+zestors = { path = "../zestors", features = ["distr"] } # path-only: stripped on publish, as `zestors` depends on this crate
 tracing-subscriber.workspace = true
 zestors-distr-quic = { path = "../distr-quic" }
 rcgen.workspace = true

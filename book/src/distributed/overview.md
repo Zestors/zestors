@@ -1,4 +1,4 @@
-# Distributed mode
+# Distributed mode (experimental)
 
 Several `zestors` programs — *nodes* — can form a *cluster*. An actor on one node
 can message an actor on another, using the same `cast` and `call` as for a local
@@ -29,20 +29,23 @@ actor.
 
 ## From a local program to a distributed one
 
-1. **Make the messages remote.** Derive `StableId` and `Serialize`/`Deserialize`
+1. **Enable the `distr` feature** of `zestors`, which adds the `distr` and
+   `distr_quic` modules and their items in the prelude:
+   `zestors = { version = "0.3", features = ["distr"] }`.
+2. **Make the messages remote.** Derive `StableId` and `Serialize`/`Deserialize`
    on each message that crosses the network, and give it an id:
    `#[msg(id = "<uuid>")]`. Its reply type must be serializable too. See
    [Remote messages](remote-messages.md).
-2. **Replace `Node` with `ClusterNode`,** configured with a `ClusterConfig`: the
+3. **Replace `Node` with `ClusterNode`,** configured with a `ClusterConfig`: the
    node's name, the backend, and the seeds to join through. See
    [Running a cluster](running-a-cluster.md).
-3. **Register what each node accepts.** A node that hosts an actor registers the
+4. **Register what each node accepts.** A node that hosts an actor registers the
    messages other nodes may send to it: `config.register::<Msg>()`. Sending needs
    no registration.
-4. **Address actors by `GlobalName`.** `cluster.address::<I>(GlobalName::new("name",
+5. **Address actors by `GlobalName`.** `cluster.address::<I>(GlobalName::new("name",
    "node")).await` gives a `ClusterAddress<I>`. Every actor registered under a
    `Name` is reachable. See [Addressing and sending](addressing.md).
-5. **Handle the network's failures.** A remote call can fail in ways a local one
+6. **Handle the network's failures.** A remote call can fail in ways a local one
    can't: the node is gone, a timeout expires, the message is too large. See
    [Delivery and failure](delivery.md).
 

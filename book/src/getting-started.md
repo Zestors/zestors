@@ -11,10 +11,12 @@ tokio = { version = "1", features = ["full"] }
 rootcause = "0.13"
 ```
 
-For clustering, the messages that cross the network are usually serialized
+Clustering — [distributed mode](distributed/overview.md) — is behind the
+`distr` feature, which is off by default. Its messages are usually serialized
 with `serde`:
 
 ```toml
+zestors = { version = "0.3", features = ["distr"] }
 serde = { version = "1", features = ["derive"] }
 ```
 
@@ -81,7 +83,12 @@ see [Supervision](supervision.md). To run it across several machines, see
 The workspace also has runnable examples in `crates/zestors/examples`:
 
 ```sh
-cargo run -p zestors --example supervision  # a supervision tree, with the HTTP API on :8080
-cargo run -p zestors --example remote       # two cluster nodes in one process
-cargo run -p zestors --example cluster -- node-a 127.0.0.1:7001
+# A supervision tree, with the HTTP API on :8080
+cargo run -p zestors --example supervision
+
+# Two cluster nodes in one process
+cargo run -p zestors --features distr --example remote
+
+# One cluster node per terminal
+cargo run -p zestors --features distr --example cluster -- node-a 127.0.0.1:7001
 ```

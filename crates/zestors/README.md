@@ -18,4 +18,7 @@ The [zestors book](https://zestors.github.io/zestors/) is the guide, from a
 first actor to supervision trees and clusters. The
 [API documentation](https://docs.rs/zestors) is the reference.
 
-Features: `auto-register` enables `ClusterConfig::auto_register`.
+Features:
+- `distr`: distributed mode, the `distr` and `distr_quic` modules. Off by
+  default, and not production ready yet.
+- `auto-register`: enables `ClusterConfig::auto_register`. Implies `distr`.

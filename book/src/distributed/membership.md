@@ -36,9 +36,9 @@ Run it in a few terminals to watch nodes join, and press Ctrl+C or `kill -9` one
 of them to see the others notice it leave or fail:
 
 ```sh
-cargo run -p zestors --example cluster -- node-a 127.0.0.1:7001
-cargo run -p zestors --example cluster -- node-b 127.0.0.1:7002 node-a=127.0.0.1:7001
-cargo run -p zestors --example cluster -- node-c 127.0.0.1:7003 node-a=127.0.0.1:7001
+cargo run -p zestors --features distr --example cluster -- node-a 127.0.0.1:7001
+cargo run -p zestors --features distr --example cluster -- node-b 127.0.0.1:7002 node-a=127.0.0.1:7001
+cargo run -p zestors --features distr --example cluster -- node-c 127.0.0.1:7003 node-a=127.0.0.1:7001
 ```
 
 ## Failure detection

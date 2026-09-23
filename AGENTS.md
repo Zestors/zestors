@@ -45,8 +45,11 @@ Other things nextest gives that matter here:
   on itself enables both), so the feature-less build is only checked by
   `cargo check -p zestors-distr`. Run that too: `auto_register.rs` is gated, but the macro
   feeding it is always compiled.
-- `cargo run -p zestors --example remote` is a good end-to-end smoke test; it should print
+- `cargo run -p zestors --features distr --example remote` is a good end-to-end smoke test; it should print
   two greetings and "5 letters".
+- Distributed mode is behind the `distr` feature of the `zestors` facade (off by default).
+  Workspace builds enable it through the dev-dependencies of `zestors-distr` and
+  `zestors-book`, so check the facade without it on its own: `cargo check -p zestors`.
 - `cargo test -p zestors-book --doc` runs the code in the book and the README; see below.
 - `crates/distr/REVIEW.md` is a handoff note on that crate's open issues and on behaviours
   that look like bugs but are deliberate. Read it before "fixing" anything in `distr`.

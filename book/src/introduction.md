@@ -49,8 +49,8 @@ modules.
 | `zestors::actor`       | `zestors-actor`         | `Handler` (one handler per message) and `Actor` (a full event loop), and `Blueprint`.      |
 | `zestors::supervision` | `zestors-supervision`   | `ChildSpec`, `ChildConfig`, `RestartIntensity`, and the `GetChildren`/`GetHealth` queries. |
 | `zestors::supervisor`  | `zestors-supervisor`    | The `Supervisor` actor, and `Node` to run one as a program.                                |
-| `zestors::distr`       | `zestors-distr`         | Clustering: `ClusterNode`, `Cluster`, `ClusterAddress`, remote messages.                   |
-| `zestors::distr_quic`  | `zestors-distr-quic`    | The QUIC transport for clusters, with mutual TLS.                                          |
+| `zestors::distr`       | `zestors-distr`         | Clustering (feature `distr`): `ClusterNode`, `Cluster`, `ClusterAddress`, remote messages. |
+| `zestors::distr_quic`  | `zestors-distr-quic`    | The QUIC transport for clusters, with mutual TLS (feature `distr`).                         |
 | `zestors::api_server`  | `zestors-api-server`    | An HTTP server for inspecting a running supervision tree.                                  |
 | —                      | `zestors-codegen`       | The derive macros, re-exported in `zestors::prelude`.                                      |
 | —                      | `zestors-distr-backend` | The transport trait, for running a cluster over something other than QUIC.                 |

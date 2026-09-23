@@ -19,8 +19,8 @@ zestors-api-server.workspace = true
 zestors-codegen.workspace = true
 zestors-interface.workspace = true
 zestors-supervisor.workspace = true
-zestors-distr.workspace = true
-zestors-distr-quic.workspace = true
+zestors-distr = { workspace = true, optional = true }
+zestors-distr-quic = { workspace = true, optional = true }
 
 [dev-dependencies]
 tracing-subscriber.workspace = true
@@ -33,9 +33,21 @@ serde.workspace = true
 [features]
 # Only for rust-analyzer in this workspace (see .vscode/settings.json), so that
 # feature-gated code is checked. Not meant to be enabled by users.
-_ra = ["auto-register"]
+_ra = ["distr", "auto-register"]
+# Distributed mode: the `distr` and `distr_quic` modules, and their items in the
+# prelude. Not production ready yet; off by default.
+distr = ["dep:zestors-distr", "dep:zestors-distr-quic"]
 # `ClusterConfig::auto_register`: registers every remote message in the binary.
-auto-register = ["zestors-distr/auto-register"]
+auto-register = ["distr", "zestors-distr/auto-register"]
+
+# The cluster examples need distributed mode.
+[[example]]
+name = "remote"
+required-features = ["distr"]
+
+[[example]]
+name = "cluster"
+required-features = ["distr"]
 
 [package.metadata.docs.rs]
 all-features = true

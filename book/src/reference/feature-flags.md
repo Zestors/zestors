@@ -4,13 +4,11 @@
 
 | Feature | Default | Enables |
 | --- | --- | --- |
-| `auto-register` | off | `ClusterConfig::auto_register`, which registers every remote message in the binary. Same as `zestors-distr/auto-register`. |
+| `distr` | off | [Distributed mode](../distributed/overview.md): the `zestors::distr` and `zestors::distr_quic` modules, and their items in the prelude (`ClusterNode`, `ClusterAccepts`, `StableId`, `Quic`, `Tls`, …). Not production ready yet. |
+| `auto-register` | off | `ClusterConfig::auto_register`, which registers every remote message in the binary. Implies `distr`. |
 
-The `zestors` crate always includes the cluster crates, `zestors-distr` and
-`zestors-distr-quic`. The QUIC stack (`quinn`, `rustls`) is part of every build.
-A program that never runs a cluster and wants to avoid compiling it can depend
-on the crates it needs directly (`zestors-runtime`, `zestors-actor`, …), setting
-the derives' path attributes as in [Derive attributes](derive-attributes.md).
+Without `distr`, the cluster crates and the QUIC stack (`quinn`, `rustls`)
+aren't compiled at all.
 
 ## `zestors-distr`
 

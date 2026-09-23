@@ -1,7 +1,7 @@
 //! Two cluster nodes in one process, talking over QUIC on localhost: `host`
 //! runs an actor, `caller` calls it.
 //!
-//! Run it with `cargo run -p zestors --example remote`. It prints two
+//! Run it with `cargo run -p zestors --features distr --example remote`. It prints two
 //! greetings and "5 letters", then shuts both nodes down.
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;

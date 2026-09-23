@@ -23,8 +23,8 @@
 //! | [`actor`] | [`Handler`](actor::Handler) (one handler per message) and [`Actor`](actor::Actor) (a full event loop), and [`Blueprint`](actor::Blueprint). |
 //! | [`supervision`] | [`ChildSpec`](supervision::ChildSpec), [`ChildConfig`](supervision::ChildConfig), [`RestartIntensity`](supervision::RestartIntensity), and the [`GetChildren`](supervision::messages::GetChildren)/[`GetHealth`](supervision::messages::GetHealth) queries. |
 //! | [`supervisor`] | The [`Supervisor`](supervisor::Supervisor) actor, and [`Node`](supervisor::Node) to run one as a program. |
-//! | [`distr`] | Clustering: [`ClusterNode`](distr::ClusterNode), [`Cluster`](distr::Cluster), [`ClusterAddress`](distr::ClusterAddress), and messages with a [`StableId`](distr::StableId). |
-//! | [`distr_quic`] | The QUIC transport for clusters, with mutual TLS: [`Quic`](distr_quic::Quic) and [`Tls`](distr_quic::Tls). |
+//! | `distr` | Clustering (feature `distr`): `ClusterNode`, `Cluster`, `ClusterAddress`, and messages with a `StableId`. |
+//! | `distr_quic` | The QUIC transport for clusters, with mutual TLS: `Quic` and `Tls` (feature `distr`). |
 //! | [`api_server`] | [`ApiServer`](api_server::ApiServer): an HTTP server for inspecting a running supervision tree. |
 //!
 //! # Example
@@ -70,17 +70,25 @@
 //!
 //! # Features
 //!
+//! - `distr`: distributed mode — the `distr` and `distr_quic` modules, and
+//!   their items in the prelude. Off by default. **Not production ready:** its
+//!   API is bound to change, and there will be bugs.
 //! - `auto-register`: enables `ClusterConfig::auto_register`, which registers
-//!   every remote message in the binary.
+//!   every remote message in the binary. Implies `distr`.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 /// The items you usually need: the derive macros, the reference types, and the
-/// traits that provide their methods (`Accepts`, `ActorOps`, `ClusterAccepts`,
-/// `ClusterActorOps`, …).
+/// traits that provide their methods (`Accepts`, `ActorOps`, …). With the
+/// `distr` feature, also the cluster items (`ClusterNode`, `ClusterAccepts`,
+/// `StableId`, …).
 pub mod prelude {
     pub use zestors_actor::prelude::*;
-    pub use zestors_codegen::{HandlerInterface, Interface, Message, StableId};
+    pub use zestors_codegen::{HandlerInterface, Interface, Message};
+    #[cfg(feature = "distr")]
+    pub use zestors_codegen::StableId;
+    #[cfg(feature = "distr")]
     pub use zestors_distr::prelude::*;
+    #[cfg(feature = "distr")]
     pub use zestors_distr_quic::{Quic, Tls};
     pub use zestors_interface::prelude::*;
     pub use zestors_runtime::prelude::*;
@@ -106,8 +114,12 @@ pub use zestors_supervision as supervision;
 #[doc(inline)]
 pub use zestors_supervisor as supervisor;
 
+#[cfg(feature = "distr")]
+#[cfg_attr(docsrs, doc(cfg(feature = "distr")))]
 #[doc(inline)]
 pub use zestors_distr as distr;
 
+#[cfg(feature = "distr")]
+#[cfg_attr(docsrs, doc(cfg(feature = "distr")))]
 #[doc(inline)]
 pub use zestors_distr_quic as distr_quic;

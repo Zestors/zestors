@@ -2,7 +2,7 @@
 //! each other across them.
 //!
 //! **Not production ready:** the API is bound to change, and there will be
-//! bugs.
+//! bugs. Through the `zestors` crate, it is enabled with the `distr` feature.
 //!
 //! The [distributed mode chapters of the zestors book](https://zestors.github.io/zestors/distributed/overview.html)
 //! explain how the pieces fit together, and what is and isn't guaranteed.

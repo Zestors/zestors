@@ -9,7 +9,7 @@ description = "Compiles and runs the code in the zestors book and README as doct
 path = "lib.rs"
 
 [dev-dependencies]
-zestors = { path = "../crates/zestors" }
+zestors = { path = "../crates/zestors", features = ["distr"] }
 zestors-distr = { path = "../crates/distr", features = ["sim", "auto-register"] }
 tokio = { workspace = true, features = ["test-util"] }
 serde.workspace = true

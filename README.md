@@ -34,7 +34,8 @@ messaged just like a local one.
 
 > [!WARNING]
 > **Distributed mode is not production ready.** Its APIs are bound to change,
-> and there will be bugs. The rest of the framework — actors, messaging and
+> and there will be bugs. It is behind the `distr` feature, which is off by
+> default. The rest of the framework — actors, messaging and
 > supervision — is the mature part.
 
 ## Example
@@ -99,8 +100,9 @@ rootcause = "0.13"
   first actor to supervision trees and clusters.
 - **[API documentation](https://docs.rs/zestors)**: every type in detail.
 - **Examples** in [`crates/zestors/examples`](crates/zestors/examples):
-  `supervision` (a supervision tree with the HTTP API), `remote` (two cluster
-  nodes in one process) and `cluster` (one node per terminal).
+  `supervision` (a supervision tree with the HTTP API), and, with
+  `--features distr`, `remote` (two cluster nodes in one process) and `cluster`
+  (one node per terminal).
 
 A proof-of-concept [inspector GUI](crates/inspector) draws a running supervision
 tree; see [Observability](https://zestors.github.io/zestors/observability.html).

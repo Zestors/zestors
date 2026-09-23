@@ -22,6 +22,6 @@ supervise-example:
 
 # Two cluster nodes in one process; prints two greetings and "5 letters".
 remote-example:
-    @cargo run --example remote
+    @cargo run -p zestors --features distr --example remote
 
 mod inspector "crates/inspector"

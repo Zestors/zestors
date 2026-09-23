@@ -266,5 +266,5 @@ under §1's rule, not a `Remote*` one.
 - The tests always build with `sim` and `auto-register` (the crate's dev-dependency on
   itself enables both), so check the feature-less build with `cargo check -p zestors-distr`:
   `auto_register.rs` is gated but the macro it feeds is always compiled.
-- `cargo run -p zestors --example remote` is a good end-to-end smoke test; it should print
+- `cargo run -p zestors --features distr --example remote` is a good end-to-end smoke test; it should print
   two greetings and "5 letters".
