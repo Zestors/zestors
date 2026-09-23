@@ -15,7 +15,9 @@ pub enum ActorStatus {
     /// The actor is suspended and will not process messages until it is resumed.
     Suspended,
 
-    /// The actor is in the process of shutting down. It will not accept new messages, but will finish processing any messages that are already in the queue.
+    /// The actor is in the process of shutting down. It will not accept new
+    /// messages (unless sent with [`CallOptions::ignore_exiting`]), but will
+    /// finish processing any messages that are already in the queue.
     Exiting,
 }
 
@@ -77,11 +79,8 @@ impl ActorStatus {
 /// Which [`ActorStatus`] an actor is in, without the exit reason that
 /// [`ActorStatus::Exited`] carries.
 ///
-/// This is what [`ActorOps::monitor_any`](crate::ActorOps::monitor_any) waits for. A
-/// status to wait for has to be named before it happens, so it can't carry the
-/// reason it happened; the reason comes back in the [`ActorStatus`] that is
-/// returned. It is also what a monitor on an actor on another node sends, which a
-/// closure could not be.
+/// This is what [`ActorOps::monitor_any`](crate::ActorOps::monitor_any) is told
+/// to wait for; the full [`ActorStatus`], with the reason, comes back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ActorStatusKind {
     /// See [`ActorStatus::Exited`].

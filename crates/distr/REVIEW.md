@@ -4,8 +4,9 @@ A handoff note for whoever works on this crate next. It records inconsistencies,
 ends and restructuring ideas that are not obvious from reading the code, together with
 the reasoning behind some choices that look odd but are deliberate.
 
-Everything below was checked against the tree as of this writing; `cargo test --workspace`
-is green at 41 suites.
+Everything below was checked against the tree as of this writing. User-facing behaviour
+(delivery guarantees, timeouts, the overload drop) is documented in the book's
+distributed-mode chapters (`book/src/distributed/`); this note is for maintainers.
 
 ---
 
@@ -48,27 +49,22 @@ messaging: CommunicationView }`:
 - [`cluster/state.rs`](src/cluster/state.rs) — the type, plus two `impl Cluster` blocks
   for membership (lines 47 and 228).
 - [`messaging/node.rs`](src/messaging/node.rs) — a third `impl Cluster` for messaging
-  (line 63), plus `CommunicationView` and `Serving`.
+  (line 65), plus `CommunicationView` and `Serving`.
 
 The split is **deliberate and worth keeping**: it is what stops `cluster/` from depending
 on `messaging/`. But `messaging/node.rs` is a poor name for "the messaging half of
 `Cluster` plus its runtime state" — it reads as if it were about `ClusterNode`, which
 lives in `cluster/node/mod.rs`. Two different `node`s.
 
-**Suggestion:** rename `messaging/node.rs` → `messaging/cluster.rs` and say in its module
-doc that `Cluster`'s membership half lives in `cluster/state.rs`. One-line change, removes
-a real stumbling block.
+**Suggestion:** rename `messaging/node.rs` → `messaging/cluster.rs`. The `messaging` module
+doc now says where the two halves live, but the file name still misleads.
 
-## 3. Dead code
+## 3. Dead code — resolved
 
-- **`Cluster::membership_only`** ([state.rs:72](src/cluster/state.rs#L72)) warns as dead
-  code on any build without `--features sim`. It is used only by `sim` and by a
-  `#[cfg(test)]` test in `cluster/membership/driver.rs`. Gate it:
-  `#[cfg(any(feature = "sim", test))]`.
-- **`Cargo.toml` feature docs are stale**: the `auto-register` comment still refers to
-  `Cluster::auto_register`, which moved to `ClusterConfig::auto_register`. And `_ra =
-  ["auto-register"]` is undocumented — it looks like a rust-analyzer workaround; say so or
-  drop it.
+- `Cluster::membership_only` is now gated `#[cfg(any(feature = "sim", test))]`, so a build
+  without `sim` no longer warns.
+- The `Cargo.toml` feature comments name `ClusterConfig::auto_register`, and `_ra` is
+  documented as a rust-analyzer-only hook.
 
 ## 4. Things that look like bugs but are not — leave them alone, document them
 
@@ -147,15 +143,15 @@ that both cleanup paths actually empty the registry.
 reason the gap mattered.
 
 ### Medium — a remote cast can be dropped and the sender never told
-[receive.rs:340](src/messaging/receive.rs#L340). When the per-actor queue bound is hit a
+[receive.rs:306](src/messaging/receive.rs#L306). When the per-actor queue bound is hit a
 cast is refused with `Overloaded`; a cast has no reply channel, so the only trace is a
 `tracing::warn!` **on the receiving node**. A *local* cast instead waits out the actor's
 backpressure.
 
 This is the one place where the documented "at most once" quietly becomes "sometimes zero,
-and you will not know". OTP blocks the sender instead (`busy_dist_port`). Minimum: say so
-in the `ClusterAccepts` docs. Better: apply backpressure to the peer's lane rather than
-dropping.
+and you will not know". OTP blocks the sender instead (`busy_dist_port`). It is now
+documented (`ClusterAccepts`, `RemoteError::Overloaded`, the book's delivery chapter).
+Still better: apply backpressure to the peer's lane rather than dropping.
 
 ### Medium — local and remote calls have different timeout rules
 A call through a remote address gets the node's `call_timeout` (30s default); a call
@@ -168,7 +164,8 @@ ignores the local case. OTP's `gen_server:call` is 5s either way.
 [send.rs](src/messaging/send.rs) would then have to carry it into `cast`/`try_cast`.
 
 ### Medium — `auto_register` skips non-remote types in silence
-[auto_register.rs:52](src/messaging/auto_register.rs#L52): `IfNot::register` is an empty
+[auto_register.rs:52](src/messaging/auto_register.rs#L52) (documented on
+`ClusterConfig::auto_register` and in the book, not fixed): `IfNot::register` is an empty
 default. A message that derives `StableId` but is missing `Encode`/`Decode` registers
 nowhere and fails much later with `RemoteError::UnknownMessage`, far from the cause.
 Deriving `StableId` says "this type has a wire identity", so being unable to cross the wire
@@ -180,7 +177,7 @@ emit one `tracing::warn!` naming them. Adding a `ClusterConfig::auto_register_sk
 Vec<&'static str>` makes it testable and lets a user assert on it at startup.
 
 ### Low — two disconnect paths, no stated owner
-[receive.rs:101](src/messaging/receive.rs#L101) fails a node's pending calls on
+[receive.rs:109](src/messaging/receive.rs#L109) fails a node's pending calls on
 `PeerEvent::Disconnected`. [driver.rs:129](src/cluster/membership/driver.rs#L129) treats the
 same event as a non-event, with a comment that "Nothing here rides on a single connection".
 
@@ -193,12 +190,29 @@ pins the behaviour; no behaviour change.
 
 ### Low — two different shard functions in one protocol
 A request's lane is `hash(name) % shards` chosen by the sender; a reply's lane is
-`call_id % shards` chosen by the replier ([receive.rs:160](src/messaging/receive.rs#L160)),
+`call_id % shards` chosen by the replier ([receive.rs:168](src/messaging/receive.rs#L168)),
 and `shards` is each node's own `lanes` config, so the two sides can disagree on the count.
 
 This is correct — a lane only orders what passes through it, and replies are matched by
 `call_id`, not by lane — but nothing says so, and the pairing invites the assumption that
 both sides must agree. One comment.
+
+### Low — `ClusterAddress` can't change its context
+A local reference converts between contexts with `IntoDyn`/`AsDyn` (`into_dyn`,
+`into_dyn_checked`, `downcast`). `ClusterAddress<C>` has none of these: the context is fixed
+by `Cluster::address::<I>()` / `address_dyn::<S>()` at creation. The book's dynamic-addresses
+chapter says so. A compile-time `into_dyn` is cheap for both targets (the remote one only
+carries a name); a checked one would need an `AcceptsOp` round trip for a remote target.
+
+### Why some public docs don't explain themselves — moved here from rustdoc
+- `Cluster::local_address` takes the `Cluster` because operations that go by `MessageId`
+  (`members`, `accepts`) answer from the node's registry of registered messages, so that a
+  node says the same about an actor however it is asked.
+- `ClusterActorOps::info` is the only operation that carries the actor's history and
+  accepts list; the one-field reads ask for that field alone (see §6).
+- `ClusterActorOps::monitor_init` can't tell a never-spawned channel from an exited one on
+  another node: the local version checks `last_spawned_at`, which isn't asked over the wire.
+  Reaching an actor by name makes that a corner case.
 
 ## 6. Done: narrow built-in ops, instead of always asking for the full info
 
@@ -246,11 +260,11 @@ under §1's rule, not a `Remote*` one.
   would delete that capability and the whole distr suite with it. `Registry` gets away with
   it because a registry is genuinely process-wide and needs no configuration; a `Cluster`
   needs `local_name`, `call_timeout` and `shards` before it can exist.
-- **Run the suite with `cargo nextest run --workspace`** (3-4s), not `cargo test --workspace`
-  (27s). nextest does not run doctests, so `cargo test --workspace --doc` is the other half.
-  See `CLAUDE.md` at the repo root. The old note here said this suite takes ~105s — that was
-  compilation, not the tests, which are seconds.
-- Check **both** `--features auto-register` and without: `auto_register.rs` is gated but the
-  macro it feeds is always compiled.
+- **Run the suite with `cargo nextest run --workspace`** (seconds), not `cargo test
+  --workspace`. nextest does not run doctests, so `cargo test --workspace --doc` is the
+  other half. See `AGENTS.md` at the repo root.
+- The tests always build with `sim` and `auto-register` (the crate's dev-dependency on
+  itself enables both), so check the feature-less build with `cargo check -p zestors-distr`:
+  `auto_register.rs` is gated but the macro it feeds is always compiled.
 - `cargo run -p zestors --example remote` is a good end-to-end smoke test; it should print
   two greetings and "5 letters".

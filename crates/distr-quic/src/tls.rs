@@ -21,18 +21,26 @@ const ALPN: &[u8] = b"zestors/1";
 /// Errors that can occur while building a [`Tls`] configuration.
 #[derive(Debug, thiserror::Error)]
 pub enum TlsError {
+    /// A PEM input couldn't be parsed.
     #[error("Invalid PEM input: {0}")]
     Pem(#[from] rustls::pki_types::pem::Error),
+    /// The certificate input held no certificates.
     #[error("No certificates found in PEM input")]
     NoCertificates,
+    /// rustls rejected the configuration, for example a key that doesn't
+    /// match the certificate.
     #[error("Invalid TLS configuration: {0}")]
     Rustls(#[from] rustls::Error),
+    /// The CA certificates couldn't be used to verify peers.
     #[error("Failed to build client certificate verifier: {0}")]
     Verifier(#[from] rustls::server::VerifierBuilderError),
+    /// A self-signed certificate couldn't be made.
     #[error("Failed to generate a self-signed certificate: {0}")]
     Generate(#[from] rcgen::Error),
+    /// The node's certificate doesn't carry exactly one DNS name.
     #[error("The certificate must carry exactly one DNS name, the node name; found {0}")]
     CertificateNames(usize),
+    /// The node's certificate couldn't be read.
     #[error("Invalid certificate: {0}")]
     Certificate(String),
 }
@@ -43,9 +51,9 @@ pub enum TlsError {
 /// cluster's CA and verifies the certificates of its peers (mutual TLS).
 ///
 /// A certificate belongs to one node: it carries exactly one DNS name, the
-/// node's [`NodeId`](zestors_distr_backend::NodeId). That name is how a node is dialed (as the
-/// TLS server name), and who a peer is, as far as the cluster is concerned, is
-/// the name in the certificate it presented.
+/// node's [`NodeName`]. That name is how a node is dialed (as the TLS server
+/// name), and who a peer is, as far as the cluster is concerned, is the name in
+/// the certificate it presented.
 ///
 /// Mutual TLS authenticates *cluster membership*: every node holding a
 /// certificate from the CA is trusted.

@@ -1,4 +1,28 @@
-//! Macros for the `zestors` crate.
+//! The derive macros of `zestors`, re-exported in `zestors::prelude`:
+//!
+//! - [`Message`](derive@Message): a message, fire-and-forget or with a reply.
+//! - [`Interface`](derive@Interface): the set of messages an actor accepts.
+//! - [`HandlerInterface`](derive@HandlerInterface): dispatch from an
+//!   interface to a `Handler`'s `Handle<M>` implementations.
+//! - [`StableId`](derive@StableId): a message's id on the wire, for sending
+//!   it to other nodes.
+//!
+//! # Attributes
+//!
+//! All derives read `#[msg(...)]` and `#[zestors(...)]`; the two are
+//! interchangeable.
+//!
+//! | Key | Used by | Meaning |
+//! |---|---|---|
+//! | `reply = T` | `Message` | The message expects a reply of type `T`. Quote types with generics: `reply = "Option<u32>"`. |
+//! | `id = "<uuid>"` | `StableId` | The message's id. Required. |
+//! | `no_auto_register` | `StableId` | Leave the type out of `ClusterConfig::auto_register`. |
+//! | `interface_path = "path"` | `Message`, `Interface` | Where to find `zestors-interface`. Default `::zestors::interface`. |
+//! | `actor_path = "path"` | `HandlerInterface` | Where to find `zestors-actor`. Default `::zestors::actor`. |
+//! | `distr_path = "path"` | `StableId` | Where to find `zestors-distr`. Default `::zestors::distr`. |
+//!
+//! The path keys are only needed when depending on the `zestors-*` crates
+//! directly instead of on `zestors`.
 
 extern crate proc_macro;
 use darling::FromAttributes;
@@ -7,10 +31,13 @@ use proc_macro2::Span;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, Fields, Type};
 
-/// Derives the `Interface` trait for an enum.
+/// Derives the `Interface` trait for an enum: the set of messages an actor
+/// accepts.
 ///
-/// This only works un unnamed, single-value enum-fields that are envelopes.
-/// Anything else is rejected.
+/// Every variant must be a tuple variant holding exactly one `Envelope<M>`,
+/// with each message type `M` appearing once; anything else is rejected.
+/// Generic enums aren't supported. Besides `Interface`, it generates the
+/// conversions between each `Envelope<M>` and the enum.
 ///
 /// # Example
 /// ```
@@ -27,9 +54,8 @@ pub fn derive_interface_polybox(input: TokenStream) -> TokenStream {
     derive_interface(input)
 }
 
-/// The attributes shared by all derives: `#[zestors(interface_path = "..",
-/// distr_path = "..", actor_path = "..")]` override where the generated code
-/// finds each crate, and `#[msg(reply = .., id = "..")]` configure messages.
+/// The attributes shared by all derives, read from both `#[zestors(..)]` and
+/// `#[msg(..)]`; see the crate docs for what each key means.
 #[derive(darling::FromAttributes)]
 #[darling(attributes(zestors, msg))]
 struct Attrs {
@@ -194,9 +220,44 @@ fn derive_interface(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-/// Derives the `HandlerInterface` trait for an enum, allowing it to act as a
-/// handler interface for an actor. Each variant must contain a single unnamed
-/// field of type `Envelope<T>`.
+/// Derives the `HandlerInterface` trait for an enum, which dispatches each
+/// variant to the `Handle<M>` implementation of a `Handler`. Use it next to
+/// `#[derive(Interface)]` on the enum that is the handler's `Interface`.
+///
+/// The generated code names `rootcause::Report`, so the crate using it must
+/// depend on `rootcause`.
+///
+/// # Example
+/// ```
+/// use zestors::interface::{Envelope, Interface, Message};
+/// use zestors::prelude::*;
+///
+/// #[derive(Message, Debug)]
+/// struct Ping;
+///
+/// #[derive(Interface, HandlerInterface, Debug)]
+/// enum PingInterface {
+///     Ping(Envelope<Ping>),
+/// }
+///
+/// #[derive(Debug)]
+/// struct Pinger;
+///
+/// impl Handler for Pinger {
+///     type Interface = PingInterface;
+/// }
+///
+/// impl Handle<Ping> for Pinger {
+///     async fn handle(
+///         &mut self,
+///         _ctx: HandlerContext<'_, Self>,
+///         _msg: Ping,
+///         _req: (),
+///     ) -> Result<(), rootcause::Report> {
+///         Ok(())
+///     }
+/// }
+/// ```
 #[proc_macro_derive(HandlerInterface, attributes(zestors))]
 pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -256,9 +317,14 @@ pub fn derive_actor_interface(input: TokenStream) -> TokenStream {
 
 /// Derives the `Message` trait.
 ///
-/// This macro accepts an optional `reply` attribute to specify the reply type for the message.
-/// When `reply` is specified, the receipt becomes a `Response` and the resolver a `Request`.
+/// Without attributes the message is fire-and-forget (`Kind = Cast`). With
+/// `#[msg(reply = T)]` it expects a reply of type `T` (`Kind = Call`): it is
+/// sent with a `Request<T>`, and the sender waits on a `Reply<T>`. Quote a type
+/// with generics: `#[msg(reply = "Option<u32>")]`.
 ///
+/// To send the message to other nodes, also derive
+/// [`StableId`](derive@StableId) and serde's `Serialize`/`Deserialize`; the
+/// id goes in the same attribute, `#[msg(reply = u32, id = "<uuid>")]`.
 ///
 /// # Example
 /// ```
@@ -306,14 +372,18 @@ pub fn derive_message(input: TokenStream) -> TokenStream {
 }
 
 /// Derives the `StableId` trait, giving the message a stable, globally unique
-/// [`MessageId`](https://docs.rs/zestors-distr) that identifies it across nodes.
+/// [`MessageId`](https://docs.rs/zestors-distr/latest/zestors_distr/struct.MessageId.html)
+/// that identifies it across nodes.
 ///
 /// The id is set with `#[msg(id = "<uuid>")]`. If it is missing, compilation
-/// fails with a freshly generated random id that can be pasted in.
+/// fails with a freshly generated random id that can be pasted in. Once nodes
+/// running different builds may talk to each other, never change an id, and
+/// never give two types the same one: registering both on a node panics.
 ///
 /// With the `auto-register` feature of `zestors-distr`, a type that isn't
-/// generic is also collected for `Cluster::auto_register`, which registers it
-/// if it is a `RemoteMessage`. `#[msg(no_auto_register)]` leaves it out.
+/// generic is also collected for `ClusterConfig::auto_register`, which
+/// registers it if it is a `RemoteMessage`. `#[msg(no_auto_register)]` leaves
+/// it out.
 ///
 /// # Example
 /// ```

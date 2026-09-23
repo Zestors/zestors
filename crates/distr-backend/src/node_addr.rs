@@ -11,10 +11,12 @@ use std::{fmt, net::SocketAddr};
 pub struct NodeAddr(SmolStr);
 
 impl NodeAddr {
+    /// An address, in the form the backend expects.
     pub fn new(addr: impl Into<SmolStr>) -> Self {
         Self(addr.into())
     }
 
+    /// The address as a string.
     pub fn as_str(&self) -> &str {
         &self.0
     }

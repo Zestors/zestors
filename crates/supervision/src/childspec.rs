@@ -105,8 +105,7 @@ impl<T: Blueprint> ChildSpec<T> {
     }
 }
 
-// Implementations when T can be any type that implements RepeatSpawn
-// (including DynRepeatSpawner)
+// Implementations for any `T: Start`, including the type-erased `DynStarter`.
 impl<T: Start> ChildSpec<T> {
     /// Returns this spec's [`ChildConfig`].
     pub fn cfg(&self) -> &ChildConfig {
@@ -185,8 +184,8 @@ impl<T: Start + Debug> Debug for ChildSpec<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ChildSpec")
             .field("cfg", &self.cfg)
-            .field("spawner", &self.blueprint)
-            .field("data", &self.channel)
+            .field("blueprint", &self.blueprint)
+            .field("channel", &self.channel)
             .finish()
     }
 }
@@ -197,7 +196,7 @@ impl<T: Blueprint> From<ChildSpec<T>> for ChildSpec {
     }
 }
 
-/// Convenience methods for turning an [`Blueprint`] into a [`ChildSpec`],
+/// Convenience methods for turning a [`Blueprint`] into a [`ChildSpec`],
 /// implemented automatically for every [`Blueprint`].
 pub trait BlueprintSupervisionExt: Blueprint + Sized {
     /// Type-erases this blueprint into a [`DynStarter`].

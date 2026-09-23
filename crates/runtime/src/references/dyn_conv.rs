@@ -46,9 +46,8 @@ pub trait IntoDyn: ActorRef + Sized {
     /// Converts to the [`Context`] `C` without checking that the underlying
     /// channel actually supports it.
     ///
-    /// # Safety-adjacent note
-    /// This does not perform an unsafe cast, but an incorrect `C` will cause
-    /// later operations (e.g. sending a message not accepted by `C`) to panic.
+    /// This is not `unsafe`, but with an incorrect `C`, sending a message the
+    /// actor doesn't accept will panic.
     /// Prefer [`IntoDyn::into_dyn`], [`IntoDyn::into_dyn_checked`], or
     /// [`IntoDyn::downcast`].
     fn into_context_unchecked<C>(self) -> Self::Ref<C>

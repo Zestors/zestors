@@ -1,0 +1,20 @@
+[package]
+name = "zestors-book"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Compiles and runs the code in the zestors book and README as doctests"
+
+[lib]
+path = "lib.rs"
+
+[dev-dependencies]
+zestors = { workspace = true }
+zestors-distr = { workspace = true, features = ["sim", "auto-register"] }
+tokio = { workspace = true, features = ["test-util"] }
+serde.workspace = true
+rootcause.workspace = true
+futures.workspace = true
+
+[package.metadata.cargo-machete]
+ignored = ["zestors", "zestors-distr", "tokio", "serde", "rootcause", "futures"] # only used in doctests

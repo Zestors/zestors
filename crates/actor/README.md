@@ -9,4 +9,5 @@ Declarative actor implementation on top of
 package either as a `Blueprint`.
 
 Part of the [`zestors`](https://crates.io/crates/zestors) actor framework —
-see that crate's documentation for a guided introduction.
+see the [zestors book](https://zestors.github.io/zestors/) for a guided
+introduction.

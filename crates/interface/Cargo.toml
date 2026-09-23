@@ -2,10 +2,14 @@
 name = "zestors-interface"
 version = "0.2.0"
 edition = "2024"
-license = "MIT OR Apache-2.0"
 readme = "README.md"
 description = "Message/Interface vocabulary for the zestors actor framework"
-repository = "https://github.com/Zestors/zestors"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 type-sets.workspace = true

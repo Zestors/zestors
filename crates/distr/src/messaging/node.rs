@@ -61,8 +61,7 @@ impl CommunicationView {
     }
 }
 
-/// Messaging between actors: registers what this node accepts, and makes
-/// [`ClusterAddress`]es to send with.
+/// Messaging between actors: making [`ClusterAddress`]es to send with.
 impl Cluster {
     /// How many monitors other nodes are holding on actors here. For tests that
     /// check a monitor is let go of.
@@ -85,26 +84,42 @@ impl Cluster {
     }
 
     /// An actor on this node as a [`ClusterAddress`], so that it can be
-    /// operated on the same way as one anywhere else in the cluster. The
-    /// cluster is needed because the operations that go by
-    /// [`MessageId`] answer from its registry.
+    /// handled the same way as one anywhere else in the cluster.
     pub fn local_address<C: Context>(&self, address: Address<C>) -> ClusterAddress<C> {
         ClusterAddress::local(self.clone(), address)
     }
 
-    /// The actor `target`, whether it is on this node or another — which
-    /// [`ClusterAddress::is_local`] tells apart, though nothing else need.
-    /// `I` is what it accepts.
+    /// An address for the actor `target`, which accepts the interface `I`,
+    /// wherever it is in the cluster.
     ///
-    /// The actor is looked up where it is: in the registry of this node, or by
-    /// asking the node it is on. It has to be running, and accept `I`.
+    /// The actor is looked up where it is: in this node's registry, or by
+    /// asking the node it is on, which has to be a reachable member. It has to
+    /// be registered under that name, and accept every message in `I`.
     ///
-    /// For an actor on another node, that node has to be a reachable member,
-    /// and every message in `I` is asked about — which is why `I`'s messages
-    /// must all be able to cross the network, see [`RemoteSet`].
+    /// Every message in `I` has to be a [`RemoteMessage`](crate::RemoteMessage)
+    /// (see [`RemoteSet`]). For an interface with messages that can't cross the
+    /// network, address the part that can with [`Cluster::address_dyn`].
     ///
-    /// Use [`Cluster::address_dyn`] for a set of messages instead of a whole
-    /// interface.
+    /// A remote address is resolved by name on every send, so it follows the
+    /// actor across restarts under the same name.
+    ///
+    /// ```no_run
+    /// # use zestors::{distr::{Cluster, GlobalName}, interface::{Envelope, Interface, Message}, prelude::*};
+    /// # use serde::{Deserialize, Serialize};
+    /// # #[derive(Message, StableId, Serialize, Deserialize, Debug)]
+    /// # #[msg(reply = u32, id = "1c3d5e7f-2a4b-4c6d-8e0f-a1b2c3d4e5f7")]
+    /// # struct Double(u32);
+    /// # #[derive(Interface, Debug)]
+    /// # enum CalcInterface { Double(Envelope<Double>) }
+    /// # async fn example(cluster: Cluster) -> Result<(), Box<dyn std::error::Error>> {
+    /// cluster.wait_for_members(1).await;
+    /// let calc = cluster
+    ///     .address::<CalcInterface>(GlobalName::new("calc", "node-b"))
+    ///     .await?;
+    /// assert_eq!(calc.call(Double(21)).await?, 42);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn address<I: Interface>(
         &self,
         target: GlobalName,

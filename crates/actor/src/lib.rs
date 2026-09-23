@@ -17,7 +17,7 @@
 //! handler additionally react to arbitrary futures alongside its messages and
 //! signals.
 //!
-//! An [`Blueprint`] is a reusable recipe for producing an actor,
+//! A [`Blueprint`] is a reusable recipe for producing an actor,
 //! together with the default [`RestartMode`] a supervisor should apply to it.
 //!
 //! # Example
@@ -92,10 +92,11 @@
 //! # }
 //! ```
 //!
-//! Deriving `Handler` this way is optional - implementing [`Actor`] directly
-//! gives full control over the event loop (reading messages, signals, and
-//! other futures in whatever order and combination the actor needs), at the
-//! cost of writing that loop by hand instead of getting it for free.
+//! [`Handler`] is optional: implementing [`Actor`] directly gives full control
+//! over the event loop (reading messages, signals, and other futures in
+//! whatever order the actor needs), at the cost of writing that loop by hand.
+//! The [zestors book](https://zestors.github.io/zestors/handler.html) covers
+//! both.
 
 mod actor;
 

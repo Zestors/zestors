@@ -8,4 +8,5 @@ The actor runtime underlying [`zestors`](https://crates.io/crates/zestors):
 signals.
 
 Part of the [`zestors`](https://crates.io/crates/zestors) actor framework —
-see that crate's documentation for a guided introduction.
+see the [zestors book](https://zestors.github.io/zestors/) for a guided
+introduction.

@@ -1,6 +1,29 @@
-//! QUIC as a [`Backend`]: mutually authenticated, with native streams and
-//! datagrams. This only adapts `quinn`; connection management and message
-//! handling are done by the cluster.
+//! QUIC as a [`Backend`] for `zestors-distr` clusters: mutually authenticated,
+//! with native streams and datagrams. This only adapts `quinn`; connection
+//! management and message handling are done by the cluster.
+//!
+//! A node gets a [`Quic`] backend with the address to listen on and its TLS
+//! identity, [`Tls`]:
+//!
+//! ```no_run
+//! use zestors_distr_quic::{Quic, Tls};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let tls = Tls::from_pem(
+//!     &std::fs::read("ca.pem")?,     // the cluster CA, which peers must chain to
+//!     &std::fs::read("node-a.pem")?, // this node's certificate, for the DNS name `node-a`
+//!     &std::fs::read("node-a.key")?, // this node's private key
+//! )?;
+//! let quic = Quic::new("0.0.0.0:7000".parse()?, tls);
+//! # let _ = quic;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! The node's name must be a DNS name, and the only DNS name in its
+//! certificate. For local development, [`Tls::insecure_dev`] skips all
+//! verification. The [zestors book](https://zestors.github.io/zestors/distributed/running-a-cluster.html)
+//! shows how to make a CA and node certificates.
 
 mod tls;
 
@@ -39,7 +62,8 @@ impl Default for QuicTimings {
 /// The default [`Backend`]: mutually authenticated QUIC.
 ///
 /// Every node presents a certificate that the others verify (see [`Tls`]). A
-/// node is dialed by its name, and a peer is whoever its certificate names.
+/// node is dialed by its name, and a peer is whoever its certificate names, so
+/// a node's name must be a valid DNS name; starting fails otherwise.
 pub struct Quic {
     bind: SocketAddr,
     tls: Tls,

@@ -11,13 +11,11 @@
 //! Press Ctrl+C on one node to see the others notice it leave, or kill it
 //! with `kill -9` to see them detect the crash after a few seconds.
 use std::net::SocketAddr;
-use zestors::{distr_quic::Quic, prelude::*, supervisor::Supervisor};
+use zestors::{prelude::*, supervisor::Supervisor};
 
 #[tokio::main]
 async fn main() -> Result<(), ClusterNodeError> {
-    tracing_subscriber::fmt()
-        .with_env_filter("info,zestors_distr=info")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("info").init();
 
     let mut args = std::env::args().skip(1);
     let name = args
@@ -25,6 +23,7 @@ async fn main() -> Result<(), ClusterNodeError> {
         .expect("usage: cluster <name> <bind> [seed-name=seed-addr]...");
     let bind: SocketAddr = args.next().expect("missing bind address").parse().unwrap();
 
+    // ANCHOR: config
     // Development only: use `Tls::from_pem` to authenticate cluster members.
     let mut config = ClusterConfig::new(name, Quic::new(bind, Tls::insecure_dev().unwrap()));
     for seed in args {
@@ -45,4 +44,5 @@ async fn main() -> Result<(), ClusterNodeError> {
     });
 
     node.run().await
+    // ANCHOR_END: config
 }

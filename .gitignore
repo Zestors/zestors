@@ -2,3 +2,4 @@ target
 Cargo.lock
 .hidden
 rustc-ice-*.txt
+book/book

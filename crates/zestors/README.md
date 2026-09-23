@@ -2,15 +2,20 @@
 
 [![crates.io](https://img.shields.io/crates/v/zestors.svg)](https://crates.io/crates/zestors)
 [![Documentation](https://docs.rs/zestors/badge.svg)](https://docs.rs/zestors)
+[![Book](https://img.shields.io/badge/book-zestors-blue)](https://zestors.github.io/zestors/)
 
-`zestors` is an actor framework for Rust with Erlang/OTP-style supervision.
+`zestors` is an actor framework for Rust with Erlang/OTP-style supervision and
+clustering.
 
-This is the facade crate: it re-exports the `zestors-*` workspace crates as
-modules (`zestors::interface`, `zestors::runtime`, `zestors::actor`,
-`zestors::supervision`, `zestors::supervisor`, `zestors::api_server`) and
-collects the commonly used items in `zestors::prelude`. Depend on this
-crate rather than the individual `zestors-*` crates directly.
+This is the facade crate. It re-exports the `zestors-*` crates as modules
+(`zestors::interface`, `zestors::runtime`, `zestors::actor`,
+`zestors::supervision`, `zestors::supervisor`, `zestors::distr`,
+`zestors::distr_quic`, `zestors::api_server`), and collects the commonly used
+items, including the derive macros, in `zestors::prelude`. Depend on this crate
+rather than on the individual `zestors-*` crates.
 
-See the [crate documentation](https://docs.rs/zestors) for a guided
-walkthrough, from defining your first message to building a supervision
-tree.
+The [zestors book](https://zestors.github.io/zestors/) is the guide, from a
+first actor to supervision trees and clusters. The
+[API documentation](https://docs.rs/zestors) is the reference.
+
+Features: `auto-register` enables `ClusterConfig::auto_register`.

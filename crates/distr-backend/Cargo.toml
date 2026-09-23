@@ -2,10 +2,14 @@
 name = "zestors-distr-backend"
 version = "0.2.0"
 edition = "2024"
-license = "MIT OR Apache-2.0"
 readme = "README.md"
-description = "The transport interface of zestors-distr clusters: implement it to run a cluster over another network"
-repository = "https://github.com/Zestors/zestors"
+description = "The transport interface of zestors-distr clusters"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 serde.workspace = true

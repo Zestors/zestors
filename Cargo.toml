@@ -13,8 +13,17 @@ members = [
   "crates/distr",
   "crates/distr-backend",
   "crates/distr-quic",
+  "book",
 ]
 
+
+[workspace.package]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Zestors/zestors"
+homepage = "https://zestors.github.io/zestors/"
+authors = ["Jasper van der Werf"]
+keywords = ["actor", "actor-system", "tokio", "supervision", "distributed"]
+categories = ["concurrency", "asynchronous"]
 
 [workspace.dependencies]
 zestors-inspector = { path = "crates/inspector", version = "0.2.0" }

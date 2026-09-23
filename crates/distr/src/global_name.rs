@@ -15,6 +15,7 @@ pub struct GlobalName {
 }
 
 impl GlobalName {
+    /// The actor registered as `name` on the node `node`.
     pub fn new(name: impl Into<Name>, node: impl Into<NodeName>) -> Self {
         Self {
             name: name.into(),
@@ -32,6 +33,7 @@ impl GlobalName {
         &self.name
     }
 
+    /// Splits into the name and the node.
     pub fn into_parts(self) -> (Name, NodeName) {
         (self.name, self.node)
     }

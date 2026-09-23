@@ -2,10 +2,14 @@ use crate::*;
 use std::sync::OnceLock;
 use type_sets::{AsTypeSet, Members};
 
-/// A thread-safe global registry mapping name ([`Name`]) to their weak handles ([`Address`]).
+/// The process-wide registry of actors, mapping each [`Name`] to an
+/// [`Address`]. Reach it with [`Registry::local`].
 ///
-/// Processes automatically register themselves in the registry upon creation
-/// and deregister upon termination.
+/// An actor is registered when its channel is created, and deregistered once
+/// the last strong reference to it (a [`Child`], [`StrongAddress`] or
+/// [`Inbox`]) is dropped — not when its task exits. An actor that has exited
+/// but whose `StrongAddress` is still held, for example by a supervisor that
+/// will restart it, stays registered.
 #[derive(Debug)]
 pub struct Registry {
     processes: papaya::HashMap<Name, Address>,

@@ -9,4 +9,5 @@ running supervision tree. The endpoints are unstable and may change with
 minor version bumps.
 
 Part of the [`zestors`](https://crates.io/crates/zestors) actor framework —
-see that crate's documentation for a guided introduction.
+see the [zestors book](https://zestors.github.io/zestors/) for a guided
+introduction.

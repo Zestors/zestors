@@ -11,8 +11,12 @@ use zestors_supervision::messages::{GetChildren, GetHealth};
 #[zestors(interface_path = "zestors_interface")]
 #[non_exhaustive]
 pub enum SupervisorInterface {
+    /// Lists the supervisor's children.
     Children(Envelope<GetChildren>),
+    /// Reports the supervisor's health.
     Health(Envelope<GetHealth>),
+    /// Adds a child.
     Register(Envelope<RegisterChild>),
+    /// Removes a child, stopping it.
     Deregister(Envelope<DeregisterChild>),
 }

@@ -7,4 +7,5 @@ actor tree, by connecting to the introspection endpoints exposed by
 [`zestors-api-server`](https://crates.io/crates/zestors-api-server).
 
 Part of the [`zestors`](https://crates.io/crates/zestors) actor framework —
-see that crate's documentation for a guided introduction.
+see the [zestors book](https://zestors.github.io/zestors/) for a guided
+introduction.

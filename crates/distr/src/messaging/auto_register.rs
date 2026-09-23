@@ -1,5 +1,5 @@
 //! Registering every message type in the binary at once, see
-//! [`Cluster::auto_register`].
+//! [`ClusterConfig::auto_register`].
 
 use super::{Handlers, RemoteMessage};
 use crate::ClusterConfig;
@@ -62,10 +62,15 @@ impl ClusterConfig {
     /// crates it depends on. Available with the `auto-register` feature.
     ///
     /// Types are collected where they are derived, so it makes no difference
-    /// where or how often this is called. Only those that are a
-    /// [`RemoteMessage`] are registered; a generic type has no one type to
-    /// collect, and is registered with [`ClusterConfig::register`] like one
-    /// that opts out with `#[msg(no_auto_register)]`.
+    /// where or how often this is called. Left out are:
+    /// - generic types, which have to be registered with
+    ///   [`ClusterConfig::register`] once per concrete type;
+    /// - types marked `#[msg(no_auto_register)]`;
+    /// - types that aren't a [`RemoteMessage`], for example because they don't
+    ///   implement `Serialize`. They are skipped **silently**, and a sender
+    ///   gets [`RemoteError::UnknownMessage`](crate::RemoteError::UnknownMessage)
+    ///   back. When that happens for a type that derives `StableId`, check its
+    ///   other derives.
     ///
     /// ```no_run
     /// # use zestors_distr::ClusterConfig;
@@ -80,6 +85,7 @@ impl ClusterConfig {
     /// [`MessageId`](crate::MessageId), as
     /// [`ClusterConfig::register`] does. Collecting a type that was also
     /// registered by hand is not that, and only logs a warning.
+    #[cfg_attr(docsrs, doc(cfg(feature = "auto-register")))]
     pub fn auto_register(mut self) -> Self {
         for registration in inventory::iter::<Registration> {
             (registration.register)(&mut self.handlers);

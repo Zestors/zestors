@@ -2,10 +2,14 @@
 name = "zestors-distr-quic"
 version = "0.2.0"
 edition = "2024"
-license = "MIT OR Apache-2.0"
 readme = "README.md"
-description = "A QUIC backend for zestors-distr clusters, see zestors-distr-backend"
-repository = "https://github.com/Zestors/zestors"
+description = "A QUIC backend with mutual TLS for zestors-distr clusters"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 zestors-distr-backend.workspace = true

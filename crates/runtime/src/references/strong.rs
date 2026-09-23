@@ -131,9 +131,9 @@ impl<T: Context> Hash for StrongAddress<T> {
     }
 }
 
-/// A point-in-time snapshot of a channel's status and history, returned by
-/// [`ActorOps::snapshot`]. Unlike reading each piece individually through
-/// [`ActorOps`], every field here reflects the exact same instant.
+/// A snapshot of a channel's status, queue lengths and history, returned by
+/// [`ActorOps::snapshot`]. The fields are read one after another without
+/// stopping the actor, so under load they can be a moment apart.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChannelSnapshot {
     /// The actor's [`Name`].

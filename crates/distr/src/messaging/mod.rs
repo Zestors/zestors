@@ -1,56 +1,13 @@
-//! Messages to actors on other nodes.
+//! Messages to actors in the cluster, local or remote.
 //!
-//! A [`RemoteMessage`] is sent to a [`GlobalName`] through a [`ClusterAddress`];
-//! the node that hosts the actor decodes it and delivers it like any local
-//! message, and sends the reply back. A [`ClusterAddress`] is the same for an
-//! actor that may be on this node too, which is then reached without leaving
-//! the process.
+//! A [`ClusterAddress`] reaches an actor by its `GlobalName`. For an actor on
+//! another node, `send` frames and sends the message, the other node's
+//! `receive` decodes it through the handlers in `dispatch` and delivers it like
+//! a local message, and the reply comes back through `pending`. For an actor on
+//! this node, the message goes straight into its mailbox, unencoded.
 //!
-//! Which message types a node accepts is decided by registering them with
-//! [`ClusterConfig::register`](crate::ClusterConfig::register), before the node
-//! is built. Any registered message can then reach any local actor
-//! that accepts it, addressed by its [`Name`](zestors_runtime::Name).
-//!
-//! Nothing here requires a message to be serde: it must be [`Encode`] and
-//! [`Decode`], which every serde type is, and can be by hand for anything else.
-//! [`Message`](zestors_interface::Message) itself is unchanged.
-//!
-//! A reply channel can be part of a message too: see [`RemoteRequest`].
-//!
-//! ```no_run
-//! use serde::{Deserialize, Serialize};
-//! use zestors::{
-//!     distr::{ClusterAddress, ClusterConfig, ClusterNode, GlobalName},
-//!     interface::{Envelope, Interface, Message},
-//!     prelude::*,
-//! };
-//!
-//! // A message that can cross the network: it has a stable id, and serde.
-//! #[derive(Message, StableId, Serialize, Deserialize, Debug)]
-//! #[msg(reply = u32, id = "1c3d5e7f-2a4b-4c6d-8e0f-a1b2c3d4e5f6")]
-//! struct Double(u32);
-//!
-//! #[derive(Interface, Debug)]
-//! enum CounterInterface {
-//!     Double(Envelope<Double>),
-//! }
-//!
-//! // Which messages a node accepts is fixed when it is built.
-//! # fn configure(config: ClusterConfig) -> ClusterConfig {
-//! config.register::<Double>()
-//! # }
-//!
-//! # async fn example(node: ClusterNode) -> Result<(), Box<dyn std::error::Error>> {
-//! // On another node: address the actor, and call it. This looks for the
-//! // actor there, checking that it accepts the messages registered here.
-//! let counter: ClusterAddress<CounterInterface> = node
-//!     .cluster()
-//!     .address(GlobalName::new("counter", "node-b"))
-//!     .await?;
-//! let doubled = counter.call(Double(21)).await?;
-//! # Ok(())
-//! # }
-//! ```
+//! `Cluster`'s messaging half is in `node.rs`; its membership half is in
+//! `cluster/state.rs`. The user-facing overview is the crate documentation.
 
 mod address;
 #[cfg(feature = "auto-register")]

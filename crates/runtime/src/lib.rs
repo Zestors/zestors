@@ -13,20 +13,32 @@
 //! - [`Inbox`] is the strong reference held by the running task itself, used to
 //!   receive messages and signals.
 //! - [`Child`] owns the [`tokio::task::JoinHandle`] together with a
-//!   [`StrongAddress`], and aborts the task when dropped unless detached.
+//!   [`StrongAddress`], and **aborts the task when dropped** unless detached.
 //!
-//! Actors are looked up process-wide by [`Name`] through the global [`Registry`].
+//! [`Accepts`] sends messages through any of them, and [`ActorOps`] provides the
+//! rest: signals, [`ActorStatus`] and the `monitor_*` methods to wait for one,
+//! and inspection. Import both through `zestors::prelude`.
 //!
-//! Once you have a reference, [`Accepts`] and [`ActorOps`] (both re-exported
-//! through the [`prelude`]) provide the methods for interacting with the
-//! actor — sending and receiving messages, inspecting status, and more.
+//! Actors are looked up by [`Name`] through the [`Registry`], which covers one
+//! process. Actors on other nodes of a cluster are reached through
+//! `zestors-distr` instead.
+//!
+//! # Dynamic addresses
+//!
+//! A reference's type parameter is its [`Context`]: either the actor's full
+//! [`Interface`], or a [`Dyn`] set of messages it is known to accept, like
+//! `Address<Dyn<(Ping, GetHealth)>>`. References to different kinds of actor
+//! that share messages then have the same type. [`IntoDyn`] and [`AsDyn`]
+//! convert between contexts, checked at compile time or at runtime. The
+//! [zestors book](https://zestors.github.io/zestors/dynamic-addresses.html)
+//! explains this in detail.
 //!
 //! # Examples
 //!
-//! ## Fire-and-forget
+//! ## An actor, and its result
 //!
-//! A minimal actor: it accepts `()` messages (the simplest possible
-//! [`Interface`]) and counts how many it has seen.
+//! The simplest actor accepts only `()` messages. Here it counts them, and
+//! returns the count when it is shut down.
 //!
 //! ```
 //! # use zestors::runtime::prelude::*;
@@ -41,80 +53,17 @@
 //!     Ok::<_, rootcause::Report>(count)
 //! });
 //!
-//! // `monitor_init` waits for the actor's first `recv`, so it's guaranteed
-//! // to be running by the time we start sending it messages.
-//! child.monitor_init().await.unwrap();
 //! for _ in 0..3 {
 //!     child.cast(()).await.unwrap();
 //! }
 //!
-//! // Ask it to shut down, then wait for it to actually exit and collect
-//! // its result.
+//! // Ask it to shut down, then wait for it to exit and collect its result.
 //! child.signal_shutdown();
 //! assert_eq!(child.await.unwrap(), 3);
 //! # }
 //! ```
 //!
-//! ## Request/reply
-//!
-//! A real actor usually has more than one message, and expects a reply for
-//! at least some of them - both come from its [`Interface`], generated with
-//! `#[derive(Interface)]` over a set of `#[derive(Message)]` types rather
-//! than written by hand (`GetCount`'s `#[msg(reply = u32)]` is what makes
-//! [`Accepts::call`] return a `u32`, instead of `cast`'s fire-and-forget
-//! `()`):
-//!
-//! ```
-//! # use zestors::interface::{Envelope, Interface, Message};
-//! # use zestors::runtime::prelude::*;
-//! # use zestors::runtime::spawn_rand;
-//! #[derive(Message, Debug)]
-//! # #[zestors(interface_path = "zestors::interface")]
-//! struct Increment;
-//!
-//! #[derive(Message, Debug)]
-//! #[msg(reply = u32)]
-//! # #[zestors(interface_path = "zestors::interface")]
-//! struct GetCount;
-//!
-//! #[derive(Interface, Debug)]
-//! # #[zestors(interface_path = "zestors::interface")]
-//! enum CounterInterface {
-//!     Increment(Envelope<Increment>),
-//!     GetCount(Envelope<GetCount>),
-//! }
-//!
-//! # #[tokio::main]
-//! # async fn main() {
-//! let child = spawn_rand(|mut inbox: Inbox<CounterInterface>| async move {
-//!     let mut count = 0;
-//!     while let Some(msg) = inbox.recv().await {
-//!         match msg {
-//!             CounterInterface::Increment(_) => count += 1,
-//!             CounterInterface::GetCount(envelope) => {
-//!                 let _ = envelope.reply(count);
-//!             }
-//!         }
-//!     }
-//!     Ok(())
-//! });
-//!
-//! for _ in 0..5 {
-//!     child.cast(Increment).await.unwrap();
-//! }
-//! // Every message goes through the same queue, in order, so `call` can
-//! // only resolve once all 5 `Increment`s above have already been handled.
-//! assert_eq!(child.call(GetCount).await.unwrap(), 5);
-//!
-//! child.signal_shutdown();
-//! # }
-//! ```
-//!
 //! ## Looking an actor up by `Name`, and a bounded shutdown
-//!
-//! Actors don't have to be wired together by holding onto references
-//! directly: any code that knows an actor's [`Name`] can look it up through
-//! the global [`Registry`], from anywhere in the process.
 //!
 //! ```
 //! # use std::time::Duration;
@@ -154,8 +103,8 @@ pub(crate) use zestors_interface::*;
 #[doc(hidden)]
 pub mod prelude {
     pub use crate::{
-        Accepts as _, ActorOps as _, Address, Child, Inbox, InboxEvent, IntoDyn as _, Name, Signal,
-        StrongAddress, spawn,
+        Accepts as _, ActorOps as _, Address, AsDyn as _, Child, Inbox, InboxEvent, IntoDyn as _,
+        Name, Signal, StrongAddress, spawn,
     };
 }
 

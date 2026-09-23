@@ -2,13 +2,13 @@
 name = "zestors-codegen"
 version = "0.2.0"
 edition = "2021"
-repository = "https://github.com/Zestors/zestors"
-homepage = "https://github.com/Zestors/zestors"
-authors = ["Jasper van der Werf"]
-license = "MIT OR Apache-2.0"
 description = "Derive macros for the zestors actor framework"
-keywords = ["actor", "actor-system", "tokio"]
-categories = ["concurrency"]
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
 readme = "README.md"
 
 [dependencies]
@@ -19,11 +19,13 @@ uuid = { version = "1", features = ["v4"] }
 proc-macro2 = "1"
 
 [dev-dependencies]
+zestors = { path = "../zestors" }
 zestors-interface = { path = "../interface" }
 zestors-distr = { path = "../distr" }
+rootcause = { workspace = true }
 
 [package.metadata.cargo-machete]
-ignored = ["zestors-interface", "zestors-distr"] # only used in doctests
+ignored = ["zestors", "zestors-interface", "zestors-distr", "rootcause"] # only used in doctests
 
 [lib]
 proc-macro = true

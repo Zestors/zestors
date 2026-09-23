@@ -62,8 +62,9 @@ impl<H: Handler> BasicScheduler<H> {
         }));
     }
 
-    /// Polls the scheduler for the next completed future, returning a [`Message`] to be handled
-    /// by the actor, or an error if the future failed.
+    /// Waits for the next scheduled future to complete, returning a
+    /// [`HandlerMessage`] for the actor to handle, or the error if the future
+    /// failed. Returns `None` once nothing is scheduled.
     pub async fn next(&mut self) -> Option<Result<HandlerMessage<H>, Report>> {
         loop {
             match self.futures.next().await {
@@ -84,6 +85,7 @@ pub struct HandlerMessage<H: Handler> {
 }
 
 impl<H: Handler> HandlerMessage<H> {
+    /// Wraps a message that `H` handles.
     pub fn new<M>(msg: M) -> Self
     where
         H: Handle<M>,
@@ -101,6 +103,7 @@ impl<H: Handler> HandlerMessage<H> {
         Self { msg }
     }
 
+    /// Handles the wrapped message with `actor`'s [`Handle`] implementation.
     pub async fn handle(self, ctx: HandlerContext<'_, H>, actor: &mut H) -> Result<(), Report> {
         self.msg.handle_dyn(ctx, actor).await
     }
@@ -161,6 +164,7 @@ pub struct HandlerCallback<H: Handler> {
 }
 
 impl<H: Handler> HandlerCallback<H> {
+    /// A callback that runs `f` on the handler's state when handled.
     pub fn new(
         f: impl FnOnce(&mut H, HandlerContext<'_, H>) -> Result<(), Report> + Send + 'static,
     ) -> Self {

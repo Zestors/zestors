@@ -43,6 +43,9 @@ impl NodeError {
 /// termination if a second signal arrives before it finishes. The node exits
 /// whenever the root supervisor does, and is never restarted: if it should
 /// be, that is for whatever runs the program.
+///
+/// To run the program as a node of a cluster, use `ClusterNode` from
+/// `zestors-distr`, which wraps a `Node`.
 pub struct Node {
     supervisor_spec: ChildSpec<SupervisorBlueprint>,
     exit_watcher: BoxFuture<'static, ()>,

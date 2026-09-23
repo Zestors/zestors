@@ -13,15 +13,18 @@ pub trait ActorRef {
     /// The [`Context`] of the associated actor.
     type Ctx: Context;
 
-    /// Returns a reference to the [`Address`] of the associated actor. See
-    /// [`ActorOps::address`] for the same thing, re-exposed on the trait
-    /// that's part of the [`prelude`](crate::prelude).
+    /// Returns a reference to the [`Address`] of the associated actor. Use
+    /// [`ActorOps::address`], which does the same, to call it.
     fn actor_ref(&self) -> &Address<Self::Ctx>;
 }
 
-/// The core trait for interacting with actors through their [`Address`].
-/// This trait is sealed, and is implemented automatically for any type that
-/// implements [`ActorRef`].
+/// Everything you can do with an actor reference apart from sending typed
+/// messages (which is [`Accepts`]): signals, status, monitoring, dynamic
+/// sends and inspection.
+///
+/// Implemented for every type that implements [`ActorRef`]; it can't be
+/// implemented otherwise. For an actor anywhere in a cluster, `zestors-distr`
+/// has the counterpart `ClusterActorOps`.
 ///
 /// # Example
 ///
@@ -96,7 +99,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     }
 
     /// Same as [`Accepts::try_cast`], but see [`ActorOps::cast_dyn`] for how it
-    /// differs from [`Accepts::cast`].
+    /// differs from [`Accepts::try_cast`].
     fn try_cast_dyn<M: Message>(&self, msg: M) -> Result<ReceiptOf<M>, TryCastDynError<M>> {
         self.try_cast_dyn_with(msg, Default::default())
     }
@@ -112,8 +115,8 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.channel().try_cast_dyn_with(msg, options)
     }
 
-    /// Same as [`Accepts::call`], but see [`ActorOps::cast_dyn`] for how it
-    /// differs from [`Accepts::cast`].
+    /// Same as [`Accepts::call`], but checks at runtime whether the actor
+    /// accepts `M`, like [`ActorOps::cast_dyn`].
     fn call_dyn<M: Message>(
         &self,
         msg: M,
@@ -121,8 +124,8 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.call_dyn_with(msg, Default::default())
     }
 
-    /// Same as [`Accepts::call_with`], but see [`ActorOps::cast_dyn`] for how it
-    /// differs from [`Accepts::cast_with`].
+    /// Same as [`Accepts::call_with`], but checks at runtime whether the actor
+    /// accepts `M`, like [`ActorOps::cast_dyn`].
     fn call_dyn_with<M: Message>(
         &self,
         msg: M,
@@ -186,9 +189,8 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// the exit reason, if it exited.
     ///
     /// Like [`ActorOps::monitor`], the current status counts: if it already
-    /// matches, this returns at once. Unlike `monitor` it names the statuses as
-    /// data rather than as a closure, which is what lets the same question be
-    /// asked of an actor on another node.
+    /// matches, this returns at once. The same method exists for actors on
+    /// other nodes, as `ClusterActorOps::monitor_any` in `zestors-distr`.
     ///
     /// Never returns if `kinds` is empty, or if the actor never reaches any of
     /// them; include [`ActorStatusKind::Exited`] to be sure of an answer.
@@ -206,10 +208,8 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
     /// reaches [`ActorStatus::Exited`] beforehand.
     ///
     /// A channel that has been created (e.g. via [`StrongAddress::create`])
-    /// but never actually spawned onto also reports [`ActorStatus::Exited`]
-    /// by default - that default is indistinguishable from a genuine exit by
-    /// status alone, so this also checks whether a spawn has ever actually
-    /// happened before treating an `Exited` status as a real one to report.
+    /// but never spawned onto is not treated as exited: this keeps waiting for
+    /// it to be spawned.
     fn monitor_init(&self) -> impl Future<Output = Result<(), ExitStatus>> + Send
     where
         Self: Sync,
@@ -221,7 +221,10 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         })
     }
 
-    /// Waits until the actor reaches [`ActorStatus::Running`] for the first time.
+    /// Waits until the actor is [`ActorStatus::Running`]. Returns at once if
+    /// it already is, and never returns if it exits without running again; use
+    /// [`ActorOps::monitor_init`] or [`ActorOps::monitor_any`] to also hear
+    /// about an exit.
     fn monitor_running(&self) -> impl Future<Output = ()> + Send {
         self.monitor(|status| match status {
             ActorStatus::Running => return Some(()),
@@ -231,8 +234,9 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
 
     /// Waits until the actor takes signals and messages: it is
     /// [`ActorStatus::Initializing`], [`ActorStatus::Running`] or
-    /// [`ActorStatus::Suspended`], see [`ActorStatus::accepts_messages`]. Sooner
-    /// than that, a signal is rejected and dropped.
+    /// [`ActorStatus::Suspended`], see [`ActorStatus::accepts_messages`].
+    /// Before that — for a name reserved by a supervisor that hasn't spawned
+    /// the actor yet — a signal is refused and dropped.
     ///
     /// Unlike [`ActorOps::monitor_running`], this doesn't wait for the actor to
     /// start receiving, so it also returns for an actor that is still
@@ -420,9 +424,7 @@ pub trait ActorOps: ActorRef + sealed::Sealed {
         self.channel().weak_count()
     }
 
-    /// Returns a reference to the [`Address`] of the associated actor. Same
-    /// as [`ActorRef::actor_ref`], re-exposed here since [`ActorRef`] itself
-    /// is not part of the [`prelude`](crate::prelude).
+    /// Returns a reference to the [`Address`] of the associated actor.
     fn address(&self) -> &Address<Self::Ctx> {
         self.actor_ref()
     }

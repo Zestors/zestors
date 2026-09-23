@@ -9,8 +9,8 @@
 //!   ([`CallError`]/[`CallDynError`]), which additionally fail with
 //!   `NoResponse` if a reply never arrives.
 //!
-//! Each of those carries the message back on failure (via [`TryCastError::into_inner`]
-//! and friends), so a failed send never silently drops it.
+//! A send that fails before the message is delivered gives the message back in
+//! the error, so a failed send doesn't silently drop it.
 
 use super::*;
 use std::fmt::Display;
@@ -257,10 +257,9 @@ impl<T> From<NotAccepted<T>> for CastDynError<T> {
     }
 }
 
-/// The non-normal ways an actor's task can end, carried by
-/// [`ActorStatus::Exited`]/[`ExitStatus`]. Unlike [`ExitStatus`], this has no
-/// variant for a normal `Ok(())` return - it's the `Result::Err` side of
-/// that same outcome (see [`ExitStatus::from_result`]).
+/// The non-normal ways an actor's task can end: the `Err` side of an
+/// [`ExitStatus`] (see [`ExitStatus::from_result`]), as returned by
+/// [`ActorOps::monitor_exit`].
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Copy)]
 pub enum ExitError {
     /// The actor's task panicked.

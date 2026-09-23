@@ -2,8 +2,10 @@ use crate::*;
 use futures::FutureExt as _;
 use std::{fmt::Debug, pin::Pin, task::Poll, time::Duration};
 
-/// A unique handle to a child process spawned on an [`Address`]. By default,
-/// dropping a `Child` will abort the child process. To prevent this, call [`Child::detach`].
+/// The owning handle to a spawned actor. By default, **dropping a `Child`
+/// aborts the actor**, even when it is bound to `_` or goes out of scope. To
+/// prevent this, call [`Child::detach`], or take the task out with
+/// [`Child::into_handle`].
 ///
 /// A `Child` is made up of 2 main components:
 /// - The [`tokio::task::JoinHandle`] of the child process, which can be used to await the

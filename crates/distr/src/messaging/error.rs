@@ -17,7 +17,9 @@ pub enum RemoteError {
     /// The actor is not taking messages any more.
     #[error("The actor is closed")]
     Closed,
-    /// Too much is waiting to be delivered to the actor already.
+    /// Too much is waiting to be delivered to the actor already. A cast that
+    /// is refused this way is dropped without the sender being told, since
+    /// there is no reply to carry the error.
     #[error("The actor has too much waiting for it")]
     Overloaded,
     /// The actor dropped the request without replying to it.
@@ -52,9 +54,14 @@ pub enum CastFailure {
     /// The node can't be connected to right now.
     #[error("The node can't be reached")]
     Unreachable,
-    /// The encoded message is larger than can be sent.
+    /// The encoded message is larger than can be sent, which is 4 MiB.
     #[error("The message is too large: {size} bytes, at most {max} can be sent")]
-    TooLarge { size: usize, max: usize },
+    TooLarge {
+        /// The size of the encoded message, in bytes.
+        size: usize,
+        /// The largest size that can be sent, in bytes.
+        max: usize,
+    },
     /// The message couldn't be encoded.
     #[error("Failed to encode the message: {0}")]
     Encode(EncodeError),
@@ -96,11 +103,13 @@ impl<M> ClusterCastError<M> {
 }
 
 /// A message was sent, but no reply came. An actor on this node can fail this
-/// way too: it may drop the request, or outlast the call's timeout.
+/// way too: it may drop the request ([`RemoteError::NoReply`]), or outlast a
+/// timeout set with [`ClusterCallOptions::timeout`](super::ClusterCallOptions::timeout).
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ClusterReplyError {
-    /// The node answered with an error.
+    /// The node answered with an error. For an actor on this node, this is
+    /// [`RemoteError::NoReply`] when it dropped the request.
     #[error("The node could not deliver the message: {0}")]
     Remote(#[from] RemoteError),
     /// The connection to the node was lost, or the node left, before the reply
@@ -115,7 +124,7 @@ pub enum ClusterReplyError {
     Decode(#[from] DecodeError),
 }
 
-/// An operation on a remote actor failed, see
+/// An operation on an actor failed, see
 /// [`ClusterActorOps`](super::ClusterActorOps).
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -128,7 +137,8 @@ pub enum ClusterOpError {
     Reply(#[from] ClusterReplyError),
 }
 
-/// An address for an actor couldn't be made.
+/// An address for an actor couldn't be made, see
+/// [`Cluster::address`](crate::Cluster::address).
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum AddressError {
@@ -153,7 +163,8 @@ impl From<TypedRegistryError> for AddressError {
     }
 }
 
-/// A call failed, wherever the actor is.
+/// A call failed, wherever the actor is: either the message wasn't sent, and is
+/// given back, or no reply came.
 #[derive(Debug, thiserror::Error)]
 pub enum ClusterCallError<M> {
     /// The message was not sent, and is given back.

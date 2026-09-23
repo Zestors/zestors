@@ -8,6 +8,7 @@ use std::error::Error;
 pub struct EncodeError(#[source] Box<dyn Error + Send + Sync>);
 
 impl EncodeError {
+    /// Wraps the error that stopped the encoding.
     pub fn new(error: impl Into<Box<dyn Error + Send + Sync>>) -> Self {
         Self(error.into())
     }
@@ -19,6 +20,7 @@ impl EncodeError {
 pub struct DecodeError(#[source] Box<dyn Error + Send + Sync>);
 
 impl DecodeError {
+    /// Wraps the error that stopped the decoding.
     pub fn new(error: impl Into<Box<dyn Error + Send + Sync>>) -> Self {
         Self(error.into())
     }
@@ -27,14 +29,17 @@ impl DecodeError {
 /// A value that can be put on the wire.
 ///
 /// Implemented for every type that implements [`serde::Serialize`], in the
-/// [postcard](https://docs.rs/postcard) format. To use another format for a
-/// type of your own, implement it by hand; that works for types that don't
-/// implement `Serialize`, since the blanket impl would otherwise overlap. (For
-/// a type that does, or one from another crate, wrap it in a newtype.)
+/// [postcard](https://docs.rs/postcard) format.
 ///
-/// Being remote is opt-in per message: [`Message`](zestors_interface::Message)
-/// itself has no such bound.
+/// To use another format, implement `Encode` and [`Decode`] by hand. That is
+/// only possible for a type that doesn't implement `Serialize`, because it
+/// would overlap with the serde implementation. For a type that does, or one
+/// from another crate, wrap it in a newtype of your own.
+///
+/// A message sent to an actor on the same node is never encoded, so a broken
+/// implementation only shows up once a message crosses the network.
 pub trait Encode {
+    /// Encodes the value into the bytes that are sent.
     fn encode(&self) -> Result<Bytes, EncodeError>;
 }
 
@@ -42,6 +47,7 @@ pub trait Encode {
 ///
 /// Implemented for every type that implements [`serde::de::DeserializeOwned`].
 pub trait Decode: Sized {
+    /// Decodes a value from the bytes that were received.
     fn decode(bytes: Bytes) -> Result<Self, DecodeError>;
 }
 

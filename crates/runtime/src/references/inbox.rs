@@ -66,9 +66,9 @@ impl<I: Interface> Inbox<I> {
         self.channel().next_event::<I>(true).await
     }
 
-    /// Block until the next message becomes available. Once the actor has received a
-    /// [`Signal::Shutdown`], the inbox will be closed, and all remaining messages
-    /// are received until the inbox is empty.
+    /// Waits for the next message, skipping signals. Once a
+    /// [`Signal::Shutdown`] has been received, the inbox is closed: the
+    /// messages still queued are returned, and then `None`.
     pub async fn recv(&mut self) -> Option<I> {
         self.maybe_auto_init();
 
@@ -91,7 +91,7 @@ impl<I: Interface> Inbox<I> {
         self.channel().try_next_event::<I>()
     }
 
-    /// Block until the next signal becomes available, ignoring any queued messages.
+    /// Waits for the next signal, leaving any queued messages where they are.
     pub async fn recv_signal(&mut self) -> Option<Signal> {
         self.maybe_auto_init();
         self.channel().next_signal().await

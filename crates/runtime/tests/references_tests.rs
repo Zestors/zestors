@@ -6,9 +6,7 @@ use std::time::Duration;
 use zestors_interface::{Envelope, Interface, Message};
 use zestors_runtime::errors::{Cancelled, ConcurrentInboxError, JoinError, ShutdownAbortError};
 use zestors_runtime::prelude::*;
-use zestors_runtime::{
-    ActorStatus, AsDyn as _, Dyn, StrongAddress, spawn, spawn_rand, spawn_task_rand,
-};
+use zestors_runtime::{ActorStatus, Dyn, StrongAddress, spawn, spawn_rand, spawn_task_rand};
 
 mod common;
 

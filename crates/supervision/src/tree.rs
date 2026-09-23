@@ -20,8 +20,8 @@ pub struct SupervisionTree {
     /// This node's live status, or `None` if it's no longer registered.
     pub status: Option<ActorStatus>,
 
-    /// This node's health, if [`SupervisionTree::populate`] hasn't been
-    /// extended to fetch it — currently always `None`.
+    /// This node's health. Nothing in this crate fills it in yet, so it is
+    /// `None` unless set by hand.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<Health>,
 

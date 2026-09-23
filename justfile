@@ -2,27 +2,26 @@
 default:
     @just -l -u --list-submodules
 
+# Run every test: nextest for unit and integration tests, then the doctests
+# (including the book's code blocks, via the zestors-book crate).
+test:
+    cargo nextest run --workspace
+    cargo test --workspace --doc
+
+# Serve the book at http://localhost:3000, rebuilding on changes.
+book:
+    mdbook serve book --open
+
+# Build the API docs the way docs.rs does, failing on broken links.
+doc:
+    RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links --cfg docsrs" cargo doc --workspace --all-features --no-deps
+
+# A supervision tree with the HTTP API on :8080, for the inspector.
 supervise-example:
     @cargo run --example supervision
 
-generate-openapi:
-    @cargo run --package zestors-gen-oapi
-
-generate-api-client: generate-openapi
-    # docker run --rm \
-    #     -v "$PWD:/local" \
-    #     openapitools/openapi-generator-cli generate \
-    #     -i /local/openapi.json \
-    #     -g rust \
-    #     -o /local/crates/client-api-gen \
-    #     --library reqwest \
-    #     --additional-properties=packageName=zestors-client-api-gen \
-    #     --additional-properties=packageVersion=0.1.0
-    # ploidy generate rust \
-    #     openapi.json \
-    #     -o crates/client-api-gen
-
-    # oas3-gen generate -i openapi.json -o crates/client-api/src/oas3/types.rs
-    oas3-gen generate client-mod -i openapi.json -o crates/client-api/src/oas3
+# Two cluster nodes in one process; prints two greetings and "5 letters".
+remote-example:
+    @cargo run --example remote
 
 mod inspector "crates/inspector"

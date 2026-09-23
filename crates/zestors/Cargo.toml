@@ -2,10 +2,14 @@
 name = "zestors"
 version = "0.2.0"
 edition = "2024"
-license = "MIT OR Apache-2.0"
 readme = "README.md"
-description = "An actor framework with Erlang/OTP-style supervision"
-repository = "https://github.com/Zestors/zestors"
+description = "An actor framework with Erlang/OTP-style supervision and clustering"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 zestors-supervision.workspace = true
@@ -27,6 +31,12 @@ rootcause.workspace = true
 serde.workspace = true
 
 [features]
+# Only for rust-analyzer in this workspace (see .vscode/settings.json), so that
+# feature-gated code is checked. Not meant to be enabled by users.
 _ra = ["auto-register"]
-# See `zestors_distr::Cluster::auto_register`.
+# `ClusterConfig::auto_register`: registers every remote message in the binary.
 auto-register = ["zestors-distr/auto-register"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

@@ -48,6 +48,7 @@ pub type RecvStream = Box<dyn AsyncRead + Send + Unpin>;
 
 /// A way of connecting nodes, see the [module docs](self).
 pub trait Backend: Send + 'static {
+    /// What the backend becomes once started: this node on the network.
     type Endpoint: Endpoint;
 
     /// Brings up the network for the node described by `local`.
@@ -69,7 +70,7 @@ pub struct NodeIncarnation {
 }
 
 impl NodeIncarnation {
-    /// Describes the node `id` in its incarnation `generation`.
+    /// Describes the node `name` in its incarnation `generation`.
     pub fn new(name: NodeName, generation: u64) -> Self {
         Self { name, generation }
     }
@@ -77,6 +78,7 @@ impl NodeIncarnation {
 
 /// A node's presence on the network: it connects to peers and accepts theirs.
 pub trait Endpoint: Send + Sync + 'static {
+    /// A connection to one peer.
     type Connection: Connection;
 
     /// The address other nodes reach this one on. The node's configuration can

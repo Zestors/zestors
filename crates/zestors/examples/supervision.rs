@@ -1,18 +1,27 @@
-use futures::future::pending;
+//! A supervision tree run as a program, with the HTTP API server attached.
+//!
+//! The root supervisor starts an `ApiServer` on `127.0.0.1:8080` and an app
+//! supervisor with nested supervisors, `Handler` actors, closure actors and a
+//! task. A background loop keeps adding short-lived tasks to one supervisor
+//! through an `InMemorySupervisorSource`.
+//!
+//! Run it with `cargo run -p zestors --example supervision`. While it runs,
+//! `just inspector run` shows the tree, or query the API directly with
+//! `curl localhost:8080/processes`. Press Ctrl+C to shut the tree down
+//! gracefully. The actors deliberately sleep in `init` and `exit`, so starting
+//! and stopping take a few seconds.
 use rootcause::Report;
 use std::{sync::Arc, time::Duration};
 use zestors::{
     actor::{
-        BasicScheduler, Handle, Handler, HandlerContext, HandlerExit, fn_actor, fn_blueprint,
-        fn_task,
+        BasicScheduler, Handle, Handler, HandlerContext, HandlerExit, RestartMode, fn_actor,
+        fn_blueprint, fn_task,
     },
     api_server::ApiServer,
     prelude::*,
     runtime::errors::Cancelled,
-    supervisor::{InMemorySupervisorSource, Supervisor},
+    supervisor::{InMemorySupervisorSource, Node, Supervisor},
 };
-use zestors_actor::RestartMode;
-use zestors_supervisor::Node;
 
 #[derive(Interface, HandlerInterface)]
 enum MyInterface {
@@ -114,9 +123,10 @@ impl Handle<String> for MyActor {
 #[tokio::main]
 async fn main() -> Result<(), Report> {
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(tracing::Level::INFO)
         .init();
 
+    // ANCHOR: tree
     let source = InMemorySupervisorSource::new_arc();
 
     let (spec_a, _addr) = fn_blueprint(|| MyActor::new("A"))
@@ -207,18 +217,22 @@ async fn main() -> Result<(), Report> {
             .child(app_supervisor)
             .name("root-supervisor")?,
     );
+    // ANCHOR_END: tree
 
+    // ANCHOR: run
     let root_address = node.root_supervisor().address().clone();
+    let node_task = tokio::spawn(node.run());
 
-    tokio::spawn(node.run()).await??;
-
+    // A supervisor is running once all of its children have initialized.
     root_address.monitor_init().await?;
+    tracing::info!("All actors started");
 
     spawn_tasks_in_background(source);
 
-    tracing::info!("All actors started, sending messages...");
-
-    pending().await
+    // Runs until Ctrl+C/SIGTERM, or until the root supervisor exits.
+    node_task.await??;
+    Ok(())
+    // ANCHOR_END: run
 }
 
 fn spawn_tasks_in_background(source: Arc<InMemorySupervisorSource>) {

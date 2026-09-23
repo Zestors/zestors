@@ -65,7 +65,7 @@ pub enum StartError {
 #[error("failed to instantiate actor from blueprint: {0}")]
 pub struct StartRandError(pub Report);
 
-/// Convenience methods for instantiating and spawning an [`Blueprint`]
+/// Convenience methods for instantiating and spawning a [`Blueprint`]
 /// in one step, mirroring [`zestors_runtime::spawn`]/[`zestors_runtime::spawn_rand`].
 pub trait BlueprintExt: Blueprint {
     /// Instantiates this blueprint's actor and spawns it under `name`.
@@ -180,7 +180,7 @@ mod _hidden {
 use _hidden::*;
 use zestors_runtime::{Child, Name};
 
-/// Creates an [`Blueprint`] that instantiates the actor by calling `f`.
+/// Creates a [`Blueprint`] that instantiates the actor by calling `f`.
 pub fn fn_blueprint<F, A>(f: F) -> FnBlueprint<F, A>
 where
     F: Fn() -> A + Send + Sync + 'static,

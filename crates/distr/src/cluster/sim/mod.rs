@@ -6,9 +6,20 @@
 //! when the seeds are the same. The network can be slowed down and cut in two,
 //! which real sockets on one machine can't do.
 //!
-//! It runs the real membership protocol; only the transport is replaced. What it
-//! doesn't model: TLS, connection setup and reconnect backoff. Those are
-//! covered by tests over real QUIC.
+//! It runs the real membership protocol and messaging; only the transport is
+//! replaced. What it doesn't model: TLS, connection setup and reconnect
+//! backoff. Those are covered by tests over real QUIC.
+//!
+//! There are two kinds of node:
+//! - [`SimNetwork::backend`] is a backend for a real
+//!   [`ClusterNode`](crate::ClusterNode), with its supervisor and messaging.
+//!   This is what to test application code with.
+//! - [`SimNetwork::start`] starts a lighter node that only takes part in
+//!   membership, and can [leave](SimNode::leave) or [crash](SimNode::crash).
+//!   It can't send messages.
+//!
+//! All nodes share the process, and so one `Registry`: an actor spawned in the
+//! test is found through every node.
 //!
 //! ```no_run
 //! # async fn example() {

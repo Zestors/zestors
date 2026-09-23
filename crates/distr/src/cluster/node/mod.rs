@@ -12,10 +12,32 @@ use zestors_supervisor::{Node, SupervisorBlueprint};
 /// A [`Node`] that also joins a cluster.
 ///
 /// It runs the same root supervisor with the same shutdown behavior as
-/// [`Node`], and additionally takes part in a gossip-based
-/// membership protocol over a [backend](crate::backend) (mutually
-/// authenticated QUIC with `zestors-distr-quic`). Observe the cluster
-/// through [`ClusterNode::cluster`].
+/// [`Node`], and additionally takes part in a gossip-based membership
+/// protocol over a [backend](crate::backend) (mutually authenticated QUIC with
+/// `zestors-distr-quic`), and serves the messages registered in its
+/// [`ClusterConfig`]. Observe the cluster and address actors through
+/// [`ClusterNode::cluster`], taken before [`ClusterNode::run`].
+///
+/// ```no_run
+/// use zestors::{prelude::*, supervisor::Supervisor};
+///
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let tls = Tls::from_pem(
+///     &std::fs::read("ca.pem")?,
+///     &std::fs::read("node-a.pem")?,
+///     &std::fs::read("node-a.key")?,
+/// )?;
+/// let config = ClusterConfig::new("node-a", Quic::new("0.0.0.0:7000".parse()?, tls))
+///     .seed(Seed::new("node-b", "node-b.internal:7000"));
+///
+/// let node = ClusterNode::new(Supervisor::blueprint().rand_name(), config);
+/// let cluster = node.cluster();
+/// node.run().await?;
+/// # drop(cluster);
+/// # Ok(())
+/// # }
+/// ```
 pub struct ClusterNode {
     node: Node,
     config: ClusterConfig,
@@ -58,8 +80,7 @@ impl ClusterNode {
         self.node.root_supervisor()
     }
 
-    /// A handle for observing the cluster, for messaging actors on other
-    /// nodes, and for registering the messages this node accepts from them.
+    /// A handle for observing the cluster and for addressing actors in it.
     /// Cheap to clone and usable from anywhere, also before
     /// [`ClusterNode::run`] is called.
     pub fn cluster(&self) -> Cluster {

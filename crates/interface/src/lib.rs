@@ -1,39 +1,30 @@
-//! Defines the core interface/messaging traits for `zestors`.
+//! The message vocabulary of `zestors`: what an actor accepts, and how it
+//! replies.
 //!
-//! Sending a message packages it into an [`Envelope`], pairing the message
-//! payload with a [`Resolver`] that the receiving actor uses to send back a
-//! reply. The sender is immediately given the matching [`Receipt`], which
-//! resolves once that reply arrives.
+//! - [`Message`] is implemented by every message type, and is usually
+//!   [derived](derive@Message). Its [`Kind`](Message::Kind) says whether it
+//!   expects a reply: [`Cast`] for fire-and-forget, [`Call`] for
+//!   request/reply, with the reply's type as [`Output`](Message::Output).
+//! - Sending a message packs it into an [`Envelope`] together with a
+//!   [`Resolver`], which the receiving actor answers with. The sender keeps the
+//!   matching [`Receipt`] and waits on it. For a `Call` message these are a
+//!   [`Request<T>`] and a [`Reply<T>`]; for a `Cast` message both are `()`.
+//! - [`Interface`] is the set of messages an actor accepts: an enum with one
+//!   [`Envelope`] variant per message, usually [derived](derive@Interface).
 //!
-//! - [`Message`] specifies a message type's [`Receipt`]/[`Resolver`]/output,
-//!   and is usually [derived](derive@Message) rather than implemented by hand.
-//! - [`Receipt`]/[`Resolver`] come in two forms: `()`/`()` for
-//!   fire-and-forget messages that expect no reply, and [`Reply<T>`]/
-//!   [`Request<T>`] for messages that expect a reply of type `T`.
-//! - [`Interface`] specifies the set of message types an actor accepts, and
-//!   how to convert between a concrete message and a type-erased
-//!   [`AnyEnvelope`] for dynamic sending; like [`Message`], it is usually
-//!   [derived](derive@Interface).
+//! This crate only defines the contract; delivering messages is up to
+//! `zestors-runtime`. The [zestors book](https://zestors.github.io/zestors/messages.html)
+//! explains messages and interfaces in more depth. To send a message to
+//! another node, it also needs a `StableId`; see `zestors-distr`.
 //!
-//! This crate only defines the message *contract* - it has no notion of an
-//! actor or a channel to deliver a message through. That's the job of
-//! `zestors-runtime`, which sends a [`Message`] by constructing an
-//! [`Envelope`] for it and pushing that onto an actor's queue; see its
-//! `Accepts::cast`/`Accepts::call` for the sending side.
+//! # Example
 //!
-//! # Examples
-//!
-//! ## Request/reply
-//!
-//! A request-style message: it derives [`Message`] with a `reply` type, so
-//! its [`Resolver`] is a [`Request<T>`] and its [`Receipt`] is a
-//! [`Reply<T>`]. Below, `resolver`/`receipt` stand in for what a real
-//! channel implementation would keep on opposite ends of an [`Envelope`]:
-//! the receiving side resolves it, the sending side awaits the result.
+//! What sending a request amounts to, without an actor: the receiving side
+//! answers the [`Request`], and the sending side gets the answer from the
+//! [`Reply`].
 //!
 //! ```
 //! # use zestors::interface::{Envelope, Message, Receipt as _, Resolver as _};
-//!
 //! #[derive(Message, Debug)]
 //! #[msg(reply = u32)]
 //! #[zestors(interface_path = "zestors::interface")]
@@ -41,60 +32,14 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() {
-//! // Pair the message with a fresh resolver/receipt, exactly like sending
-//! // it through a channel would.
 //! let (envelope, receipt) = Envelope::new_pair(DoubleMe(21));
 //!
-//! // The "receiving" side unpacks the envelope, computes a reply, and
-//! // resolves it.
+//! // The receiving side unpacks the envelope and resolves the request.
 //! let Envelope { msg: DoubleMe(n), req: resolver } = envelope;
 //! resolver.resolve(n * 2).unwrap();
 //!
-//! // The "sending" side awaits the receipt to get that reply back.
+//! // The sending side waits on the receipt for the reply.
 //! assert_eq!(receipt.wait().await.unwrap(), 42);
-//! # }
-//! ```
-//!
-//! ## Grouping messages into an `Interface`
-//!
-//! A real actor accepts more than one message type, so its messages get
-//! grouped into an [`Interface`] - one variant per message, each wrapping
-//! an [`Envelope`] of that message. Deriving it also gives you the
-//! [`AnyEnvelope`] conversions ([`Interface::into_dyn_envelope`]/
-//! [`Interface::try_from_dyn_envelope`]) that let a message be sent without
-//! the sender statically knowing the receiver's whole `Interface`:
-//!
-//! ```
-//! # use zestors::interface::{AnyEnvelope, Envelope, Interface, Message, Receipt as _};
-//! #[derive(Message, Debug)]
-//! #[zestors(interface_path = "zestors::interface")]
-//! struct Ping;
-//!
-//! #[derive(Message, Debug)]
-//! #[msg(reply = u32)]
-//! #[zestors(interface_path = "zestors::interface")]
-//! struct Double(u32);
-//!
-//! #[derive(Interface, Debug)]
-//! #[zestors(interface_path = "zestors::interface")]
-//! enum MyInterface {
-//!     Ping(Envelope<Ping>),
-//!     Double(Envelope<Double>),
-//! }
-//!
-//! # #[tokio::main]
-//! # async fn main() {
-//! // A concrete `Ping` envelope, type-erased and then recovered as
-//! // `MyInterface` - the same round trip a dynamic send goes through.
-//! let (envelope, receipt) = Envelope::new_pair(Ping);
-//! let any_envelope = MyInterface::Ping(envelope).into_dyn_envelope();
-//!
-//! let restored = MyInterface::try_from_dyn_envelope(any_envelope).unwrap();
-//! assert!(matches!(restored, MyInterface::Ping(_)));
-//!
-//! // `Ping`'s resolver/receipt are both `()`, a fire-and-forget message:
-//! // there's nothing to actually wait for.
-//! receipt.wait().await.unwrap();
 //! # }
 //! ```
 

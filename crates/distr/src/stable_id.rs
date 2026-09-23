@@ -1,9 +1,17 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Gives a message type a stable, globally unique [`MessageId`].
+/// Gives a message type a stable, globally unique [`MessageId`], which names it
+/// on the wire.
 ///
-/// Derive it with `#[derive(StableId)]` and `#[msg(id = "<uuid>")]`.
+/// Derive it with `#[derive(StableId)]` and `#[msg(id = "<uuid>")]`. Leave the
+/// id out, and the compile error suggests a freshly generated one.
+///
+/// - **Never change the id** once nodes running different builds may talk to
+///   each other: a node that doesn't know an id answers
+///   [`RemoteError::UnknownMessage`](crate::RemoteError::UnknownMessage).
+/// - **Never give two types the same id.** Registering both on one node panics
+///   when the node is built.
 #[allow(non_upper_case_globals)]
 pub trait StableId {
     /// The stable, globally unique identifier for this message type.
@@ -15,6 +23,7 @@ pub trait StableId {
 pub struct MessageId(Uuid);
 
 impl MessageId {
+    /// Creates a [`MessageId`] from a [`Uuid`].
     pub const fn from_uuid(id: Uuid) -> Self {
         Self(id)
     }

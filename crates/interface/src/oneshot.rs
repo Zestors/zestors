@@ -120,7 +120,8 @@ impl<T> Drop for Request<T> {
     }
 }
 
-/// The actor failed to resolve the receipt correctly.
+/// No reply came: the [`Request`] was dropped without being answered, for
+/// example because the actor exited.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, thiserror::Error)]
 #[error("Failed to receive from Reply because it is closed.")]
 pub struct ReceiptError;

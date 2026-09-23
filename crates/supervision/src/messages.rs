@@ -19,7 +19,7 @@ use zestors_codegen::Message;
 #[msg(reply = "Vec<ChildDescription>")]
 pub struct GetChildren;
 
-/// Requests a supervisor's current [`Health`].
+/// Requests an actor's current [`Health`]. Any actor can accept it.
 #[derive(Message, Debug)]
 #[zestors(interface_path = "zestors_interface")]
 #[msg(reply = Health)]

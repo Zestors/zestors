@@ -1,0 +1,13 @@
+[book]
+title = "zestors"
+description = "An actor framework for Rust with Erlang/OTP-style supervision and clustering"
+authors = ["Jasper van der Werf"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/Zestors/zestors"
+edit-url-template = "https://github.com/Zestors/zestors/edit/main/book/{path}"
+
+[output.html.playground]
+runnable = false

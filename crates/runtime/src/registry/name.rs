@@ -6,9 +6,14 @@ use std::{borrow::Cow, fmt::Display, sync::Arc};
 /// The name of an actor: a cheaply-cloneable, human-readable string that
 /// uniquely names an actor in the local [`Registry`].
 ///
-/// A `Name` is stable across restarts: creating a new [`StrongAddress`] with a
-/// given `Name` (see [`StrongAddress::create`]) reuses the same registry entry,
-/// which is what allows an actor to be restarted on the same channel.
+/// A `Name` is stable across restarts: a supervisor restarts an actor by
+/// spawning a new task on the same [`StrongAddress`] (see
+/// [`StrongAddress::spawn`]), which keeps its name and registry entry. Creating
+/// a second channel under a name that is in use fails.
+///
+/// A `Name` is unique within one process. To name an actor on another node of
+/// a cluster, `zestors-distr` pairs it with the node's name in a
+/// `GlobalName`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Name(SmolStr);
 

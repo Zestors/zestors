@@ -228,21 +228,20 @@ pub(super) fn register(handlers: &mut Handlers) {
     handlers.insert_op::<AcceptsOp>();
 }
 
-/// Operations on actors on other nodes: the counterpart of
+/// Operations on an actor anywhere in the cluster: the counterpart of
 /// [`ActorOps`](zestors_runtime::ActorOps) for a
-/// [`ClusterAddress`](super::ClusterAddress). This trait is sealed, and is
-/// implemented automatically for any type that implements [`ClusterActorRef`].
+/// [`ClusterAddress`](super::ClusterAddress). Implemented for every type that
+/// implements [`ClusterActorRef`]; it can't be implemented otherwise.
 ///
 /// Everything here asks the node the actor is on, so it is async and can fail.
-/// If the actor is on this node, which a [`ClusterAddress`](super::ClusterAddress)
-/// can be for, the answer is read from it directly and the future is ready at
-/// once. Each method that reads the actor's state asks again; to read several
-/// things consistently, get a [`ActorInfo`] with [`ClusterActorOps::info`] and
-/// read them from that.
+/// If the actor is on this node the answer is read from it directly, and the
+/// future is ready at once. Each method that reads the actor's state asks
+/// again; to read several things consistently, get an [`ActorInfo`] with
+/// [`ClusterActorOps::info`] and read them from that.
 ///
-/// Sending messages is done with
-/// [`ClusterAccepts`](super::ClusterAccepts), and waiting for an actor's status to
-/// change isn't supported yet.
+/// The `monitor_*` methods wait for the actor to reach a status, across nodes;
+/// see [`ClusterActorOps::monitor_any`]. Messages are sent with
+/// [`ClusterAccepts`](super::ClusterAccepts).
 ///
 /// The operations aren't queued behind the messages waiting for the actor.
 pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
@@ -291,9 +290,9 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
         }
     }
 
-    /// Asks about the actor's state, everything at one instant. This is the
-    /// only operation that carries the actor's history and accepts list; the
-    /// methods below that read one field ask for that field alone.
+    /// Asks about the actor's state, everything at one instant: status, queue
+    /// lengths, spawn and exit history, and the messages it accepts. To read a
+    /// single value, the methods for that value are cheaper.
     fn info(&self) -> impl Future<Output = Result<ActorInfo, ClusterOpError>> + Send {
         async move {
             let address = self.cluster_address();
@@ -517,12 +516,9 @@ pub trait ClusterActorOps: ClusterActorRef + sealed::Sealed {
     /// Waits until the actor is running, or `Err` with how it exited if it got
     /// there first.
     ///
-    /// Not quite [`ActorOps::monitor_init`](zestors_runtime::ActorOps::monitor_init):
-    /// that one also checks whether the actor was ever spawned, to tell a
-    /// channel that was made but never run from one that really exited. That
-    /// check can't be asked of another node, so a never-spawned actor reads as
-    /// exited here. Reaching one by name makes that a corner rather than the
-    /// usual case.
+    /// Unlike [`ActorOps::monitor_init`](zestors_runtime::ActorOps::monitor_init),
+    /// an actor whose name is reserved but which has never been spawned counts
+    /// as exited here.
     fn monitor_init(
         &self,
     ) -> impl Future<Output = Result<Result<(), ExitStatus>, ClusterOpError>> + Send {

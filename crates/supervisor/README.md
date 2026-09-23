@@ -9,4 +9,5 @@ restart strategy. `Node` runs a root `Supervisor` as an entire program,
 shutting it down gracefully on Ctrl+C/SIGTERM.
 
 Part of the [`zestors`](https://crates.io/crates/zestors) actor framework —
-see that crate's documentation for a guided introduction.
+see the [zestors book](https://zestors.github.io/zestors/) for a guided
+introduction.

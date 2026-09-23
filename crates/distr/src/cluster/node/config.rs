@@ -10,6 +10,28 @@ use std::{
 };
 
 /// How a [`ClusterNode`](crate::ClusterNode) joins and behaves in a cluster.
+///
+/// Only the node's name and its backend are required, in
+/// [`ClusterConfig::new`]; everything else has a default. A node usually also
+/// has [seeds](ClusterConfig::seed) to join through, and
+/// [registers](ClusterConfig::register) the messages it accepts from other
+/// nodes.
+///
+/// ```no_run
+/// # use zestors::{interface::Message, prelude::*};
+/// # use serde::{Deserialize, Serialize};
+/// # use std::time::Duration;
+/// # #[derive(Message, StableId, Serialize, Deserialize, Debug)]
+/// # #[msg(reply = u32, id = "1c3d5e7f-2a4b-4c6d-8e0f-a1b2c3d4e5f8")]
+/// # struct Double(u32);
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let config = ClusterConfig::new("node-a", Quic::new("0.0.0.0:7000".parse()?, Tls::insecure_dev()?))
+///     .seed(Seed::new("node-b", "node-b.internal:7000"))
+///     .register::<Double>()
+///     .call_timeout(Duration::from_secs(5));
+/// # let _ = config; Ok(())
+/// # }
+/// ```
 pub struct ClusterConfig {
     pub(super) node_id: NodeName,
     pub(super) backend: Starter,
@@ -29,11 +51,16 @@ pub struct ClusterConfig {
 }
 
 impl ClusterConfig {
-    /// Configures a node named `node_id` that talks to the others over
+    /// Configures a node named `name` that talks to the others over
     /// `backend`, for example the QUIC backend of `zestors-distr-quic`.
-    pub fn new(node_id: impl Into<NodeName>, backend: impl Backend) -> Self {
+    ///
+    /// The name identifies the node in the cluster, and is the node part of
+    /// every [`GlobalName`](crate::GlobalName) that points at it. The backend
+    /// may restrict it: with QUIC it must be a DNS name matching the node's
+    /// certificate.
+    pub fn new(name: impl Into<NodeName>, backend: impl Backend) -> Self {
         Self {
-            node_id: node_id.into(),
+            node_id: name.into(),
             backend: Starter::new(backend),
             advertise: None,
             seeds: Vec::new(),
@@ -121,6 +148,9 @@ impl ClusterConfig {
     /// How long a call to an actor on another node waits for its reply before
     /// giving up, 30 seconds by default. See
     /// [`ClusterAccepts::call`](crate::ClusterAccepts::call).
+    ///
+    /// Calls to actors on this node have no default timeout, and monitors
+    /// never time out.
     pub fn call_timeout(mut self, timeout: Duration) -> Self {
         self.call_timeout = timeout;
         self
@@ -190,12 +220,14 @@ impl std::fmt::Debug for ClusterConfig {
 /// A node to contact when joining the cluster.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seed {
-    /// The seed's node name, which its certificate must carry.
+    /// The seed's node name. With QUIC, its certificate must carry it.
     pub node: NodeName,
+    /// Where to reach the seed.
     pub addr: NodeAddr,
 }
 
 impl Seed {
+    /// The node `node`, reachable at `addr`.
     pub fn new(node: impl Into<NodeName>, addr: impl Into<NodeAddr>) -> Self {
         Self {
             node: node.into(),

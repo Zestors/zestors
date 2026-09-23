@@ -51,12 +51,11 @@ pub trait Interface:
     fn into_dyn_envelope(self) -> AnyEnvelope;
 }
 
-/// The simplest possible [`Interface`]: it has no message variants and
-/// carries no payload other than itself, so it can only ever be sent (and
-/// received) as `()` - see `zestors-runtime`'s crate-level example for an
-/// actor built on `Inbox<()>`.
+/// The simplest possible [`Interface`]: it accepts one message, `()`, and
+/// nothing else - see `zestors-runtime`'s crate-level example for an actor
+/// built on `Inbox<()>`.
 impl Interface for () {
-    type Set = ();
+    type Set = ((),);
 
     fn try_from_dyn_envelope(envelope: AnyEnvelope) -> Result<Self, AnyEnvelope> {
         envelope.downcast::<()>().map(|env| env.msg)

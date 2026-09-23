@@ -19,8 +19,8 @@ use zestors::{
 use zestors_distr::{
     AddressError, CastFailure, Cluster, ClusterAccepts, ClusterActorOps, ClusterAddress,
     ClusterCallError, ClusterCallOptions, ClusterCastError, ClusterConfig, ClusterNode,
-    ClusterNodeError, ClusterOpError, ClusterReceipt as _, ClusterReplyError, Decode, DecodeError,
-    Encode, EncodeError, GlobalName, RemoteError, RemoteRequest, Seed, StableId, sim::SimNetwork,
+    ClusterNodeError, ClusterOpError, ClusterReplyError, Decode, DecodeError, Encode, EncodeError,
+    GlobalName, RemoteError, RemoteRequest, Seed, StableId, sim::SimNetwork,
 };
 use zestors_runtime::Registry;
 
@@ -266,9 +266,9 @@ fn node_with_lanes(
     seed: Option<u8>,
     lanes: u8,
 ) -> ClusterNode {
-    // Everything with a `StableId` but `Unknown`, which opts out: node-b to
-    // receive them, node-a to name them when it asks for an address. Registered
-    // here so the node never serves before its handlers exist.
+    // Everything with a `StableId` but `Unknown`, which opts out. Only node-b
+    // needs them, to receive them; both nodes get the same config for
+    // simplicity.
     let mut config = ClusterConfig::new(name, net.backend(addr(n)))
         .foca_config(fast_foca())
         .call_timeout(Duration::from_secs(10))

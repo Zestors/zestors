@@ -1,0 +1,46 @@
+# Builds the book in `book/` and publishes it to GitHub Pages.
+#
+# One-time setup: in the repository settings, under Pages, set the source to
+# "GitHub Actions".
+name: Book
+
+on:
+  push:
+    branches: [main]
+    paths: ["book/**", "crates/zestors/examples/**", ".github/workflows/book.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mdBook
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.5.4/mdbook-v0.5.4-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xz -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: mdbook build book
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: book/book
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

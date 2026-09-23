@@ -21,9 +21,16 @@ use zestors_runtime::{Address, Context, Dyn};
 /// Messages are sent with [`ClusterAccepts`](super::ClusterAccepts), and the
 /// actor is operated on with [`ClusterActorOps`](super::ClusterActorOps),
 /// wherever it is: an actor on this node is simply reached without leaving the
-/// process, and without the message being encoded. Messages sent to one actor
-/// arrive in the order they were sent. A message that is not answered is not
-/// sent again; delivery is at most once.
+/// process, and without the message being encoded.
+///
+/// Messages sent from this node to one actor arrive in the order they were
+/// sent; there is no order between messages from different nodes. A message
+/// that is not answered is not sent again: delivery is at most once. See the
+/// [delivery chapter of the book](https://zestors.github.io/zestors/distributed/delivery.html)
+/// for when a message can be lost.
+///
+/// A remote address names the actor, and is resolved on the other node for
+/// every message: it reaches whichever actor holds the name at the time.
 ///
 /// That is all it offers: it isn't an [`ActorRef`](zestors_runtime::ActorRef),
 /// so [`ActorOps`](zestors_runtime::ActorOps) isn't available on it. For an

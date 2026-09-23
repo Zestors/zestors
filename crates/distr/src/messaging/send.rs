@@ -326,15 +326,26 @@ impl ClusterCallOptions {
 ///
 /// There are two ways to send:
 ///
-/// - [`cast`](Self::cast) waits for room to send, and so only fails if the
-///   message can't be sent at all.
+/// - [`cast`](Self::cast) waits for room in the queue to the actor's node, and
+///   so only fails if the message can't be sent at all.
 /// - [`try_cast`](Self::try_cast) never waits: it also fails with
 ///   [`CastFailure::Full`] if many messages are queued for the node.
 ///
 /// Returning means that the message is queued for sending, not that it arrived
 /// or was accepted; for that, wait for the reply. Unlike a local message, one
-/// can fail on the way: see [`ClusterReplyError`](super::ClusterReplyError). A message that got no answer
-/// is not sent again; delivery is at most once.
+/// can fail on the way: see [`ClusterReplyError`](super::ClusterReplyError). A
+/// message that got no answer is not sent again; delivery is at most once.
+///
+/// In particular, a node that already has too much waiting for the actor
+/// refuses further messages with
+/// [`RemoteError::Overloaded`](super::RemoteError::Overloaded). A call gets
+/// that error as its reply, but **a refused cast is dropped silently**: only
+/// the receiving node logs it. A cast to an actor on this node waits for room
+/// in its mailbox instead.
+///
+/// Every message sent this way has to be a [`RemoteMessage`], even when the
+/// actor is on this node. For other messages, use the plain address from
+/// [`ClusterAddress::local_address`](super::ClusterAddress::local_address).
 pub trait ClusterAccepts<M: RemoteMessage>: Sync {
     /// Sends a message, waiting for room to send it if many messages are
     /// queued for the node.

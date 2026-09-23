@@ -2,10 +2,14 @@
 name = "zestors-distr"
 version = "0.2.0"
 edition = "2024"
-license = "MIT OR Apache-2.0"
 readme = "README.md"
 description = "Distributed messaging for the zestors actor framework"
-repository = "https://github.com/Zestors/zestors"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 zestors-runtime.workspace = true
@@ -42,9 +46,15 @@ futures.workspace = true
 zestors-distr = { path = ".", features = ["sim", "auto-register"] }
 
 [features]
+# Only for rust-analyzer in this workspace (see .vscode/settings.json), so that
+# feature-gated code is checked. Not meant to be enabled by users.
 _ra = ["auto-register"]
-# `Cluster::auto_register`: registers every message type in the binary that
-# derives `StableId`, see `auto_register`.
+# `ClusterConfig::auto_register`: registers every message type in the binary
+# that derives `StableId` and is a `RemoteMessage`.
 auto-register = ["dep:inventory"]
-# In-process simulated clusters for tests, see `sim`.
+# In-process simulated clusters for tests, see the `sim` module.
 sim = []
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

@@ -69,6 +69,7 @@ impl Cluster {
     }
 
     /// For nodes that only take part in membership, such as the simulated ones.
+    #[cfg(any(feature = "sim", test))]
     pub(crate) fn membership_only(local: Member) -> Self {
         Self::new(local, Duration::from_secs(30), 4, Handlers::new())
     }

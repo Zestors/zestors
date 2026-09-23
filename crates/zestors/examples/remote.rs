@@ -1,19 +1,19 @@
-//! Two nodes in one process: one hosts an actor, the other calls it.
+//! Two cluster nodes in one process, talking over QUIC on localhost: `host`
+//! runs an actor, `caller` calls it.
 //!
-//! Every message that goes between nodes is `Serialize`, `Deserialize` and has
-//! a `StableId`; the actor's node also has to register the messages it accepts.
-//! Run it with `cargo run --example remote`.
+//! Run it with `cargo run -p zestors --example remote`. It prints two
+//! greetings and "5 letters", then shuts both nodes down.
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use zestors::{
-    distr::{ClusterAccepts, ClusterConfig, ClusterNode, GlobalName, RemoteRequest, Seed},
-    distr_quic::{Quic, Tls},
     interface::{Envelope, Interface, Message},
     prelude::*,
     runtime::{Inbox, Name, spawn},
-    supervisor::Supervisor,
+    supervisor::{Supervisor, SupervisorInterface},
 };
 
+// ANCHOR: messages
+/// A message that can cross the network: it has a stable id, and serde.
 #[derive(Message, StableId, Serialize, Deserialize, Debug)]
 #[msg(reply = String, id = "3e4c1b7a-0d51-4f0e-9b6f-2a7c5d8e9f10")]
 struct Greet(String);
@@ -32,30 +32,38 @@ enum GreeterInterface {
     Greet(Envelope<Greet>),
     CountLetters(Envelope<CountLetters>),
 }
+// ANCHOR_END: messages
 
-fn node(name: &str, addr: SocketAddr, seed: Option<(&str, SocketAddr)>) -> ClusterNode {
+fn config(name: &str, addr: SocketAddr) -> ClusterConfig {
     // Development only: use `Tls::from_pem` to authenticate cluster members.
-    // Both nodes accept these from others: the host to serve them, the caller
-    // so it can name them when it asks the host for an address.
-    let mut config = ClusterConfig::new(name, Quic::new(addr, Tls::insecure_dev().unwrap()))
-        .register::<Greet>()
-        .register::<CountLetters>();
-    if let Some((seed, seed_addr)) = seed {
-        config = config.seed(Seed::new(seed, seed_addr));
-    }
-    ClusterNode::new(Supervisor::blueprint().rand_name(), config)
+    ClusterConfig::new(name, Quic::new(addr, Tls::insecure_dev().unwrap()))
 }
 
 #[tokio::main]
 async fn main() {
-    let (a_addr, b_addr) = (
+    let (host_addr, caller_addr): (SocketAddr, SocketAddr) = (
         "127.0.0.1:7101".parse().unwrap(),
         "127.0.0.1:7102".parse().unwrap(),
     );
-    let host = node("host", a_addr, None);
-    let caller = node("caller", b_addr, Some(("host", a_addr)));
 
-    // The host runs the actor that handles them.
+    // ANCHOR: nodes
+    // The host serves the greeter, so it registers the messages the greeter
+    // accepts from other nodes. The caller only sends them, which needs no
+    // registration.
+    let host = ClusterNode::new(
+        Supervisor::blueprint().rand_name(),
+        config("host", host_addr)
+            .register::<Greet>()
+            .register::<CountLetters>(),
+    );
+    let caller = ClusterNode::new(
+        Supervisor::blueprint().rand_name(),
+        config("caller", caller_addr).seed(Seed::new("host", host_addr)),
+    );
+    // ANCHOR_END: nodes
+
+    // The greeter runs on the host. Any actor registered under a `Name` can be
+    // reached from other nodes.
     let _greeter = spawn(
         Name::new_static("greeter"),
         |mut inbox: Inbox<GreeterInterface>| async move {
@@ -76,53 +84,56 @@ async fn main() {
     )
     .unwrap();
 
-    let host_remote = host.cluster();
-    let (caller_cluster, host_shutdown, caller_shutdown) = (
-        caller.cluster(),
+    // `run` consumes the node, so take what is needed from it first.
+    let (host_cluster, caller_cluster) = (host.cluster(), caller.cluster());
+    let (host_root, caller_root) = (
         host.root_supervisor().address().clone(),
         caller.root_supervisor().address().clone(),
     );
     let (host_task, caller_task) = (tokio::spawn(host.run()), tokio::spawn(caller.run()));
 
-    // Addressing an actor on another node asks that node, so wait until the caller knows the host.
+    // ANCHOR: call
+    // Addressing an actor on another node asks that node, so first wait until
+    // the caller has joined the host.
     caller_cluster.wait_for_members(1).await;
     let greeter = caller_cluster
         .address::<GreeterInterface>(GlobalName::new("greeter", "host"))
         .await
         .unwrap();
-    // The same for an actor on this node: the host's own view of its greeter is
-    // delivered locally, without leaving the process.
-    let local_greeter = host_remote
+    println!("{}", greeter.call(Greet("world".into())).await.unwrap());
+
+    // The same works for an actor on this node: the host's own address for its
+    // greeter delivers locally, without encoding the message.
+    let local_greeter = host_cluster
         .address::<GreeterInterface>(GlobalName::new("greeter", "host"))
         .await
         .unwrap();
-
-    let greeting = greeter.call(Greet("world".into())).await.unwrap();
-    println!("{greeting}");
     println!(
         "{}",
         local_greeter.call(Greet("host".into())).await.unwrap()
     );
 
-    // A message with a reply channel in it: keep the `Reply`, send the request.
-    let (reply, count) = RemoteRequest::new();
+    // A message with a reply channel in it: send the `RemoteRequest` inside the
+    // message, and wait on the `Reply`.
+    let (request, reply) = RemoteRequest::new();
     greeter
         .cast(CountLetters {
             text: "world".into(),
-            reply,
+            reply: request,
         })
         .await
         .unwrap();
-    println!("{} letters", count.await.unwrap());
+    println!("{} letters", reply.await.unwrap());
+    // ANCHOR_END: call
 
-    stop(&host_shutdown).await;
-    stop(&caller_shutdown).await;
+    stop(&host_root).await;
+    stop(&caller_root).await;
     let _ = tokio::join!(host_task, caller_task);
 }
 
-/// Shuts a node down through its root supervisor, once that takes signals: it
-/// is initializing or running. Sooner, they are dropped.
-async fn stop(root: &zestors::runtime::Address<zestors::supervisor::SupervisorInterface>) {
+/// Shuts a node down through its root supervisor. A signal sent before the
+/// supervisor has started is dropped, so wait for it to accept one first.
+async fn stop(root: &Address<SupervisorInterface>) {
     root.monitor_accepts_messages().await;
     root.signal_shutdown();
 }

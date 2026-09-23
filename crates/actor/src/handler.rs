@@ -10,22 +10,15 @@ use zestors_runtime::prelude::*;
 /// implements [`Actor`] automatically.
 ///
 /// # Lifecycle
-/// 1. [`Handler::init`] is called when the actor is first spawned, before any
-///    messages are processed.
-/// 2. The actor enters the
-///    [`Running`](zestors_runtime::ActorStatus::Running) state, and begins
-///    processing messages and signals. Messages are handled using the
-///    [`Handle<M>`] trait, and signals are handled using the
-///    [`Handler::on_shutdown`], [`Handler::on_suspend`], and
-///    [`Handler::on_resume`] methods. If any of these methods return an
-///    error, the actor enters the
-///    [`Exiting`](zestors_runtime::ActorStatus::Exiting) state, and
-///    [`Handler::exit`] is called with [`HandlerExit::HandlerError`].
-/// 3. When a [`Signal::Shutdown`] is received, or if any handler or lifecycle
-///    hook returns an error, the actor enters the
-///    [`Exiting`](zestors_runtime::ActorStatus::Exiting) state. This then
-///    calls [`Handler::exit`] and exits the actor after all messages have
-///    been processed.
+/// 1. [`Handler::init`] is called when the actor is spawned, before any
+///    message is handled.
+/// 2. The actor then handles messages with its [`Handle<M>`] implementations,
+///    and signals with [`Handler::on_shutdown`], [`Handler::on_suspend`] and
+///    [`Handler::on_resume`].
+/// 3. The loop ends when a [`Signal::Shutdown`] has been received and the
+///    queued messages have been handled, or as soon as a handler or hook
+///    returns an error. [`Handler::exit`] is then called with the reason, and
+///    what it returns is the actor's result.
 ///
 /// # Scheduling
 /// During each event-loop, the actor polls the next signal to be received. If no signal is present,
@@ -42,11 +35,14 @@ pub trait Handler: Debug + Sized + Send + 'static {
     /// The actor must implement [`Handle<M>`] for every message type `M` that it wants to handle. The [`Interface`] must additionally derive [`HandlerInterface`](derive@crate::HandlerInterface) (or implement it manually) to provide a way to handle messages of that type.
     type Interface: HandlerInterface<Self>;
 
-    /// Called when the actor is first spawned, before any messages are processed.
-    /// This corresponds to [`Initializing`](zestors_runtime::ActorStatus::Initializing).
+    /// Called when the actor is spawned, before any message is handled.
     ///
-    /// If a shutdown-signal is received while this method is running, this method
-    /// will be cancelled, and [`Handler::exit`] will be called with
+    /// It runs alongside the inbox's signal receiver, so the actor's status can
+    /// already be [`Running`](zestors_runtime::ActorStatus::Running) while
+    /// `init` is still busy: `monitor_init` doesn't wait for it to finish.
+    ///
+    /// If a shutdown signal is received while this method is running, it is
+    /// cancelled, and [`Handler::exit`] is called with
     /// [`HandlerExit::InitCancelled`].
     fn init(
         &mut self,
@@ -57,9 +53,12 @@ pub trait Handler: Debug + Sized + Send + 'static {
 
     /// Called when the actor is about to exit.
     ///
-    /// This is the final lifecycle hook and is called exactly once, regardless
-    /// of how the actor exits. The [`HandlerExit`] describes why the actor is
-    /// exiting.
+    /// This is the final lifecycle hook, called once when the event loop ends.
+    /// The [`HandlerExit`] describes why. It is not called when the actor
+    /// panics or is aborted.
+    ///
+    /// The default turns every reason but [`HandlerExit::Normal`] into an
+    /// error.
     fn exit(
         &mut self,
         _ctx: HandlerContext<'_, Self>,
@@ -138,7 +137,7 @@ pub trait Handler: Debug + Sized + Send + 'static {
     /// - `Some(Err(e))` means the actor received an error `e`, and the actor should exit.
     ///
     /// For scheduling arbitrary futures or messages, see the [`BasicScheduler`](crate::BasicScheduler).
-    /// Its `next` method is compatible with this message. The basic scheduler returns
+    /// Its `next` method can be returned from this method directly. The basic scheduler returns
     /// [`HandlerMessage`](crate::HandlerMessage)s, which can easily be created from any message
     /// type using [`HandlerMessage::new`](crate::HandlerMessage::new).
     ///
@@ -156,6 +155,10 @@ pub trait Handler: Debug + Sized + Send + 'static {
 }
 
 /// Defines how a [`Handler`] handles a specific [`Message`].
+///
+/// `req` is the message's reply channel: `()` for a fire-and-forget message,
+/// and a [`Request<T>`](zestors_interface::Request) to reply with for a message
+/// with `#[msg(reply = T)]`. Returning an error stops the actor.
 pub trait Handle<M: Message>: Handler {
     /// Handles a message of type `M`.
     fn handle(
@@ -196,7 +199,8 @@ pub trait HandlerInterface<H: Handler>: Interface {
 /// This can be transformed into a `Result` using [`HandlerExit::into_result`].
 #[derive(Debug)]
 pub enum HandlerExit {
-    /// The handler is exiting normally, due to a shutdown signal.
+    /// The handler is exiting normally: after a shutdown signal, or because
+    /// its inbox closed.
     Normal,
 
     /// The handler failed to initialize.
@@ -216,6 +220,8 @@ pub enum HandlerExit {
 }
 
 impl HandlerExit {
+    /// `Ok(())` for [`HandlerExit::Normal`], and an error describing the
+    /// reason otherwise.
     pub fn into_result(self) -> Result<(), Report> {
         match self {
             HandlerExit::Normal => Ok(()),

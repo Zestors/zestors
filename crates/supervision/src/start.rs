@@ -5,7 +5,7 @@ use rootcause::Report;
 use zestors_actor::{Actor, ActorExt as _, Blueprint};
 use zestors_runtime::{
     prelude::*,
-    {AsDyn as _, Context, Dyn, IntoDyn, errors::ConcurrentInboxError},
+    {Context, Dyn, IntoDyn, errors::ConcurrentInboxError},
 };
 
 /// Returned by [`Start::start_on`]: either the channel already had a

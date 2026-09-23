@@ -23,11 +23,10 @@ pub trait RemoteMessage:
     /// [`ClusterReply`](super::ClusterReply).
     type ClusterReceipt: ClusterReceipt<Output = Self::Output>;
 
-    /// The [`ClusterReceipt`](Self::ClusterReceipt), given what to wait on if
-    /// there is a reply.
+    #[doc(hidden)]
     fn remote_receipt(waiting: Option<ClusterReply<Self::Output>>) -> Self::ClusterReceipt;
 
-    /// What to wait on for a message sent to an actor on this node.
+    #[doc(hidden)]
     fn local_receipt(receipt: ReceiptOf<Self>, timeout: Option<Duration>) -> Self::ClusterReceipt;
 }
 
@@ -50,8 +49,8 @@ where
 }
 
 /// How the [`Receipt`](zestors_interface::Receipt) of a message, `()` or
-/// [`Reply<T>`](zestors_interface::Reply), is sent and received remotely. The
-/// two are all there are.
+/// [`Reply<T>`](zestors_interface::Reply), is sent and received remotely.
+/// Implemented for [`Cast`] and [`Call`], the only two kinds of message.
 pub trait RemoteMessageKind<T>: MessageKind<T> {
     type ClusterReceipt: ClusterReceipt<Output = T>;
 
@@ -100,7 +99,7 @@ impl<T: Send + 'static> RemoteMessageKind<T> for Call {
 /// addressable as a whole. Reach the rest of it with
 /// [`Cluster::address_dyn`](crate::Cluster::address_dyn):
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// # use zestors_distr::{Cluster, GlobalName};
 /// # use zestors_interface::Message;
 /// // An ordinary message, but with no `StableId` to name it by and no way to

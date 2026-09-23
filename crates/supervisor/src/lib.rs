@@ -20,7 +20,12 @@
 //!   messages defined in [`messages`].
 //! - [`Node`] runs a single root [`Supervisor`] as an entire program: it
 //!   starts it, and shuts it down gracefully on a Ctrl+C/SIGTERM. It exits
-//!   whenever the supervisor does.
+//!   whenever the supervisor does. To run the program as a node of a cluster,
+//!   use `ClusterNode` from `zestors-distr` instead.
+//!
+//! Supervision is local: a supervisor supervises actors in its own process. The
+//! [zestors book](https://zestors.github.io/zestors/supervision.html) covers
+//! supervision as a whole.
 //!
 //! The shared building blocks — [`ChildSpec`](zestors_supervision::ChildSpec),
 //! [`ChildConfig`](zestors_supervision::ChildConfig),
@@ -36,11 +41,12 @@
 //!
 //! A [`SupervisorBlueprint`] collects one or more
 //! [`ChildSpec`](zestors_supervision::ChildSpec)s, each pairing a blueprint
-//! with the [`Name`] it's registered under and the [`RestartMode`] the
-//! supervisor should apply to it. Instantiating the blueprint produces a
-//! [`Supervisor`] - an ordinary [`Actor`] like any other, so
-//! [`BlueprintExt::start`]/[`start_rand`](BlueprintExt::start_rand) start it
-//! the same way they would any other actor.
+//! with the [`Name`](zestors_runtime::Name) it's registered under and the
+//! [`RestartMode`](zestors_actor::RestartMode) the supervisor should apply to
+//! it. Instantiating the blueprint produces a [`Supervisor`] - an ordinary
+//! [`Actor`](zestors_actor::Actor) like any other, so
+//! [`BlueprintExt::start`](zestors_actor::BlueprintExt::start)/[`start_rand`](zestors_actor::BlueprintExt::start_rand)
+//! start it the same way they would any other actor.
 //!
 //! ```
 //! use zestors::actor::RestartMode;
@@ -106,7 +112,8 @@
 //! for a *root* supervisor and runs it as an entire program: [`Node::run`]
 //! starts it, and shuts it down gracefully - on a Ctrl+C/SIGTERM in a
 //! real program, or, as below, on an ordinary
-//! [`ActorOps::signal_shutdown`] sent to its address like any other actor.
+//! [`ActorOps::signal_shutdown`](zestors_runtime::ActorOps::signal_shutdown)
+//! sent to its address like any other actor.
 //!
 //! ```
 //! use zestors::interface::{Envelope, Interface, Message};
@@ -148,8 +155,9 @@
 //!         .rand_name(),
 //! );
 //!
-//! // `Node::run` consumes the `Node`, so keep a handle to the root
-//! // supervisor before handing it off.
+//! // In a program, `node.run().await` is all there is. Here it runs in the
+//! // background so the example can inspect it and stop it; `run` consumes the
+//! // node, so take the root supervisor's address first.
 //! let root = node.root_supervisor().address().clone();
 //! let node_task = tokio::spawn(node.run());
 //!
@@ -165,12 +173,6 @@
 //! assert!(node_task.await.unwrap().is_ok());
 //! # }
 //! ```
-//!
-//! In a real program, `node.run()` is usually just `.await`ed directly from
-//! `main` instead of spawned onto a background task: the only reason to
-//! reach for the root supervisor's address at all here is to trigger and
-//! observe a controlled shutdown from the test itself, in place of the
-//! Ctrl+C/SIGTERM a real deployment would send.
 
 mod actor;
 mod source;
@@ -201,6 +203,8 @@ pub mod prelude {
     pub use crate::{SupervisorBlueprint, SupervisorInterface};
 }
 
+/// The messages that change a running [`Supervisor`]'s children, part of
+/// [`SupervisorInterface`].
 pub mod messages {
     use crate::_prelude::*;
     use zestors_runtime::errors::DuplicateNameError;

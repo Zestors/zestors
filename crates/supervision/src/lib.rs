@@ -14,14 +14,16 @@
 //! - [`RestartIntensity`] is a sliding-window restart budget used to prevent
 //!   an actor that keeps failing immediately from restarting in a tight,
 //!   endless loop.
-//! - [`Start`]/[`DynStarter`] turn an
+//! - [`Start`]/[`DynStarter`] turn a
 //!   [`Blueprint`](zestors_actor::Blueprint) into something that
 //!   can (re)spawn an actor on an already-registered
 //!   [`StrongAddress`](zestors_runtime::StrongAddress), and
-//!   [`BlueprintSupervisionExt`] adds ergonomic `name`/`with_rand_name` helpers
-//!   to every blueprint.
-//! - [`messages`] holds the request/response types used to query a running
-//!   supervisor (its children and its health).
+//!   [`BlueprintSupervisionExt`] adds the `name`/`rand_name` helpers to every
+//!   blueprint.
+//! - [`messages`] holds [`GetChildren`] and [`GetHealth`], the queries that
+//!   any actor can accept to take part in the supervision tree and in health
+//!   reporting. Tools find them with dynamic calls, without knowing an actor's
+//!   type.
 //! - [`SupervisionTree`] recursively walks a supervisor and its descendants
 //!   into a serializable snapshot of the whole tree.
 //!
@@ -79,10 +81,14 @@
 //! # }
 //! ```
 //!
-//! A [`ChildSpec`] on its own is just a recipe plus a reserved [`Name`]; it
+//! A [`ChildSpec`] on its own is just a recipe plus a reserved [`Name`](zestors_runtime::Name); it
 //! doesn't monitor the child or restart it. That behavior belongs to the
 //! `Supervisor` actor in `zestors-supervisor`, which holds a set of specs and
 //! calls `start`/`restart` on them according to a `SupervisionStrategy`.
+//!
+//! Supervision is local: a `ChildSpec` holds a local address. The
+//! [zestors book](https://zestors.github.io/zestors/supervision.html) covers
+//! supervision as a whole.
 
 mod _prelude {
     pub use crate::*;
