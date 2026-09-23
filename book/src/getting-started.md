@@ -6,7 +6,7 @@ most programs need `rootcause` as well:
 
 ```toml
 [dependencies]
-zestors = "0.2"
+zestors = "0.3"
 tokio = { version = "1", features = ["full"] }
 rootcause = "0.13"
 ```

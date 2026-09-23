@@ -1,6 +1,6 @@
 [package]
 name = "zestors-runtime"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 readme = "README.md"
 description = "The actor runtime underlying the zestors actor framework"

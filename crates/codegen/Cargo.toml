@@ -1,6 +1,6 @@
 [package]
 name = "zestors-codegen"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Derive macros for the zestors actor framework"
 license.workspace = true

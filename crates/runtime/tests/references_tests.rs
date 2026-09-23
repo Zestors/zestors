@@ -485,6 +485,19 @@ async fn into_parts_and_into_handle_hand_back_ownership() {
 // ============================================================================
 
 #[tokio::test]
+async fn the_unit_interface_accepts_unit() {
+    let child = spawn_rand(common::simplest_handler);
+    child.monitor_init().await.unwrap();
+
+    assert!(child.accepts::<()>());
+    let dyn_address = child.address().clone().into_dyn::<((),)>();
+    dyn_address.cast(()).await.unwrap();
+    assert!(child.address().clone().into_dyn_checked::<((),)>().is_ok());
+
+    child.signal_shutdown();
+}
+
+#[tokio::test]
 async fn into_dyn_widens_to_an_accepted_subset() {
     let child = spawn_rand(ping_pong_handler);
     child.monitor_init().await.unwrap();

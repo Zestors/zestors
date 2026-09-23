@@ -1,6 +1,9 @@
 //! Clustering for `zestors`: nodes that find each other, and actors that message
 //! each other across them.
 //!
+//! **Not production ready:** the API is bound to change, and there will be
+//! bugs.
+//!
 //! The [distributed mode chapters of the zestors book](https://zestors.github.io/zestors/distributed/overview.html)
 //! explain how the pieces fit together, and what is and isn't guaranteed.
 //!

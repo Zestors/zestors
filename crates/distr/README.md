@@ -3,6 +3,8 @@
 [![crates.io](https://img.shields.io/crates/v/zestors-distr.svg)](https://crates.io/crates/zestors-distr)
 [![Documentation](https://docs.rs/zestors-distr/badge.svg)](https://docs.rs/zestors-distr)
 
+**Not production ready:** the API is bound to change, and there will be bugs.
+
 Clustering for the [`zestors`](https://crates.io/crates/zestors) actor
 framework: `ClusterNode` runs a program as a node of a cluster, membership is
 tracked with SWIM gossip, and a `ClusterAddress` sends messages to an actor on

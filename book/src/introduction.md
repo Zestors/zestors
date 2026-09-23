@@ -12,20 +12,30 @@ another node is messaged the same way as one on this node.
 
 ## Ideas behind it
 
-- **Messages define the contract.** A message says what it replies with, so an
-  actor's interface — the set of messages it accepts — says exactly what can be
-  asked of it and what comes back.
-- **Bring your own event loop.** Implementing a `Handle<M>` per message is enough
-  for most actors. When you need more control, you write the loop over the
-  `Inbox` yourself, interleaving messages, signals and any other future.
-- **Use only what you need.** The pieces are separate crates, and each layer
-  builds only on the one below it. You can write your own supervisor, or skip
-  the `Actor` and `Blueprint` traits entirely and spawn a closure.
-- **Dynamic addresses.** An address can be narrowed to a subset of the actor's
-  interface, like `Address<Dyn<(GetHealth, GetChildren)>>`. Addresses of
-  unrelated actors that share those messages then have the same type, and can
-  go in one collection — still strongly typed. The supervision tree and its
-  introspection are built on this; see [Dynamic addresses](dynamic-addresses.md).
+- **An actor is just a task.** There is no actor system to start: spawn an async
+  closure over an `Inbox` inside any tokio runtime, and write its receive loop
+  like any other async code — `select!` over messages, signals, timers and
+  sockets. When you don't need that control, implement one `Handle<M>` per
+  message and let `Handler` run the loop.
+- **A message means the same thing to every actor.** What a message replies with
+  is part of the message, not of the actor that receives it. So one message —
+  `GetHealth`, say — can be asked of any actor that accepts it, and always
+  answers the same way.
+- **Address actors by what they accept.** An address can be narrowed to part of
+  an actor's interface: `Address<Dyn<(GetHealth, GetChildren)>>`. Addresses of
+  unrelated actors that share those messages have the same type and can go in
+  one collection, checked at compile time; or you can send by message type and
+  check at runtime. The supervision tree, the HTTP API and the inspector find
+  their way around a running system this way, without knowing any actor's
+  type. See [Dynamic addresses](dynamic-addresses.md).
+- **Supervision in the OTP sense.** Supervisors restart actors on the same
+  channel, so a name — and every address to it — stays valid across restarts.
+  Restart strategies, restart budgets and child sets that change at runtime are
+  all plain data.
+- **Local or remote, the same code.** A `ClusterAddress` reaches an actor on this
+  node or another through the same `cast` and `call`. What the network adds —
+  at-most-once delivery, timeouts, lost nodes — is spelled out, not hidden.
+  Clusters can be tested inside one process, on virtual time.
 
 ## The crates
 
@@ -48,4 +58,3 @@ modules.
 
 The [API documentation](https://docs.rs/zestors) covers every type in detail.
 This book explains how the pieces fit together.
-d

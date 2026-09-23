@@ -14,20 +14,28 @@ its children according to a restart strategy, and a `Node` runs a supervision
 tree as a program. Nodes can join a cluster, where an actor on another node is
 messaged just like a local one.
 
-- **The interface defines the contract.** A message says what it replies with,
-  so an actor's interface says exactly what can be asked of it.
-- **Bring your own event loop.** Implement one `Handle<M>` per message, or write
-  the receive loop yourself and interleave messages, signals and any other
-  future.
-- **Use only what you need.** Each layer is a separate crate. Write your own
-  supervisor, or skip the `Actor` and `Blueprint` traits and spawn a closure.
-- **Dynamic addresses.** An address can be narrowed to part of an actor's
-  interface: `Address<Dyn<(GetHealth, GetChildren)>>`. Addresses of different
-  kinds of actor then share one type, still strongly typed. This is how the
-  supervision tree is inspected at runtime: any actor that accepts
-  `GetChildren` is part of it.
-- **Clustering.** Nodes discover each other over SWIM gossip and talk over QUIC
-  with mutual TLS. A `ClusterAddress` reaches an actor wherever it runs.
+- **An actor is just a task.** No actor system to start: spawn an async closure
+  over an `Inbox` in any tokio runtime and `select!` over whatever it needs — or
+  implement one `Handle<M>` per message and let `Handler` run the loop.
+- **A message means the same thing to every actor.** Its reply type belongs to
+  the message, not to the receiver, so one message (`GetHealth`) can be asked of
+  any actor that accepts it.
+- **Address actors by what they accept.** `Address<Dyn<(GetHealth,
+  GetChildren)>>` has the same type for unrelated actors that share those
+  messages. The supervision tree, HTTP API and inspector explore a running
+  system this way, without knowing any actor's type.
+- **Supervision in the OTP sense.** Actors restart on the same channel, so names
+  and addresses stay valid across restarts; strategies, restart budgets and
+  dynamic child sets are plain data.
+- **Local or remote, the same code.** A `ClusterAddress` reaches an actor on any
+  node with the same `cast` and `call`, over QUIC with mutual TLS. The network's
+  semantics are spelled out, and clusters can be tested in one process on
+  virtual time.
+
+> [!WARNING]
+> **Distributed mode is not production ready.** Its APIs are bound to change,
+> and there will be bugs. The rest of the framework — actors, messaging and
+> supervision — is the mature part.
 
 ## Example
 
@@ -80,7 +88,7 @@ async fn main() {
 
 ```toml
 [dependencies]
-zestors = "0.2"
+zestors = "0.3"
 tokio = { version = "1", features = ["full"] }
 rootcause = "0.13"
 ```
@@ -102,20 +110,27 @@ tree; see [Observability](https://zestors.github.io/zestors/observability.html).
 Most programs depend only on the [`zestors`](crates/zestors) crate, which
 re-exports the others as modules.
 
-| Crate                                           | What it provides                                                                                 |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| [`zestors`](crates/zestors)                     | The facade: re-exports the others, and a prelude. Start here.                                    |
-| [`zestors-interface`](crates/interface)         | `Message`/`Interface`: what an actor accepts, and how it replies.                                |
-| [`zestors-runtime`](crates/runtime)             | `Inbox`, `Address`, `Child`, `Name`, the `Registry`, signals, statuses and dynamic addresses.    |
-| [`zestors-actor`](crates/actor)                 | `Handler`/`Actor`: declarative and low-level ways to implement an actor; `Blueprint`.            |
-| [`zestors-supervision`](crates/supervision)     | `ChildSpec`/`ChildConfig`/`RestartIntensity`, and the `GetChildren`/`GetHealth` queries.         |
-| [`zestors-supervisor`](crates/supervisor)       | The `Supervisor` actor, and `Node` to run one as a program.                                      |
-| [`zestors-distr`](crates/distr)                 | Clustering: `ClusterNode`, `Cluster`, `ClusterAddress`, remote messages.                         |
-| [`zestors-distr-quic`](crates/distr-quic)       | The QUIC transport for clusters, with mutual TLS.                                                |
-| [`zestors-distr-backend`](crates/distr-backend) | The transport trait, to run a cluster over another network.                                      |
-| [`zestors-api-server`](crates/api-server)       | An HTTP server for inspecting a running supervision tree.                                        |
-| [`zestors-codegen`](crates/codegen)             | The `Message`, `Interface`, `HandlerInterface` and `StableId` derive macros.                     |
-| [`zestors-inspector`](crates/inspector)         | A GUI for the data `zestors-api-server` serves (not re-exported by `zestors`).                   |
+| Crate                                           | What it provides                                                                              |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| [`zestors`](crates/zestors)                     | The facade: re-exports the others, and a prelude. Start here.                                 |
+| [`zestors-interface`](crates/interface)         | `Message`/`Interface`: what an actor accepts, and how it replies.                             |
+| [`zestors-runtime`](crates/runtime)             | `Inbox`, `Address`, `Child`, `Name`, the `Registry`, signals, statuses and dynamic addresses. |
+| [`zestors-actor`](crates/actor)                 | `Handler`/`Actor`: declarative and low-level ways to implement an actor; `Blueprint`.         |
+| [`zestors-supervision`](crates/supervision)     | `ChildSpec`/`ChildConfig`/`RestartIntensity`, and the `GetChildren`/`GetHealth` queries.      |
+| [`zestors-supervisor`](crates/supervisor)       | The `Supervisor` actor, and `Node` to run one as a program.                                   |
+| [`zestors-distr`](crates/distr)                 | Clustering: `ClusterNode`, `Cluster`, `ClusterAddress`, remote messages.                      |
+| [`zestors-distr-quic`](crates/distr-quic)       | The QUIC transport for clusters, with mutual TLS.                                             |
+| [`zestors-distr-backend`](crates/distr-backend) | The transport trait, to run a cluster over another network.                                   |
+| [`zestors-api-server`](crates/api-server)       | An HTTP server for inspecting a running supervision tree.                                     |
+| [`zestors-codegen`](crates/codegen)             | The `Message`, `Interface`, `HandlerInterface` and `StableId` derive macros.                  |
+| [`zestors-inspector`](crates/inspector)         | A GUI for the data `zestors-api-server` serves (not re-exported by `zestors`).                |
+
+## AI policy
+
+AI agents were used to write parts of the documentation and the implementation,
+always paired with human supervision and thorough analysis of what they
+produced. The core of zestors — its actors, messaging and supervision — was
+crafted and coded by hand, with love and attention to detail.
 
 ## License
 

@@ -1,6 +1,6 @@
 [package]
 name = "zestors-distr-quic"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 readme = "README.md"
 description = "A QUIC backend with mutual TLS for zestors-distr clusters"

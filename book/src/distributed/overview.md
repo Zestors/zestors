@@ -4,6 +4,9 @@ Several `zestors` programs — *nodes* — can form a *cluster*. An actor on one
 can message an actor on another, using the same `cast` and `call` as for a local
 actor.
 
+> **Not production ready.** Distributed mode is new. Its APIs are bound to
+> change, and there will be bugs.
+
 ## The moving parts
 
 - **A node** is one program in the cluster. `ClusterNode` runs it: it does

@@ -3,7 +3,7 @@ use reqwest::StatusCode;
 use rootcause::report;
 use zestors::{
     runtime::{ActorStatus, ChannelSnapshot, Name},
-    supervision::{ChildConfig, SupervisionTree, messages::Health},
+    supervision::ChildConfig,
 };
 
 pub struct Client {
@@ -17,21 +17,6 @@ impl Client {
             client: reqwest::Client::new(),
             base_url: reqwest::Url::parse(base_url.as_ref())?,
         })
-    }
-
-    #[expect(dead_code)]
-    pub async fn get_tree(&self) -> rootcause::Result<Option<SupervisionTree>> {
-        let url = self.base_url.join("/tree")?;
-        let response = self.client.get(url).send().await?;
-
-        match response.status() {
-            StatusCode::OK => {
-                let supervision_tree = response.json::<SupervisionTree>().await?;
-                Ok(Some(supervision_tree))
-            }
-            StatusCode::NOT_FOUND => Ok(None),
-            _ => Err(response_error(response).await),
-        }
     }
 
     pub async fn get_processes(
@@ -57,20 +42,6 @@ impl Client {
             StatusCode::OK => {
                 let snapshots = response.json::<Vec<Option<ChannelSnapshot>>>().await?;
                 Ok(snapshots)
-            }
-            _ => Err(response_error(response).await),
-        }
-    }
-
-    #[expect(dead_code)]
-    pub async fn get_health(&self, names: Vec<Name>) -> rootcause::Result<Vec<Option<Health>>> {
-        let url = self.base_url.join("/debug_info")?;
-        let response = self.client.get(url).json(&names).send().await?;
-
-        match response.status() {
-            StatusCode::OK => {
-                let debug_info = response.json::<Vec<Option<Health>>>().await?;
-                Ok(debug_info)
             }
             _ => Err(response_error(response).await),
         }

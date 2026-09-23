@@ -5,7 +5,7 @@ simulated network. Enable it for tests only:
 
 ```toml
 [dev-dependencies]
-zestors-distr = { version = "0.2", features = ["sim"] }
+zestors-distr = { version = "0.3", features = ["sim"] }
 tokio = { version = "1", features = ["test-util"] }
 ```
 
