@@ -1,7 +1,5 @@
 use crate::*;
-use std::{
-    any::TypeId, convert::Infallible, fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc,
-};
+use std::{fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
 
 /// A weak reference to an actor's channel, which can be used to send
 /// messages and signals to it without keeping it alive.
@@ -37,15 +35,10 @@ impl<C: Context> Address<C> {
 
 impl<I: Interface> Address<I> {
     pub(crate) fn new(name: Name, strong_count: usize) -> Self {
-        let msg_queue_capacity = match TypeId::of::<I>() == TypeId::of::<Infallible>() {
-            true => 1,
-            false => MSG_QUEUE_CAPACITY,
-        };
-
         let inner: Arc<Channel> = Arc::new(Channel::new(
             name,
             strong_count,
-            ConcurrentQueue::<I>::bounded(msg_queue_capacity),
+            ConcurrentQueue::<I>::unbounded(),
         ));
 
         Self {

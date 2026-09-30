@@ -111,8 +111,13 @@ pub mod prelude {
 const BACKPRESSURE_LIMIT: usize = 100;
 const KEEP_N_SPAWNS: usize = 5;
 const KEEP_N_EXITS: usize = 5;
-const SIGNAL_QUEUE_CAPACITY: usize = 1_000_000;
-const MSG_QUEUE_CAPACITY: usize = 1_000_000;
+/// The most signals a channel holds: past it, a new signal is dropped (and logged). A ceiling, not
+/// an allocation: the queue only allocates for what is queued.
+const SIGNAL_QUEUE_LIMIT: usize = 1_000_000;
+/// The most messages a channel holds: pushing past it panics. Backpressure starts long before
+/// (see `BACKPRESSURE_LIMIT`), so only a sender that ignores it gets here. A ceiling, not an
+/// allocation: the queue only allocates for what is queued.
+const MSG_QUEUE_LIMIT: usize = 1_000_000;
 
 mod references;
 pub use references::*;

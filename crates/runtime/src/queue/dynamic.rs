@@ -18,11 +18,10 @@ impl<I: Interface> DynamicQueue for ConcurrentQueue<I> {
     fn push_envelope_dyn(&self, msg: AnyEnvelope) -> Result<(), NotAccepted<AnyEnvelope>> {
         let envelope = I::try_from_dyn_envelope(msg).map_err(|envelope| NotAccepted(envelope))?;
 
+        // The channel enforces its limit before pushing (`Channel::try_push_msg`).
         self.push(envelope).map_err(|e| match e {
             PushError::Closed(_) => unreachable!("Should never be closed"),
-            PushError::Full(_) => {
-                panic!("Queue is full: {:?}", std::any::type_name::<Self>());
-            }
+            PushError::Full(_) => unreachable!("The message queue is unbounded"),
         })
     }
 

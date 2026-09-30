@@ -10,6 +10,8 @@ pub(crate) struct Channel<Q: ?Sized = dyn DynamicQueue> {
     status_observer: SharedObservable<ActorStatus>,
     msg_notifier: Notify,
     msg_backpressure_limit: usize,
+    msg_queue_limit: usize,
+    signal_queue_limit: usize,
     created_at: Instant,
     spawns: RwLock<Vec<Instant>>,
     exits: RwLock<Vec<(Instant, Result<(), ExitError>)>>,
@@ -18,12 +20,32 @@ pub(crate) struct Channel<Q: ?Sized = dyn DynamicQueue> {
 }
 
 impl<I: Interface> Channel<ConcurrentQueue<I>> {
+    /// `msg_queue` should be unbounded: both queues grow with what is queued, and the limits are
+    /// enforced by the channel (a bounded queue allocates its whole capacity up front).
     pub(crate) fn new(name: Name, strong_count: usize, msg_queue: ConcurrentQueue<I>) -> Self {
+        Self::with_limits(
+            name,
+            strong_count,
+            msg_queue,
+            MSG_QUEUE_LIMIT,
+            SIGNAL_QUEUE_LIMIT,
+        )
+    }
+
+    pub(crate) fn with_limits(
+        name: Name,
+        strong_count: usize,
+        msg_queue: ConcurrentQueue<I>,
+        msg_queue_limit: usize,
+        signal_queue_limit: usize,
+    ) -> Self {
         Self {
             name,
             msg_notifier: Notify::new(),
             msg_backpressure_limit: BACKPRESSURE_LIMIT,
-            signal_queue: ConcurrentQueue::bounded(SIGNAL_QUEUE_CAPACITY),
+            msg_queue_limit,
+            signal_queue_limit,
+            signal_queue: ConcurrentQueue::unbounded(),
             signal_notifier: Notify::new(),
             status_observer: SharedObservable::new(ActorStatus::Exited(ExitStatus::Normal)),
             msg_queue,
@@ -65,22 +87,24 @@ impl Channel {
             return false;
         }
 
-        match self.signal_queue.push(signal) {
-            Ok(_) => {
-                self.signal_notifier.notify_one();
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Signal queue for {} contains more than {} signals. The signal has been lost. Error: {:?}",
-                    std::any::type_name::<Self>(),
-                    SIGNAL_QUEUE_CAPACITY,
-                    e
-                );
-                return false;
-            }
+        // Checked before pushing, so concurrent senders can overshoot the limit by a few signals.
+        if self.signal_queue.len() >= self.signal_queue_limit {
+            tracing::error!(
+                "Signal queue of {:?} holds {} signals, its limit. The signal has been lost.",
+                self.name,
+                self.signal_queue_limit,
+            );
+            return false;
         }
 
-        true
+        match self.signal_queue.push(signal) {
+            Ok(()) => {
+                self.signal_notifier.notify_one();
+                true
+            }
+            Err(PushError::Closed(_)) => unreachable!("The signal queue is never closed"),
+            Err(PushError::Full(_)) => unreachable!("The signal queue is unbounded"),
+        }
     }
 
     pub(crate) fn created_at(&self) -> Instant {
@@ -168,8 +192,26 @@ impl Channel {
         exits.clone()
     }
 
+    /// # Panics
+    /// If the queue already holds `msg_queue_limit` messages (see [`Self::assert_msg_room`]).
     pub(crate) fn try_push_msg<M: Message>(&self, msg: M) -> Result<ReceiptOf<M>, NotAccepted<M>> {
+        self.assert_msg_room();
         self.msg_queue.try_push_msg(msg)
+    }
+
+    /// Enforces the message queue's limit, which the (unbounded) queue itself doesn't: every push
+    /// into the message queue goes through here first. Checked before pushing, so concurrent senders
+    /// can overshoot the limit by a few messages.
+    ///
+    /// # Panics
+    /// If the queue already holds `msg_queue_limit` messages.
+    pub(crate) fn assert_msg_room(&self) {
+        if self.msg_queue.len() >= self.msg_queue_limit {
+            panic!(
+                "Queue is full: {:?} holds {} messages, its limit",
+                self.name, self.msg_queue_limit
+            );
+        }
     }
 
     pub(crate) fn msg_notify_one(&self) {
@@ -531,5 +573,84 @@ pub(crate) struct InvalidStatusUpdate {
 impl InvalidStatusUpdate {
     pub fn new(from: ActorStatus, to: ActorStatus) -> Self {
         Self { from, to }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Message, Debug)]
+    #[zestors(interface_path = "zestors_interface")]
+    struct Bump;
+
+    #[derive(Interface)]
+    #[zestors(interface_path = "zestors_interface")]
+    enum BumpInterface {
+        Bump(Envelope<Bump>),
+    }
+
+    fn channel(msg_queue_limit: usize, signal_queue_limit: usize) -> Arc<Channel> {
+        let channel: Arc<Channel> = Arc::new(Channel::with_limits(
+            Name::new_static("limits-test"),
+            1,
+            ConcurrentQueue::<BumpInterface>::unbounded(),
+            msg_queue_limit,
+            signal_queue_limit,
+        ));
+        channel.register_spawned().unwrap();
+        channel
+    }
+
+    fn ping() -> SignalInterface {
+        SignalInterface::Ping(Envelope::new_pair(Ping).0)
+    }
+
+    #[test]
+    fn queues_are_not_preallocated() {
+        let channel: Arc<Channel> = Arc::new(Channel::new(
+            Name::new_static("default-limits-test"),
+            1,
+            ConcurrentQueue::<BumpInterface>::unbounded(),
+        ));
+
+        let msg_queue = channel.raw_queue::<BumpInterface>().unwrap();
+        assert_eq!(msg_queue.capacity(), None);
+        assert_eq!(channel.signal_queue.capacity(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "Queue is full")]
+    fn pushing_past_the_message_limit_panics() {
+        let channel = channel(2, 10);
+        channel.try_push_msg(Bump).ok().unwrap();
+        channel.try_push_msg(Bump).ok().unwrap();
+        let _ = channel.try_push_msg(Bump);
+    }
+
+    #[test]
+    #[should_panic(expected = "Queue is full")]
+    fn pushing_past_the_message_limit_panics_on_the_typed_path() {
+        // `try_cast_with` pushes into the typed queue directly, not through `try_push_msg`.
+        let channel = channel(2, 10);
+        let options = CallOptions::new().ignore_backpressure(true);
+        channel
+            .try_cast_with::<Bump, BumpInterface>(Bump, options)
+            .ok()
+            .unwrap();
+        channel
+            .try_cast_with::<Bump, BumpInterface>(Bump, options)
+            .ok()
+            .unwrap();
+        let _ = channel.try_cast_with::<Bump, BumpInterface>(Bump, options);
+    }
+
+    #[test]
+    fn signals_past_the_limit_are_dropped() {
+        let channel = channel(10, 2);
+        assert!(channel.signal(ping()));
+        assert!(channel.signal(ping()));
+        assert!(!channel.signal(ping()));
+        assert_eq!(channel.signal_len(), 2);
     }
 }

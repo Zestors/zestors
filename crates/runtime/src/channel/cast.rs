@@ -78,8 +78,12 @@ impl Channel {
         let (envelope, receipt) = Envelope::new_pair(msg);
         let interface = I::from(envelope);
 
-        if let Err(_e) = queue.push(interface) {
-            panic!("Queue was full or empty {}", std::any::type_name::<Self>());
+        self.assert_msg_room();
+        if let Err(e) = queue.push(interface) {
+            match e {
+                PushError::Closed(_) => unreachable!("The message queue is never closed"),
+                PushError::Full(_) => unreachable!("The message queue is unbounded"),
+            }
         }
 
         self.msg_notify_one();

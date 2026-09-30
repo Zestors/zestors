@@ -1,6 +1,6 @@
 [package]
 name = "zestors-inspector"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 readme = "README.md"
 description = "GUI inspector for a running zestors actor tree"
