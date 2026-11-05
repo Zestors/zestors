@@ -14,7 +14,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use zestors_runtime::{ActorStatus, ExitStatus, errors::DuplicateNameError};
+use zestors_runtime::{ActorStatus, errors::DuplicateNameError};
 use zestors_supervision::{
     RestartIntensity,
     messages::{Health, HealthStatus},
@@ -44,6 +44,7 @@ impl Actor for Supervisor {
             inbox,
             source: self.source,
             restarter: RestartLimiter::new(self.restart_intensity),
+            failure: None,
         }
         .run(self.strategy)
         .await
@@ -78,6 +79,10 @@ struct SupervisorInner {
     inbox: Inbox<SupervisorInterface>,
     source: Option<Arc<dyn SupervisorSource>>,
     restarter: RestartLimiter,
+    /// Set when the supervisor gives up (e.g. its restart budget is
+    /// exhausted). Once set, the event loop shuts down and `run` returns it as
+    /// the supervisor's own error, so its parent (or `Node`) sees the failure.
+    failure: Option<Report>,
 }
 
 impl SupervisorInner {
@@ -192,6 +197,23 @@ impl SupervisorInner {
         }
     }
 
+    /// Records that the supervisor is giving up on `name` (its restart budget
+    /// ran out), and logs it. The stored report becomes the supervisor's own
+    /// exit error, so the failure escalates to its parent or `Node` instead of
+    /// the supervisor exiting as if nothing had happened.
+    pub(super) fn give_up(&mut self, name: &Name) {
+        tracing::error!(
+            name = %name,
+            "Restart budget exhausted; supervisor is shutting down and propagating the failure"
+        );
+
+        if self.failure.is_none() {
+            self.failure = Some(report!(
+                "Supervisor gave up: restart budget exhausted while restarting child '{name}'"
+            ));
+        }
+    }
+
     /// The part of `remove_spec` common to every strategy; strategies with extra
     /// per-name bookkeeping (e.g. an in-progress restart cascade) clean that up
     /// themselves around this call.
@@ -222,7 +244,7 @@ enum ExitReason {
     /// The supervisee failed to start; always requires a restart attempt.
     StartFailure,
     /// The supervisee exited before finishing initialization.
-    InitExit(ExitStatus),
+    InitExit(InitError),
     Exit(SuperviseeExit),
 }
 
@@ -230,7 +252,7 @@ impl ExitReason {
     fn requires_restart(&self, supervisee: &Supervisee) -> bool {
         match self {
             ExitReason::StartFailure => supervisee.cfg().restart_mode != RestartMode::Never,
-            ExitReason::InitExit(status) => supervisee.requires_restart_for_init_exit(status),
+            ExitReason::InitExit(error) => supervisee.requires_restart_for_init_exit(error),
             ExitReason::Exit(e) => supervisee.requires_restart(e),
         }
     }

@@ -13,13 +13,14 @@ use tokio::time::{error::Elapsed, timeout};
 use zestors_runtime::{
     ActorRef, Address, Child, Dyn, ExitStatus, Name, ShutdownChild, errors::JoinError,
 };
-use zestors_supervision::{ChildConfig, ChildDescription, StartOnError};
+use zestors_supervision::{ChildConfig, ChildDescription, RestartBackoff, StartOnError};
 
 #[derive(Debug)]
 pub(super) struct Supervisee {
     spec: ChildSpec,
     state: SuperviseeState,
     restarter: Option<RestartLimiter>,
+    backoff: BackoffState,
     /// The waker from this supervisee's most recent poll. `start`/`stop`
     /// mutate `state` from outside of a poll (e.g. in response to a
     /// sibling's exit), which on its own doesn't get this supervisee's
@@ -30,12 +31,32 @@ pub(super) struct Supervisee {
     waker: Option<Waker>,
 }
 
+/// How many consecutive restarts a child has needed since it last
+/// initialized successfully, used to pick the next [`RestartBackoff`] delay.
+#[derive(Debug, Default)]
+struct BackoffState {
+    consecutive_restarts: u32,
+}
+
+impl BackoffState {
+    fn next_delay(&mut self, backoff: &RestartBackoff) -> Duration {
+        let delay = backoff.delay(self.consecutive_restarts);
+        self.consecutive_restarts = self.consecutive_restarts.saturating_add(1);
+        delay
+    }
+
+    fn reset(&mut self) {
+        self.consecutive_restarts = 0;
+    }
+}
+
 impl Supervisee {
     pub(super) fn new(spec: ChildSpec) -> Self {
         Self {
             restarter: spec.cfg().intensity.clone().map(RestartLimiter::new),
             spec,
             state: SuperviseeState::dead(),
+            backoff: BackoffState::default(),
             waker: None,
         }
     }
@@ -66,18 +87,18 @@ impl Supervisee {
         }
     }
 
-    /// Whether exiting with this status before finishing initialization
-    /// requires the child to be restarted. A `Normal` exit is treated the
-    /// same as [`SuperviseeExit::NormalExit`]: under `OnError` it's a
-    /// successful completion, not a failure, even though it happened before
-    /// the child reported itself as running.
+    /// Whether exiting with this error before finishing initialization
+    /// requires the child to be restarted. A normal exit is treated the same
+    /// as [`SuperviseeExit::NormalExit`]: under `OnError` it's a successful
+    /// completion, not a failure, even though it happened before the child
+    /// reported itself as running.
     #[must_use]
-    pub(super) fn requires_restart_for_init_exit(&self, status: &ExitStatus) -> bool {
-        match (self.cfg().restart_mode, status) {
+    pub(super) fn requires_restart_for_init_exit(&self, error: &InitError) -> bool {
+        match (self.cfg().restart_mode, error) {
             (RestartMode::Always, _) => true,
             (RestartMode::Never, _) => false,
-            (RestartMode::OnError, ExitStatus::Normal) => false,
-            (RestartMode::OnError, _) => true,
+            (RestartMode::OnError, InitError::NormalExit) => false,
+            (RestartMode::OnError, InitError::Join(_)) => true,
         }
     }
 
@@ -91,11 +112,29 @@ impl Supervisee {
     }
 
     pub(super) fn start(&mut self) -> Result<bool, SuperviseeIsShuttingDown> {
+        self.start_inner(None)
+    }
+
+    /// Like [`Supervisee::start`], but for a restart: the child is spawned
+    /// only after this child's configured [`RestartBackoff`] delay, which
+    /// grows with every consecutive failing restart.
+    pub(super) fn restart(&mut self) -> Result<bool, SuperviseeIsShuttingDown> {
+        self.start_inner(Some(()))
+    }
+
+    fn start_inner(&mut self, restart: Option<()>) -> Result<bool, SuperviseeIsShuttingDown> {
         let result = self.state.map(|state| match state {
             // If the supervisee is idle or dead, we can start it.
             SuperviseeState::Dead { .. } => {
+                let delay = match restart {
+                    Some(()) => self.backoff.next_delay(&self.spec.cfg().backoff),
+                    None => Duration::ZERO,
+                };
                 let spec = self.spec.clone();
                 let fut = StartFuture::new(async move {
+                    if !delay.is_zero() {
+                        tokio::time::sleep(delay).await;
+                    }
                     Ok(timeout(spec.cfg().start_timeout, spec.start()).await??)
                 });
 
@@ -157,7 +196,7 @@ impl Supervisee {
     }
 
     pub(super) async fn supervise(&mut self) -> SuperviseeItem {
-        match &mut self.state {
+        let item = match &mut self.state {
             SuperviseeState::Dead { .. } => future::pending().await,
 
             SuperviseeState::Starting { fut } => match fut.await {
@@ -186,9 +225,23 @@ impl Supervisee {
                     self.state = SuperviseeState::Alive { child };
                     SuperviseeItem::Initialized(Ok(()))
                 }
-                Err(e) => {
-                    self.state = SuperviseeState::dead();
-                    SuperviseeItem::Initialized(Err(e))
+                Err(_status) => {
+                    let SuperviseeState::Initializing { child, .. } =
+                        std::mem::replace(&mut self.state, SuperviseeState::dead())
+                    else {
+                        unreachable!();
+                    };
+
+                    // The channel only tracks *that* the child failed, not the
+                    // error it returned. The task has already finished (that's
+                    // what `monitor_init` observed), so joining it here is
+                    // immediate, and gives us the child's own `Report` to log
+                    // and to attach to the supervisor's eventual failure.
+                    let error = match child.await {
+                        Ok(()) => InitError::NormalExit,
+                        Err(join_error) => InitError::Join(join_error),
+                    };
+                    SuperviseeItem::Initialized(Err(error))
                 }
             },
 
@@ -213,7 +266,15 @@ impl Supervisee {
                     SuperviseeItem::Exit(SuperviseeExit::JoinError(join_error))
                 }
             },
+        };
+
+        // A child that made it back to `Running` after this restart is healthy
+        // again, so the next restart starts from the beginning of the backoff.
+        if matches!(&item, SuperviseeItem::Initialized(Ok(()))) {
+            self.backoff.reset();
         }
+
+        item
     }
 
     pub(super) fn cfg(&self) -> &ChildConfig {
@@ -255,8 +316,21 @@ pub(super) struct SuperviseeNext {
 #[derive(Debug)]
 pub(super) enum SuperviseeItem {
     Started(Result<(), StartSuperviseeError>),
-    Initialized(Result<(), ExitStatus>),
+    Initialized(Result<(), InitError>),
     Exit(SuperviseeExit),
+}
+
+/// Why a child that was spawned did not reach `Running`.
+#[derive(Debug, thiserror::Error)]
+pub(super) enum InitError {
+    /// The child's task ended with an error, panicked, or was aborted.
+    #[error("{0}")]
+    Join(#[from] JoinError),
+
+    /// The child's task returned `Ok(())` without ever reporting itself as
+    /// initialized.
+    #[error("child exited normally before finishing initialization")]
+    NormalExit,
 }
 
 #[derive(Debug)]

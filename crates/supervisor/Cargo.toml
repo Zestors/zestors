@@ -27,6 +27,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 zestors = { path = "../zestors" }
+tracing-subscriber.workspace = true
 
 [package.metadata.cargo-machete]
 ignored = ["zestors"] # only used in doctests

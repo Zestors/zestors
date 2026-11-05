@@ -17,9 +17,10 @@ when one exits, and restarts it according to a policy.
   - `restart_mode`: `Always`, `OnError` (the default: only after an error,
     panic or abort) or `Never`;
   - `intensity`: an optional per-child restart budget;
+  - `backoff`: how long to wait before restarting it (see below);
   - `init_timeout`, `abort_timeout`, `start_timeout`.
 
-  Set these with `with_mode`, `with_abort_timeout`, and so on.
+  Set these with `with_mode`, `with_backoff`, `with_abort_timeout`, and so on.
 - A **`Supervisor`** is an ordinary actor, built from
   `Supervisor::blueprint()`.
 - A **`SupervisionStrategy`** decides what gets restarted when a child exits:
@@ -34,8 +35,25 @@ when one exits, and restarts it according to a policy.
   Duration::from_secs(10))`, is the most restarts allowed in a window. A
   supervisor has one (by default 3 restarts in 5 minutes, set with
   `.intensity(…)`), and a child can have its own as well. When either runs out,
-  the supervisor stops its children and exits itself, and its own supervisor
-  takes over.
+  the supervisor stops its children and exits with an error, and its own
+  supervisor — or `Node`, which turns it into a non-zero exit code — takes
+  over.
+- A **`RestartBackoff`** sets how long the supervisor waits before restarting a
+  child. Its defaults start at 100 ms, double after every consecutive restart,
+  and are capped at 30 seconds; a child that finishes initialization again
+  resets the delay. Set it per child with `ChildSpec::with_backoff`, or use
+  `RestartBackoff::none()` to restart immediately. The delay stops an
+  immediately-failing child from spinning, while the restart budget is what
+  eventually stops it.
+
+## What happens when a child fails
+
+A child that exits before it finishes initializing (for example, a server
+whose `bind` fails) is logged at `warn` with the child's name and the error it
+returned, then handled like any other exit: restarted after the configured
+backoff, until its restart budget runs out. When that happens, the supervisor
+stops its children and exits with an error carrying the child's name, rather
+than exiting as if it had completed normally.
 
 ## Running a tree as a program
 

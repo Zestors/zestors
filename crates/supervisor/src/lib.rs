@@ -12,6 +12,12 @@
 //!   [`OneForOne`](SupervisionStrategy::OneForOne),
 //!   [`OneForAll`](SupervisionStrategy::OneForAll), or
 //!   [`RestForOne`](SupervisionStrategy::RestForOne).
+//! - Restarts wait for the child's configured
+//!   [`RestartBackoff`](zestors_supervision::RestartBackoff), and stop once
+//!   either restart budget (the supervisor's or the child's
+//!   [`RestartIntensity`](zestors_supervision::RestartIntensity)) is
+//!   exhausted. The supervisor then stops its children and exits with an
+//!   error, so the failure escalates to its parent or to [`Node`].
 //! - [`SupervisorSource`]/[`InMemorySupervisorSource`] let a running
 //!   supervisor add and remove children at runtime.
 //! - [`SupervisorInterface`] is the supervisor's message interface, answering

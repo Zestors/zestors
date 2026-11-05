@@ -62,7 +62,7 @@ impl<'a> OneForAllSupervisor<'a> {
             }
 
             if !supervisee.acquire_restart_permit() {
-                return self.shutdown();
+                return self.give_up(&name);
             }
 
             self.cascade_restart.insert(name.clone());
@@ -90,7 +90,7 @@ impl<'a> OneForAllSupervisor<'a> {
                 continue;
             };
 
-            if let Err(e) = supervisee.start() {
+            if let Err(e) = supervisee.restart() {
                 tracing::error!(%e, "Failed to restart supervisee");
             }
         }
@@ -128,7 +128,7 @@ impl<'a> Strategy for OneForAllSupervisor<'a> {
         }
 
         if !self.inner.restarter.acquire_permit() || !supervisee.acquire_restart_permit() {
-            return self.shutdown();
+            return self.give_up(name);
         }
 
         // One-for-all: this child alone decides *whether* the group restarts,

@@ -25,8 +25,8 @@ messaged just like a local one.
   messages. The supervision tree, HTTP API and inspector explore a running
   system this way, without knowing any actor's type.
 - **Supervision in the OTP sense.** Actors restart on the same channel, so names
-  and addresses stay valid across restarts; strategies, restart budgets and
-  dynamic child sets are plain data.
+  and addresses stay valid across restarts; restart strategies, budgets,
+  exponential backoff and dynamic child sets are plain data.
 - **Local or remote, the same code.** A `ClusterAddress` reaches an actor on any
   node with the same `cast` and `call`, over QUIC with mutual TLS. The network's
   semantics are spelled out, and clusters can be tested in one process on

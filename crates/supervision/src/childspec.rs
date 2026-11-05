@@ -16,6 +16,12 @@ pub struct ChildConfig {
     /// supervisor-wide limit.
     pub intensity: Option<RestartIntensity>,
 
+    /// How long to wait before restarting this child, growing exponentially
+    /// with every consecutive restart. Defaults to
+    /// [`RestartBackoff::default`]; set [`RestartBackoff::none`] to restart
+    /// immediately.
+    pub backoff: RestartBackoff,
+
     /// How long to wait for the child's task to exit after it is aborted.
     pub abort_timeout: Duration,
 
@@ -32,6 +38,7 @@ impl Default for ChildConfig {
         Self {
             restart_mode: RestartMode::Always,
             intensity: Default::default(),
+            backoff: Default::default(),
             abort_timeout: Duration::from_secs(5),
             init_timeout: Duration::from_secs(5),
             start_timeout: Duration::from_secs(5),
@@ -60,6 +67,7 @@ impl ChildConfig {
             init_timeout: blueprint.default_init_timeout(),
             start_timeout: blueprint.default_instantiation_timeout(),
             intensity: None,
+            backoff: RestartBackoff::default(),
         }
     }
 }
@@ -137,6 +145,13 @@ impl<T: Start> ChildSpec<T> {
     /// Sets [`ChildConfig::init_timeout`].
     pub fn with_init_timeout(mut self, init_timeout: Duration) -> Self {
         self.cfg.init_timeout = init_timeout;
+        self
+    }
+
+    /// Sets [`ChildConfig::backoff`]: how long to wait before restarting the
+    /// child, growing exponentially with every consecutive restart.
+    pub fn with_backoff(mut self, backoff: RestartBackoff) -> Self {
+        self.cfg.backoff = backoff;
         self
     }
 

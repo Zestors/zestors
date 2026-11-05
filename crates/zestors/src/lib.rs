@@ -21,7 +21,7 @@
 //! | [`interface`] | [`Message`](interface::Message) and [`Interface`](interface::Interface): what an actor accepts and how it replies. |
 //! | [`runtime`] | [`Inbox`](runtime::Inbox), [`Address`](runtime::Address), [`Child`](runtime::Child), [`Name`](runtime::Name) and the [`Registry`](runtime::Registry); signals, statuses, and [dynamic addresses](runtime::IntoDyn). |
 //! | [`actor`] | [`Handler`](actor::Handler) (one handler per message) and [`Actor`](actor::Actor) (a full event loop), and [`Blueprint`](actor::Blueprint). |
-//! | [`supervision`] | [`ChildSpec`](supervision::ChildSpec), [`ChildConfig`](supervision::ChildConfig), [`RestartIntensity`](supervision::RestartIntensity), and the [`GetChildren`](supervision::messages::GetChildren)/[`GetHealth`](supervision::messages::GetHealth) queries. |
+//! | [`supervision`] | [`ChildSpec`](supervision::ChildSpec), [`ChildConfig`](supervision::ChildConfig), [`RestartIntensity`](supervision::RestartIntensity), [`RestartBackoff`](supervision::RestartBackoff), and the [`GetChildren`](supervision::messages::GetChildren)/[`GetHealth`](supervision::messages::GetHealth) queries. |
 //! | [`supervisor`] | The [`Supervisor`](supervisor::Supervisor) actor, and [`Node`](supervisor::Node) to run one as a program. |
 //! | `distr` | Clustering (feature `distr`): `ClusterNode`, `Cluster`, `ClusterAddress`, and messages with a `StableId`. |
 //! | `distr_quic` | The QUIC transport for clusters, with mutual TLS: `Quic` and `Tls` (feature `distr`). |
@@ -83,9 +83,9 @@
 /// `StableId`, …).
 pub mod prelude {
     pub use zestors_actor::prelude::*;
-    pub use zestors_codegen::{HandlerInterface, Interface, Message};
     #[cfg(feature = "distr")]
     pub use zestors_codegen::StableId;
+    pub use zestors_codegen::{HandlerInterface, Interface, Message};
     #[cfg(feature = "distr")]
     pub use zestors_distr::prelude::*;
     #[cfg(feature = "distr")]

@@ -15,7 +15,9 @@ use std::{
 use zestors_actor::{Actor, RestartMode, fn_blueprint};
 use zestors_interface::{Envelope, Interface, Message};
 use zestors_runtime::{Dyn, prelude::*};
-use zestors_supervision::{BlueprintSupervisionExt as _, ChildConfig, ChildSpec, RestartIntensity};
+use zestors_supervision::{
+    BlueprintSupervisionExt as _, ChildConfig, ChildSpec, RestartBackoff, RestartIntensity,
+};
 use zestors_supervisor::{SupervisorBlueprint, SupervisorInterface};
 
 /// Tells a [`TestActor`] to exit with an error, simulating an unhandled crash.
@@ -127,6 +129,9 @@ pub fn test_child(mode: RestartMode) -> (ChildSpec, Address<TestInterface>, Arc<
         // failure). A generous intensity keeps that from tripping the
         // restart limiter and shutting the test's supervisor down early.
         intensity: Some(RestartIntensity::restarts(100).within(Duration::from_secs(30))),
+        // These tests are about *who* restarts, not how long it takes, so
+        // skip the restart backoff and keep them quick and deterministic.
+        backoff: RestartBackoff::none(),
         abort_timeout: Duration::from_secs(1),
         init_timeout: Duration::from_secs(1),
         start_timeout: Duration::from_secs(1),

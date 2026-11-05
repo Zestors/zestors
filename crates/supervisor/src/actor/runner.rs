@@ -38,6 +38,15 @@ pub(super) trait Strategy {
         ControlFlow::Continue(())
     }
 
+    /// Records that the supervisor's restart budget ran out while trying to
+    /// restart `name`, and begins shutting down. `run` then returns that
+    /// failure as the supervisor's own error, escalating it to the parent
+    /// supervisor or `Node`.
+    fn give_up(&mut self, name: &Name) -> ControlFlow<()> {
+        self.parts().0.give_up(name);
+        self.shutdown()
+    }
+
     /// Starts every supervisee and runs the event loop to completion.
     async fn run(&mut self) -> Result<(), Report> {
         let (inner, initializing) = self.parts();
@@ -59,7 +68,13 @@ pub(super) trait Strategy {
             }
         }
 
-        start_result.map_err(|(name, e)| report!(e).attach(name).into())
+        let start_result = start_result.map_err(|(name, e)| report!(e).attach(name).into());
+
+        if let Some(failure) = self.parts().0.failure.take() {
+            return Err(failure);
+        }
+
+        start_result
     }
 
     fn handle_next(&mut self, next: InnerNext) -> ControlFlow<()> {
@@ -111,7 +126,7 @@ pub(super) trait Strategy {
             InnerNext::Supervisee(SuperviseeNext { name, item }) => match item {
                 SuperviseeItem::Started(Ok(())) => {}
                 SuperviseeItem::Started(Err(error)) => {
-                    tracing::warn!(%error, "Supervisee failed to start");
+                    tracing::warn!(name = %name, %error, "Supervisee failed to start");
                     self.handle_exit(&name, ExitReason::StartFailure)?;
                 }
 
@@ -119,14 +134,18 @@ pub(super) trait Strategy {
                     self.handle_initialized(&name);
                     self.after_initialized(&name)?;
                 }
-                SuperviseeItem::Initialized(Err(status)) => {
-                    tracing::warn!(%status, "Supervisee exited before finishing initialization");
-                    self.handle_exit(&name, ExitReason::InitExit(status))?;
+                SuperviseeItem::Initialized(Err(error)) => {
+                    tracing::warn!(
+                        name = %name,
+                        %error,
+                        "Supervisee exited before finishing initialization"
+                    );
+                    self.handle_exit(&name, ExitReason::InitExit(error))?;
                 }
 
                 SuperviseeItem::Exit(exit) => {
                     if let SuperviseeExit::JoinError(e) = &exit {
-                        tracing::warn!(%e, "Supervisee exited with a join error");
+                        tracing::warn!(name = %name, %e, "Supervisee exited with a join error");
                     }
                     self.handle_exit(&name, ExitReason::Exit(exit))?;
                 }

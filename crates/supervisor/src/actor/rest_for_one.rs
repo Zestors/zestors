@@ -127,11 +127,11 @@ impl<'a> RestForOneSupervisor<'a> {
             return ControlFlow::Continue(());
         }
 
-        if !supervisee.acquire_restart_permit() {
-            return self.shutdown();
+        if !self.inner.restarter.acquire_permit() || !supervisee.acquire_restart_permit() {
+            return self.give_up(name);
         }
 
-        if let Err(e) = supervisee.start() {
+        if let Err(e) = supervisee.restart() {
             tracing::error!(%e, "Failed to restart supervisee");
         }
 
@@ -263,7 +263,7 @@ impl<'a> RestForOneSupervisor<'a> {
             }
 
             if !supervisee.acquire_restart_permit() {
-                return self.shutdown();
+                return self.give_up(&next);
             }
 
             to_restart.push(next.clone());
@@ -293,7 +293,7 @@ impl<'a> RestForOneSupervisor<'a> {
                 continue; // removed in the meantime; nothing to wait for
             };
 
-            match supervisee.start() {
+            match supervisee.restart() {
                 Ok(true) => {
                     self.cascade = Cascade::Restarting {
                         current: next,
@@ -363,7 +363,7 @@ impl<'a> Strategy for RestForOneSupervisor<'a> {
 
         // Here we check both permit of the supervisee as well as the supervisor
         if !self.inner.restarter.acquire_permit() || !supervisee.acquire_restart_permit() {
-            return self.shutdown();
+            return self.give_up(name);
         }
 
         match std::mem::replace(&mut self.cascade, Cascade::Idle) {

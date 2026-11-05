@@ -44,12 +44,12 @@ impl<'a> Strategy for OneForOneSupervisor<'a> {
 
         match self.inner.restarter.acquire_permit() && supervisee.acquire_restart_permit() {
             true => {
-                if let Err(e) = supervisee.start() {
+                if let Err(e) = supervisee.restart() {
                     tracing::error!(%e, "Failed to restart supervisee");
                 }
             }
             false => {
-                self.shutdown()?;
+                return self.give_up(name);
             }
         }
 
