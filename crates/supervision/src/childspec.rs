@@ -19,7 +19,9 @@ pub struct ChildConfig {
     /// How long to wait before restarting this child, growing exponentially
     /// with every consecutive restart. Defaults to
     /// [`RestartBackoff::default`]; set [`RestartBackoff::none`] to restart
-    /// immediately.
+    /// immediately. The streak resets once the child has stayed `Running` for
+    /// [`RestartBackoff::stable_period`], not merely when it reports itself
+    /// running again.
     pub backoff: RestartBackoff,
 
     /// How long to wait for the child's task to exit after it is aborted.

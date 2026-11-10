@@ -13,8 +13,9 @@
 //!   [`OneForAll`](SupervisionStrategy::OneForAll), or
 //!   [`RestForOne`](SupervisionStrategy::RestForOne).
 //! - Restarts wait for the child's configured
-//!   [`RestartBackoff`](zestors_supervision::RestartBackoff), and stop once
-//!   either restart budget (the supervisor's or the child's
+//!   [`RestartBackoff`](zestors_supervision::RestartBackoff), which only
+//!   resets once the child has stayed `Running` for its stable period, and
+//!   stop once either restart budget (the supervisor's or the child's
 //!   [`RestartIntensity`](zestors_supervision::RestartIntensity)) is
 //!   exhausted. The supervisor then stops its children and exits with an
 //!   error, so the failure escalates to its parent or to [`Node`].

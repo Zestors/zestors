@@ -40,11 +40,13 @@ when one exits, and restarts it according to a policy.
   over.
 - A **`RestartBackoff`** sets how long the supervisor waits before restarting a
   child. Its defaults start at 100 ms, double after every consecutive restart,
-  and are capped at 30 seconds; a child that finishes initialization again
-  resets the delay. Set it per child with `ChildSpec::with_backoff`, or use
-  `RestartBackoff::none()` to restart immediately. The delay stops an
-  immediately-failing child from spinning, while the restart budget is what
-  eventually stops it.
+  and are capped at 30 seconds. The delay only resets once the child has stayed
+  `Running` for a stable period — by default the same 30 seconds, set with
+  `RestartBackoff::reset_after` — so a child that reports `Running` and then
+  fails again right away keeps backing off instead of starting over. Set it per
+  child with `ChildSpec::with_backoff`, or use `RestartBackoff::none()` to
+  restart immediately. The delay stops an immediately-failing child from
+  spinning, while the restart budget is what eventually stops it.
 
 ## What happens when a child fails
 

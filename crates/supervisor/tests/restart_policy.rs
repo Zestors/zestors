@@ -1,6 +1,7 @@
 //! Tests for the supervisor's restart policy: how it logs a child that fails
-//! before initialization, backs off between restarts, and gives up once its
-//! restart budget is exhausted.
+//! before initialization, backs off between restarts, resets that backoff once
+//! a child has proven itself by staying up, and gives up once its restart
+//! budget is exhausted.
 
 use rootcause::Report;
 use std::{
@@ -19,6 +20,10 @@ use zestors_supervision::{
 use zestors_supervisor::SupervisorBlueprint;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Timeout for the paused-time tests: virtual, so it only bounds restart loops
+/// instead of how long the test really runs.
+const PAUSED_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// A child that always fails before it can finish initializing.
 struct AlwaysFails {
@@ -290,4 +295,207 @@ async fn rest_for_one_cascade_retries_stop_at_the_supervisor_restart_limit() {
         spawns <= 4,
         "rest-for-one retried a failing initialization {spawns} times despite a budget of 2"
     );
+}
+
+/// A child that reports itself `Running`, stays up for this generation's
+/// configured time, then exits with an error. Generations past the configured
+/// list fail immediately.
+struct RunsThenFails {
+    generation: Arc<AtomicUsize>,
+    spawn_times: Arc<Mutex<Vec<tokio::time::Instant>>>,
+    /// How long each generation stays `Running` before failing, indexed by
+    /// generation.
+    uptimes: Arc<Mutex<Vec<Duration>>>,
+}
+
+impl Actor for RunsThenFails {
+    type Interface = ();
+    type Exit = ();
+
+    async fn run(self, mut inbox: Inbox<()>) -> Result<(), Report> {
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst);
+        self.spawn_times
+            .lock()
+            .unwrap()
+            .push(tokio::time::Instant::now());
+
+        // Register explicitly: this is the moment the supervisor sees the
+        // child as `Running`, and the point the stable period is measured
+        // from.
+        inbox.register_initialized();
+
+        let uptime = self
+            .uptimes
+            .lock()
+            .unwrap()
+            .get(generation)
+            .copied()
+            .unwrap_or(Duration::ZERO);
+
+        if !uptime.is_zero() {
+            tokio::time::sleep(uptime).await;
+        }
+
+        Err(rootcause::report!("simulated crash after {uptime:?}"))
+    }
+}
+
+fn runs_then_fails(
+    name: &str,
+    cfg: ChildConfig,
+    uptimes: Vec<Duration>,
+) -> (
+    ChildSpec,
+    Arc<AtomicUsize>,
+    Arc<Mutex<Vec<tokio::time::Instant>>>,
+) {
+    let name: Name = name.to_string().into();
+    let spawns = Arc::new(AtomicUsize::new(0));
+    let spawn_times = Arc::new(Mutex::new(Vec::new()));
+
+    let for_actor = spawns.clone();
+    let times_for_actor = spawn_times.clone();
+    let uptimes = Arc::new(Mutex::new(uptimes));
+
+    let (spec, _) = fn_blueprint(move || RunsThenFails {
+        generation: for_actor.clone(),
+        spawn_times: times_for_actor.clone(),
+        uptimes: uptimes.clone(),
+    })
+    .name(name)
+    .expect("name is unique")
+    .with_cfg(cfg)
+    .split();
+
+    (spec, spawns, spawn_times)
+}
+
+fn spawn_gaps(spawn_times: &Arc<Mutex<Vec<tokio::time::Instant>>>) -> Vec<Duration> {
+    let times = spawn_times.lock().unwrap();
+    times.windows(2).map(|w| w[1] - w[0]).collect()
+}
+
+/// Each spawn's time relative to the first one, which is easier to read than
+/// gaps when a generation stays up for a while between restarts.
+fn spawn_offsets(spawn_times: &Arc<Mutex<Vec<tokio::time::Instant>>>) -> Vec<Duration> {
+    let times = spawn_times.lock().unwrap();
+    let Some((&first, rest)) = times.split_first() else {
+        return Vec::new();
+    };
+    std::iter::once(Duration::ZERO)
+        .chain(rest.iter().map(|time| *time - first))
+        .collect()
+}
+
+/// A child that reaches `Running` and then fails immediately is not healthy:
+/// every restart keeps the streak, so the delay doubles up to the cap.
+#[tokio::test(start_paused = true)]
+async fn reaching_running_then_failing_keeps_backing_off() {
+    let (spec, spawns, spawn_times) = runs_then_fails(
+        "running-then-failing",
+        cfg(
+            None,
+            RestartBackoff::new(Duration::from_secs(1), Duration::from_secs(4)),
+        ),
+        Vec::new(),
+    );
+
+    // The initial start plus four restarts: delays 1, 2, 4, 4 s.
+    let mut supervisor = spawn_supervisor(
+        SupervisorBlueprint::one_for_one()
+            .intensity(RestartIntensity::new(4, Duration::from_secs(60)))
+            .child(spec),
+    )
+    .await;
+
+    let result = tokio::time::timeout(PAUSED_TIMEOUT, &mut supervisor).await;
+    assert!(
+        result.expect("supervisor should give up promptly").is_err(),
+        "the supervisor should propagate its exhausted restart budget"
+    );
+    assert_eq!(spawns.load(Ordering::SeqCst), 5);
+
+    assert_eq!(
+        spawn_gaps(&spawn_times),
+        vec![
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+            Duration::from_secs(4),
+            Duration::from_secs(4),
+        ]
+    );
+}
+
+/// A child that stays `Running` past the stable period (here the default: the
+/// backoff's maximum) has proven itself, so its next failure restarts at the
+/// initial delay. A failure before that period continues the streak.
+#[tokio::test(start_paused = true)]
+async fn staying_running_for_the_stable_period_resets_the_backoff() {
+    let (spec, spawns, spawn_times) = runs_then_fails(
+        "stays-running",
+        cfg(
+            None,
+            RestartBackoff::new(Duration::from_secs(1), Duration::from_secs(4)),
+        ),
+        vec![
+            Duration::ZERO,
+            // Longer than the 4 s stable period, so this generation's exit
+            // resets the streak.
+            Duration::from_secs(10),
+            Duration::ZERO,
+            Duration::ZERO,
+        ],
+    );
+
+    let mut supervisor = spawn_supervisor(
+        SupervisorBlueprint::one_for_one()
+            .intensity(RestartIntensity::new(3, Duration::from_secs(60)))
+            .child(spec),
+    )
+    .await;
+
+    let result = tokio::time::timeout(PAUSED_TIMEOUT, &mut supervisor).await;
+    assert!(
+        result.expect("supervisor should give up promptly").is_err(),
+        "the supervisor should propagate its exhausted restart budget"
+    );
+    assert_eq!(spawns.load(Ordering::SeqCst), 4);
+
+    assert_eq!(
+        spawn_offsets(&spawn_times),
+        vec![
+            Duration::ZERO,
+            // Initial delay after the first generation failed immediately.
+            Duration::from_secs(1),
+            // Gen 2 stayed up past the stable period; its exit resets the
+            // streak, so this restart waits the initial 1 s again, after gen
+            // 2's own 10 s of uptime.
+            Duration::from_secs(12),
+            // Gen 3 failed immediately, so the streak continues and doubles.
+            Duration::from_secs(14),
+        ]
+    );
+}
+
+/// `RestartBackoff::none()` keeps restarting as soon as the exit is observed,
+/// however the child exited.
+#[tokio::test(start_paused = true)]
+async fn no_backoff_still_restarts_immediately() {
+    let (spec, spawns, spawn_times) =
+        runs_then_fails("no-backoff", cfg(None, RestartBackoff::none()), Vec::new());
+
+    let mut supervisor = spawn_supervisor(
+        SupervisorBlueprint::one_for_one()
+            .intensity(RestartIntensity::new(3, Duration::from_secs(60)))
+            .child(spec),
+    )
+    .await;
+
+    let result = tokio::time::timeout(PAUSED_TIMEOUT, &mut supervisor).await;
+    assert!(
+        result.expect("supervisor should give up promptly").is_err(),
+        "the supervisor should propagate its exhausted restart budget"
+    );
+    assert_eq!(spawns.load(Ordering::SeqCst), 4);
+    assert_eq!(spawn_gaps(&spawn_times), vec![Duration::ZERO; 3]);
 }

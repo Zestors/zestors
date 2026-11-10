@@ -14,7 +14,8 @@
 //! - [`RestartIntensity`] is a sliding-window restart budget used to prevent
 //!   an actor that keeps failing immediately from restarting in a tight,
 //!   endless loop. [`RestartBackoff`] is the matching delay between restarts,
-//!   growing exponentially up to a cap.
+//!   growing exponentially up to a cap; it resets only once a child has stayed
+//!   `Running` for the backoff's stable period.
 //! - [`Start`]/[`DynStarter`] turn a
 //!   [`Blueprint`](zestors_actor::Blueprint) into something that
 //!   can (re)spawn an actor on an already-registered

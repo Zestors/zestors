@@ -9,7 +9,7 @@ use std::{
     pin::{Pin, pin},
     task::{Context, Poll, Waker},
 };
-use tokio::time::{error::Elapsed, timeout};
+use tokio::time::{Instant, error::Elapsed, timeout};
 use zestors_runtime::{
     ActorRef, Address, Child, Dyn, ExitStatus, Name, ShutdownChild, errors::JoinError,
 };
@@ -21,6 +21,10 @@ pub(super) struct Supervisee {
     state: SuperviseeState,
     restarter: Option<RestartLimiter>,
     backoff: BackoffState,
+    /// When the child last reported itself `Running`, cleared when it exits.
+    /// Used to decide whether an exit ends the failing streak, or continues it
+    /// (see [`Supervisee::supervise`]).
+    running_since: Option<Instant>,
     /// The waker from this supervisee's most recent poll. `start`/`stop`
     /// mutate `state` from outside of a poll (e.g. in response to a
     /// sibling's exit), which on its own doesn't get this supervisee's
@@ -31,8 +35,11 @@ pub(super) struct Supervisee {
     waker: Option<Waker>,
 }
 
-/// How many consecutive restarts a child has needed since it last
-/// initialized successfully, used to pick the next [`RestartBackoff`] delay.
+/// How many consecutive restarts a child has needed since it last proved
+/// itself healthy, used to pick the next [`RestartBackoff`] delay. A child
+/// proves itself by staying `Running` for
+/// [`RestartBackoff::stable_period`], or by being stopped deliberately (which
+/// is not a failure).
 #[derive(Debug, Default)]
 struct BackoffState {
     consecutive_restarts: u32,
@@ -57,6 +64,7 @@ impl Supervisee {
             spec,
             state: SuperviseeState::dead(),
             backoff: BackoffState::default(),
+            running_since: None,
             waker: None,
         }
     }
@@ -268,10 +276,30 @@ impl Supervisee {
             },
         };
 
-        // A child that made it back to `Running` after this restart is healthy
-        // again, so the next restart starts from the beginning of the backoff.
-        if matches!(&item, SuperviseeItem::Initialized(Ok(()))) {
-            self.backoff.reset();
+        // Reaching `Running` is not proof of health: the runtime reports an
+        // actor as running on its first `recv*`, which `TaskBox` does
+        // immediately, so the child may fail straight after. Only once it has
+        // stayed `Running` for the stable period does the next exit start from
+        // the beginning of the backoff again. A deliberate stop (a group
+        // strategy restarting its siblings) is not a failure either, so it
+        // resets the streak too.
+        match &item {
+            SuperviseeItem::Initialized(Ok(())) => self.running_since = Some(Instant::now()),
+
+            SuperviseeItem::Exit(exit) => {
+                let stable_period = self.spec.cfg().backoff.stable_period();
+                let stayed_running = self
+                    .running_since
+                    .is_some_and(|since| since.elapsed() >= stable_period);
+
+                if stayed_running || matches!(exit, SuperviseeExit::NormalShutdown) {
+                    self.backoff.reset();
+                }
+
+                self.running_since = None;
+            }
+
+            SuperviseeItem::Started(_) | SuperviseeItem::Initialized(Err(_)) => {}
         }
 
         item

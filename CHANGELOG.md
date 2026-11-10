@@ -13,8 +13,10 @@ by its git SHA.
   exponentially from 100 ms, doubling per consecutive restart and capped at
   30 seconds. The delay is configured per child with the new
   `RestartBackoff` type (`ChildConfig::backoff`, `ChildSpec::with_backoff`);
-  `RestartBackoff::none()` restores immediate restarts. A child that
-  initializes successfully again resets its backoff.
+  `RestartBackoff::none()` restores immediate restarts. The streak resets only
+  once a child has stayed `Running` for a stable period
+  (`RestartBackoff::reset_after`, by default the maximum delay), so a child
+  that reports `Running` and then fails again keeps backing off.
 - **Start-up errors are logged.** A child that exits before finishing
   initialization is now logged at `warn` with its name and the error it
   returned (previously only "Supervisee exited before finishing
